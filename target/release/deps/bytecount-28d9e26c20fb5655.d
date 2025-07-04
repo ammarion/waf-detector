@@ -1,0 +1,11 @@
+/Users/ammar/waf-detector/target/release/deps/bytecount-28d9e26c20fb5655.d: /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/lib.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/naive.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/integer_simd.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/simd/mod.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/simd/aarch64.rs
+
+/Users/ammar/waf-detector/target/release/deps/libbytecount-28d9e26c20fb5655.rlib: /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/lib.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/naive.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/integer_simd.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/simd/mod.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/simd/aarch64.rs
+
+/Users/ammar/waf-detector/target/release/deps/libbytecount-28d9e26c20fb5655.rmeta: /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/lib.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/naive.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/integer_simd.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/simd/mod.rs /Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/simd/aarch64.rs
+
+/Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/lib.rs:
+/Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/naive.rs:
+/Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/integer_simd.rs:
+/Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/simd/mod.rs:
+/Users/ammar/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bytecount-0.6.9/src/simd/aarch64.rs:

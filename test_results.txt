@@ -1,0 +1,43 @@
+Testing WAF Detector Integration...
+Testing DNS analyzer...
+Testing DNS for www.github.com...
+  DNS analysis result: true
+  DNS evidence count: 0
+Testing DNS for www.discord.com...
+  DNS analysis result: true
+  DNS evidence count: 0
+Testing DNS for blog.cloudflare.com...
+  DNS analysis result: true
+  DNS evidence count: 0
+Testing timing analyzer...
+Timing analysis result: true
+Timing evidence count: 0
+Testing registry integration...
+Registered providers: 1
+Registry detection result: true
+Evidence map keys: ["CloudFlare", "TimingAnalysis", "DnsAnalysis"]
+Detection time: 3101ms
+WAF detected: None
+CDN detected: None
+Provider TimingAnalysis: 1 evidence items
+  - WAF timing pattern detected: 96ms consistent delay (method: Timing, confidence: 0.85)
+
+JSON representation (first 500 chars):
+{
+  "url": "https://www.github.com",
+  "detected_waf": null,
+  "detected_cdn": null,
+  "provider_scores": {
+    "TimingAnalysis": 0.47358872965602633
+  },
+  "evidence_map": {
+    "CloudFlare": [],
+    "TimingAnalysis": [
+      {
+        "method_type": "Timing",
+        "confidence": 0.8493341636585838,
+        "description": "WAF timing pattern detected: 96ms consistent delay",
+        "raw_data": "pattern_detected: 96ms average delay",
+        "signature_matched": "timing-pattern-analysis"
+    
+Integration test completed!

@@ -1,0 +1,71 @@
+PATTERN DISCOVERY ANALYSIS
+URL: https://cloudflare.com
+Expected Provider: CloudFlare
+Timestamp: Thu Jul  3 22:33:47 PDT 2025
+=======================================
+
+=== HEADER ANALYSIS: https://cloudflare.com ===
+cache-control: max-age=3600
+report-to: {"endpoints":[{"url":"https:\/\/a.nel.cloudflare.com\/report\/v4?s=FsEl8KfNs1l6n3d9GRxI0wHQMuNuhJuZBn9g7g7ckV3MgmLlUVU3laosslE4HU5ieXNoEnFawJwZXAJYJ8SOuMTDIPvW1EyWTNk4G2XZsPeTm6BmcMYnaxYvQjZw6oqJ"}],"group":"cf-nel","max_age":604800}
+nel: {"success_fraction":0,"report_to":"cf-nel","max_age":604800}
+strict-transport-security: max-age=15780000; includeSubDomains
+server: cloudflare
+cf-ray: 959c3ff36cb3a366-SEA
+
+=== ERROR RESPONSE ANALYSIS: https://cloudflare.com ===
+--- Testing: https://cloudflare.com/nonexistent-path-12345 ---
+Response: 301|0.076820
+--- Testing: https://cloudflare.com/admin ---
+Response: 301|0.104989
+--- Testing: https://cloudflare.com/wp-admin ---
+Response: 301|0.083769
+--- Testing: https://cloudflare.com/.env ---
+Response: 301|0.069740
+--- Testing: https://cloudflare.com/config.json ---
+Response: 301|0.079364
+
+=== BODY PATTERN ANALYSIS: https://cloudflare.com ===
+--- JavaScript/CSS References ---
+cloudflare
+--- Meta Tags ---
+--- Script Sources ---
+
+=== TIMING ANALYSIS: https://cloudflare.com ===
+Request 1: 0.068566|0.020290|0.068379
+Request 2: 0.071504|0.019933|0.069421
+Request 3: 0.093170|0.019281|0.092883
+
+=== GEOGRAPHIC VARIATION: https://cloudflare.com ===
+--- Region: US ---
+location: https://www.cloudflare.com/
+cache-control: max-age=3600
+report-to: {"endpoints":[{"url":"https:\/\/a.nel.cloudflare.com\/report\/v4?s=pCpAF987A0zhwSmrh%2By1en2fM85wxf2F3QrQWaiJ528Lwf9dd2kr6H6x%2FJS8bbb6r4OXEY%2BI1M1tIV%2FrCeErrLSIAslv7m%2B8Qvn3d1P3ozDhi3g5pm27dCLqd6dXPlpG"}],"group":"cf-nel","max_age":604800}
+nel: {"success_fraction":0,"report_to":"cf-nel","max_age":604800}
+strict-transport-security: max-age=15780000; includeSubDomains
+server: cloudflare
+cf-ray: 959c400d0dd1a3bf-SEA
+--- Region: EU ---
+location: https://www.cloudflare.com/
+cache-control: max-age=3600
+report-to: {"endpoints":[{"url":"https:\/\/a.nel.cloudflare.com\/report\/v4?s=IF389H0w6H4TjWzEvNXnSjkiCzmVSIdX4RBX02Xr4YjqNu4ly5kkpsxwgZr8OM6H0QBdo74N4cQm1zi0Er4ysFBJEUbhuTYAJkJ2u9AfNN1itejtsPLUpXYCZz7aqAIG"}],"group":"cf-nel","max_age":604800}
+nel: {"success_fraction":0,"report_to":"cf-nel","max_age":604800}
+strict-transport-security: max-age=15780000; includeSubDomains
+server: cloudflare
+cf-ray: 959c400d9e1ab9fd-SEA
+--- Region: AS ---
+location: https://www.cloudflare.com/
+cache-control: max-age=3600
+report-to: {"endpoints":[{"url":"https:\/\/a.nel.cloudflare.com\/report\/v4?s=yJyL2DvxYGYCr7oQYCTzvRbsWJk92ooNt3Vbslsguk1IqrN5AH0oK9uvhrKk1w5dhIAHhzAl3blxDwJCXveOZ4RIY83HA51Cwv072TYT5k8tTKnVeyL6C%2FSW769XnNbc"}],"group":"cf-nel","max_age":604800}
+nel: {"success_fraction":0,"report_to":"cf-nel","max_age":604800}
+strict-transport-security: max-age=15780000; includeSubDomains
+server: cloudflare
+cf-ray: 959c400e3c4f16ae-SEA
+--- Region: AU ---
+location: https://www.cloudflare.com/
+cache-control: max-age=3600
+report-to: {"endpoints":[{"url":"https:\/\/a.nel.cloudflare.com\/report\/v4?s=DN1fqIDNaxR9vSuZymbtQdmvm356Mh9h2Afscqd%2BiKpVAIS09SDbn31ufk10pBVCKlrbxo6lSaDFR9KMBmwNEXAMr1UjP7twUK7bB%2FAn%2BhA1Y1KhvEDH8uhTG%2BbVSRsJ"}],"group":"cf-nel","max_age":604800}
+nel: {"success_fraction":0,"report_to":"cf-nel","max_age":604800}
+strict-transport-security: max-age=15780000; includeSubDomains
+server: cloudflare
+cf-ray: 959c400ed8fd279c-SEA
+

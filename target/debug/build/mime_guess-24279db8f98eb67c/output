@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=/Users/ammar/waf-detector/target/debug/build/mime_guess-24279db8f98eb67c/out/mime_types_generated.rs

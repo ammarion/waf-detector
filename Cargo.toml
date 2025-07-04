@@ -1,0 +1,96 @@
+[package]
+name = "waf-detector"
+version = "0.1.0"
+edition = "2021"
+authors = ["WAF Detector Team"]
+description = "High-performance WAF/CDN detection utility with extensible provider system"
+license = "MIT"
+repository = "https://github.com/waf-detector/waf-detector"
+keywords = ["waf", "cdn", "security", "detection", "web"]
+categories = ["command-line-utilities", "web-programming", "network-programming"]
+
+[[bin]]
+name = "waf-detect"
+path = "src/main.rs"
+
+[[bin]]
+name = "test-integration"
+path = "test_integration.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "gzip", "deflate", "brotli"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Regex and text processing
+regex = "1.10"
+once_cell = "1.19"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Concurrency
+dashmap = "5.5"
+futures = "0.3"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP types
+http = "0.2"
+
+# URL encoding for WAF mode detection
+urlencoding = "2.1"
+url = "2.5.4"
+tabled = "0.20.0"
+async-trait = "0.1.88"
+
+
+
+# Web server dependencies
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+mime = "0.3"
+percent-encoding = "2.3"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockito = "1.2"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.test]
+opt-level = 1
+debug = true
+
+# Cargo features
+[features]
+default = ["full"]
+full = ["providers-all", "cli"]
+providers-all = ["cloudflare", "akamai"]
+cloudflare = []
+akamai = []
+cli = []
