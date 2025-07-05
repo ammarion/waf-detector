@@ -44,7 +44,7 @@ async fn test_confidence_engine() {
 
 #[tokio::test]
 async fn test_provider_registry() {
-    let mut registry = registry::ProviderRegistry::new();
+    let registry = registry::ProviderRegistry::new();
     
     let provider = providers::Provider::CloudFlare(providers::cloudflare::CloudFlareProvider::new());
     

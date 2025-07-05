@@ -594,20 +594,18 @@ impl DetectionProvider for AwsProvider {
         ];
         
         for path in test_paths {
-            let test_url = format!("{}{}", url, path);
+            let test_url = format!("{url}{path}");
             if let Ok(response) = client.get(&test_url).await {
-                if response.status == 403 || response.status == 429 {
-                    if response.headers.get("x-amzn-requestid").is_some() || 
-                       response.headers.get("x-amz-cf-id").is_some() {
-                        evidence.push(Evidence {
-                            method_type: MethodType::Body(format!("test-path-{}", path)),
-                            confidence: 0.70,
-                            description: format!("AWS WAF blocked test path: {}", path),
-                            raw_data: response.status.to_string(),
-                            signature_matched: "aws-active-detection".to_string(),
-                        });
-                        break; // Don't spam the server once we detect it
-                    }
+                if (response.status == 403 || response.status == 429) && 
+                   (response.headers.get("x-amzn-requestid").is_some() || response.headers.contains_key("x-amz-cf-id")) {
+                    evidence.push(Evidence {
+                        method_type: MethodType::Body(format!("test-path-{path}")),
+                        confidence: 0.70,
+                        description: format!("AWS WAF blocked test path: {}", path),
+                        raw_data: response.status.to_string(),
+                        signature_matched: "aws-active-detection".to_string(),
+                    });
+                    break; // Don't spam the server once we detect it
                 }
             }
         }

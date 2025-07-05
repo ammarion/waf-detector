@@ -4,7 +4,7 @@ use waf_detector::{
     providers::aws::AwsProvider, 
     DetectionProvider, 
     DetectionContext, 
-    http::{HttpResponse, HttpClient}, 
+    http::HttpResponse, 
     MethodType,
     ProviderType
 };
