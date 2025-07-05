@@ -7,7 +7,6 @@ pub mod waf_smoke_test;
 
 use crate::{Evidence, MethodType};
 use crate::http::HttpClient;
-use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -109,7 +108,7 @@ impl PayloadAnalyzer {
     }
 
     /// Analyze URL using payload-based probing
-    pub async fn analyze(&self, url: &str) -> Result<PayloadAnalysisResult> {
+    pub async fn analyze(&self, url: &str) -> Result<PayloadAnalysisResult, anyhow::Error> {
         let start_time = Instant::now();
 
         // Step 1: Get baseline response
@@ -133,7 +132,7 @@ impl PayloadAnalyzer {
     }
 
     /// Get baseline response for comparison
-    async fn get_baseline_response(&self, url: &str) -> Result<BaselineInfo> {
+    async fn get_baseline_response(&self, url: &str) -> Result<BaselineInfo, anyhow::Error> {
         let start_time = Instant::now();
         
         let response = self.http_client.get(url).await?;
@@ -148,7 +147,7 @@ impl PayloadAnalyzer {
     }
 
     /// Test various payloads against the target
-    async fn test_payloads(&self, base_url: &str, baseline: &BaselineInfo) -> Result<Vec<BlockedPayload>> {
+    async fn test_payloads(&self, base_url: &str, baseline: &BaselineInfo) -> Result<Vec<BlockedPayload>, anyhow::Error> {
         let mut blocked_payloads = Vec::new();
         let payloads = self.get_test_payloads();
 
@@ -172,7 +171,7 @@ impl PayloadAnalyzer {
         base_url: &str,
         payload: &Payload,
         baseline: &BaselineInfo,
-    ) -> Result<Option<BlockedPayload>> {
+    ) -> Result<Option<BlockedPayload>, anyhow::Error> {
         
         // Construct URL with payload as query parameter
         let test_url = format!("{}?test={}", base_url, urlencoding::encode(&payload.payload));

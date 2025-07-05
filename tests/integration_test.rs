@@ -32,12 +32,12 @@ async fn test_confidence_engine() {
             method_type: DetectionMethod::Header("cf-ray".to_string()),
             confidence: 0.95,
             description: "CloudFlare Ray ID header detected".to_string(),
-            raw_data: Some("1234567890abcdef-DFW".to_string()),
+            raw_data: "1234567890abcdef-DFW".to_string(),
             signature_matched: "cf-ray-pattern".to_string(),
         },
     ];
     
-    let confidence = engine.calculate_confidence(&evidence, "CloudFlare");
+    let confidence = engine.calculate_confidence("CloudFlare", evidence.len(), 0.95);
     assert!(confidence > 0.8);
     assert!(confidence <= 1.0);
 }
@@ -46,18 +46,9 @@ async fn test_confidence_engine() {
 async fn test_provider_registry() {
     let mut registry = registry::ProviderRegistry::new();
     
-    let provider = std::sync::Arc::new(providers::cloudflare::CloudFlareProvider::new());
-    let metadata = registry::ProviderMetadata {
-        name: "CloudFlare".to_string(),
-        version: "1.0.0".to_string(),
-        description: "CloudFlare detection provider".to_string(),
-        author: "Test".to_string(),
-        provider_type: ProviderType::Both,
-        enabled: true,
-        priority: 100,
-    };
+    let provider = providers::Provider::CloudFlare(providers::cloudflare::CloudFlareProvider::new());
     
-    let result = registry.register_provider(provider, metadata);
+    let result = registry.register_provider(provider);
     assert!(result.is_ok());
     
     let providers = registry.list_providers();
@@ -72,7 +63,7 @@ fn test_detection_types() {
         method_type: DetectionMethod::Header("test".to_string()),
         confidence: 0.9,
         description: "Test evidence".to_string(),
-        raw_data: Some("test-data".to_string()),
+        raw_data: "test-data".to_string(),
         signature_matched: "test-pattern".to_string(),
     };
     

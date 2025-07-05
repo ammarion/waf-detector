@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::engine::DetectionEngine;
 use crate::DetectionResult;
 use crate::script_executor::{ScriptExecutor, CombinedResult};
+use crate::payload::waf_smoke_test::{WafSmokeTest, SmokeTestConfig, SmokeTestResult};
 use anyhow::Result;
 
 pub mod templates;
@@ -52,6 +53,13 @@ pub struct CombinedScanResponse {
     error: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct SmokeTestResponse {
+    success: bool,
+    result: Option<SmokeTestResult>,
+    error: Option<String>,
+}
+
 impl WebServer {
     pub fn new(engine: DetectionEngine) -> Self {
         Self {
@@ -67,6 +75,7 @@ impl WebServer {
             // API routes
             .route("/api/scan", post(scan_url))
             .route("/api/combined-scan", post(combined_scan))
+            .route("/api/smoke-test", post(smoke_test))
             .route("/api/batch-scan", post(batch_scan))
             .route("/api/providers", get(list_providers))
             .route("/api/status", get(server_status))
@@ -189,7 +198,12 @@ async fn server_status() -> impl IntoResponse {
         "success": true,
         "status": "healthy",
         "version": "1.0.0",
-        "timestamp": chrono::Utc::now().to_rfc3339()
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "name": "WAF Detector",
+        "server_info": {
+            "name": "WAF Detector",
+            "uptime": 0  // You might want to track actual uptime in a real implementation
+        }
     }))
 }
 
@@ -238,6 +252,50 @@ async fn combined_scan(
     };
     
     (StatusCode::OK, Json(response))
+}
+
+// Handler for WAF smoke test with detailed payload results
+async fn smoke_test(
+    State(_server): State<WebServer>,
+    Json(payload): Json<ScanRequest>,
+) -> impl IntoResponse {
+    // Create smoke test configuration
+    let config = SmokeTestConfig::default();
+    
+    // Create and run smoke test
+    let smoke_test = match WafSmokeTest::new(config) {
+        Ok(test) => test,
+        Err(e) => {
+            let response = SmokeTestResponse {
+                success: false,
+                result: None,
+                error: Some(format!("Failed to create smoke test: {}", e)),
+            };
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(response));
+        }
+    };
+    
+    // Run the test
+    match smoke_test.run_test(&payload.url).await {
+        Ok(mut result) => {
+            // Ensure is_smoke_test is set (should already be true, but set explicitly)
+            result.is_smoke_test = true;
+            let response = SmokeTestResponse {
+                success: true,
+                result: Some(result),
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Err(e) => {
+            let response = SmokeTestResponse {
+                success: false,
+                result: None,
+                error: Some(format!("Smoke test failed: {}", e)),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+        }
+    }
 }
 
  

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAF Detector - Effectiveness Demo</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            margin-bottom: 1.5rem;
+            color: #2d3748;
+        }
+        
+        .results-section {
+            margin-top: 2rem;
+        }
+        
+        .chart-container {
+            margin: 2rem 0;
+        }
+        
+        .recommendations {
+            margin-top: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ WAF Effectiveness Testing Demo</h1>
+        
+        <div class="results-section">
+            <h2>Test Results for: https://cloudflare.com</h2>
+            
+            <div class="chart-container">
+                <h3>Effectiveness Score: 37.5%</h3>
+                <div id="effectiveness-chart"></div>
+            </div>
+            
+            <div class="test-details">
+                <h3>Test Details</h3>
+                <table border="1" cellpadding="5" style="border-collapse: collapse; width: 100%;">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Status</th>
+                            <th>Response Code</th>
+                            <th>Time (ms)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>SQL Injection</td>
+                            <td class="test-result-blocked">BLOCKED</td>
+                            <td>403</td>
+                            <td>150</td>
+                        </tr>
+                        <tr>
+                            <td>XSS</td>
+                            <td class="test-result-allowed">ALLOWED</td>
+                            <td>200</td>
+                            <td>200</td>
+                        </tr>
+                        <tr>
+                            <td>XXE</td>
+                            <td class="test-result-error">ERROR</td>
+                            <td>200</td>
+                            <td>250</td>
+                        </tr>
+                        <tr>
+                            <td>RFI</td>
+                            <td class="test-result-blocked">BLOCKED</td>
+                            <td>403</td>
+                            <td>300</td>
+                        </tr>
+                        <tr>
+                            <td>LFI</td>
+                            <td class="test-result-allowed">ALLOWED</td>
+                            <td>200</td>
+                            <td>350</td>
+                        </tr>
+                        <tr>
+                            <td>RCE</td>
+                            <td class="test-result-error">ERROR</td>
+                            <td>200</td>
+                            <td>400</td>
+                        </tr>
+                        <tr>
+                            <td>Command Injection</td>
+                            <td class="test-result-blocked">BLOCKED</td>
+                            <td>403</td>
+                            <td>450</td>
+                        </tr>
+                        <tr>
+                            <td>Path Traversal</td>
+                            <td class="test-result-allowed">ALLOWED</td>
+                            <td>200</td>
+                            <td>500</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="recommendations">
+                <h3>Recommendations</h3>
+                <ul>
+                    <li class="recommendation-item">⚠️ Low WAF effectiveness - many payloads bypassed</li>
+                    <li class="recommendation-item">Consider reviewing and tuning WAF rules</li>
+                    <li class="recommendation-item">Review allowed payloads for potential bypasses</li>
+                    <li class="recommendation-item">Consider tuning WAF rules for better coverage</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Render effectiveness chart
+            const chartData = {
+                blocked_tests: 12,
+                allowed_tests: 12,
+                error_tests: 8,
+                total_tests: 32
+            };
+            
+            renderEffectivenessChart('effectiveness-chart', chartData);
+        });
+    </script>
+</body>
+</html>

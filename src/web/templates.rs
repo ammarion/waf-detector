@@ -253,6 +253,67 @@ pub const DASHBOARD_HTML: &str = r#"
             border-radius: 8px;
             display: none;
         }
+        
+        .evidence-list table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        
+        .evidence-list th {
+            background-color: #f1f5f9;
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 2px solid #e2e8f0;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .evidence-list td {
+            padding: 0.75rem;
+            vertical-align: middle;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .evidence-list tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+        
+        .evidence-list tr:hover {
+            background-color: #f0f9ff;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: white;
+        }
+        
+        .status-blocked {
+            background-color: #22c55e;
+        }
+        
+        .status-allowed {
+            background-color: #ef4444;
+        }
+        
+        .status-challenge {
+            background-color: #0ea5e9;
+        }
+        
+        .summary-table {
+            margin-top: 1.5rem;
+            background-color: #f0f9ff;
+            padding: 1rem;
+            border-radius: 8px;
+            border-left: 4px solid #0ea5e9;
+        }
 
         .evidence-item {
             margin-bottom: 0.5rem;
@@ -440,18 +501,18 @@ pub const DASHBOARD_HTML: &str = r#"
 
         <div class="dashboard-grid">
             <div class="card">
-                <h2>🛡️ WAF Effectiveness Testing</h2>
+                <h2>🛡️ WAF Smoke Test</h2>
                 <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
-                    Combined detection + effectiveness testing with 36 attack payloads
+                    Live payload testing with detailed results - see every attack tested and blocked!
                 </p>
-                <form id="combinedScanForm">
+                <form id="smokeTestForm">
                     <div class="input-group">
-                        <label for="combinedUrl">Enter URL to test:</label>
-                        <input type="url" id="combinedUrl" class="input-field" placeholder="https://example.com" required>
+                        <label for="smokeTestUrl">Enter URL to test:</label>
+                        <input type="url" id="smokeTestUrl" class="input-field" placeholder="https://example.com" required>
                     </div>
                     <button type="submit" class="btn">
-                        <span id="combinedScanIcon">🛡️</span>
-                        <span id="combinedScanText">Test WAF Effectiveness</span>
+                        <span id="smokeTestIcon">🛡️</span>
+                        <span id="smokeTestText">Run Smoke Test</span>
                     </button>
                 </form>
             </div>
@@ -487,6 +548,23 @@ pub const DASHBOARD_HTML: &str = r#"
     <script>
         let allResults = [];
 
+        // HTML escaping utility to prevent XSS
+        function escapeHtml(str) {
+            if (typeof str !== 'string') return str;
+            return str.replace(/[&<>"'`=\/]/g, function(s) {
+                return ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;',
+                    '`': '&#96;',
+                    '=': '&#61;',
+                    '/': '&#47;'
+                })[s];
+            });
+        }
+
         // Single URL scan
         document.getElementById('singleScanForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -502,11 +580,11 @@ pub const DASHBOARD_HTML: &str = r#"
             await scanBatchUrls(urls);
         });
 
-        // Combined WAF effectiveness testing
-        document.getElementById('combinedScanForm').addEventListener('submit', async (e) => {
+        // WAF Smoke Testing
+        document.getElementById('smokeTestForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const url = document.getElementById('combinedUrl').value;
-            await scanCombined(url);
+            const url = document.getElementById('smokeTestUrl').value;
+            await runSmokeTest(url);
         });
 
         async function scanSingleUrl(url) {
@@ -569,15 +647,15 @@ pub const DASHBOARD_HTML: &str = r#"
             }
         }
 
-        async function scanCombined(url) {
-            const btn = document.querySelector('#combinedScanForm button');
-            const icon = document.getElementById('combinedScanIcon');
-            const text = document.getElementById('combinedScanText');
+        async function runSmokeTest(url) {
+            const btn = document.querySelector('#smokeTestForm button');
+            const icon = document.getElementById('smokeTestIcon');
+            const text = document.getElementById('smokeTestText');
             
             setButtonLoading(btn, icon, text, true, 'Testing...');
             
             try {
-                const response = await fetch('/api/combined-scan', {
+                const response = await fetch('/api/smoke-test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url })
@@ -586,16 +664,18 @@ pub const DASHBOARD_HTML: &str = r#"
                 const data = await response.json();
                 
                 if (data.success && data.result) {
+                    // Mark this as a smoke test result explicitly
+                    data.result.is_smoke_test = true;
                     allResults.unshift(data.result);
                     displayResults();
-                    showSuccessMessage(`Successfully tested ${url} (Detection + Effectiveness)`);
+                    showSuccessMessage(`Smoke test completed for ${url} - ${data.result.test_results ? data.result.test_results.length : 0} payloads tested`);
                 } else {
-                    showErrorMessage(data.error || 'Combined scan failed');
+                    showErrorMessage(data.error || 'Smoke test failed');
                 }
             } catch (error) {
                 showErrorMessage(`Error: ${error.message}`);
             } finally {
-                setButtonLoading(btn, icon, text, false, 'Test WAF Effectiveness');
+                setButtonLoading(btn, icon, text, false, 'Run Smoke Test');
             }
         }
 
@@ -610,9 +690,9 @@ pub const DASHBOARD_HTML: &str = r#"
                 if (buttonId === 'batchScanForm') {
                     icon.innerHTML = '⚡';
                     text.textContent = 'Scan Batch';
-                } else if (buttonId === 'combinedScanForm') {
+                } else if (buttonId === 'smokeTestForm') {
                     icon.innerHTML = '🛡️';
-                    text.textContent = customText || 'Test WAF Effectiveness';
+                    text.textContent = customText || 'Run Smoke Test';
                 } else {
                     icon.innerHTML = '🚀';
                     text.textContent = 'Scan URL';
@@ -632,24 +712,143 @@ pub const DASHBOARD_HTML: &str = r#"
         }
 
         function createResultCard(result) {
+            // Ensure result is defined
+            if (!result) {
+                console.error("Result is undefined");
+                return '<div class="result-card">Error: Invalid result data</div>';
+            }
+            
+            // Check if this is a smoke test result (has test_results property AND other smoke test indicators)
+            const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) || 
+                               result.is_smoke_test === true ||
+                               (result.summary && result.summary.effectiveness_percentage !== undefined);
+            
+            console.log("Creating result card for:", result);
+            console.log("isSmokeTest:", isSmokeTest, "is_smoke_test flag:", result.is_smoke_test, "detected_waf:", result.detected_waf, "detected_cdn:", result.detected_cdn);
+            console.log("test_results array:", Array.isArray(result.test_results), "length:", result.test_results ? result.test_results.length : 0);
             // Check if this is a combined result (has detection_result property)
             const isCombined = result.detection_result !== undefined;
-            const detectionData = isCombined ? result.detection_result : result;
+            const detectionData = isCombined && result.detection_result ? result.detection_result : result;
             
-            const wafDetected = detectionData.detected_waf !== null;
-            const cdnDetected = detectionData.detected_cdn !== null;
-            const wafName = wafDetected ? detectionData.detected_waf.name : 'Not Detected';
-            const cdnName = cdnDetected ? detectionData.detected_cdn.name : 'Not Detected';
-            const wafConfidence = wafDetected ? (detectionData.detected_waf.confidence * 100).toFixed(1) : 0;
-            const cdnConfidence = cdnDetected ? (detectionData.detected_cdn.confidence * 100).toFixed(1) : 0;
+            // Initialize variables safely
+            let wafDetected = false;
+            let cdnDetected = false;
+            let wafName = 'Not Detected';
+            let cdnName = 'Not Detected';
+            let wafConfidence = 0;
+            let cdnConfidence = 0;
+            
+            // For smoke test results, use the detected_waf property directly
+            if (isSmokeTest) {
+                // Handle detected_waf safely (can be null, string, or object)
+                if (result.detected_waf && result.detected_waf !== null && result.detected_waf !== 'Unknown') {
+                    wafDetected = true;
+                    if (typeof result.detected_waf === 'string') {
+                        wafName = result.detected_waf;
+                    } else if (typeof result.detected_waf === 'object' && result.detected_waf.name) {
+                        wafName = result.detected_waf.name;
+                        wafConfidence = result.detected_waf.confidence ? (result.detected_waf.confidence * 100).toFixed(1) : 95;
+                    } else {
+                        wafName = 'Detected WAF';
+                    }
+                    if (!wafConfidence) wafConfidence = 95; // Default high confidence for smoke test detections
+                }
+                
+                // Handle detected_cdn safely (can be null, string, or object)
+                if (result.detected_cdn && result.detected_cdn !== null && result.detected_cdn !== 'Unknown') {
+                    cdnDetected = true;
+                    if (typeof result.detected_cdn === 'string') {
+                        cdnName = result.detected_cdn;
+                    } else if (typeof result.detected_cdn === 'object' && result.detected_cdn.name) {
+                        cdnName = result.detected_cdn.name;
+                        cdnConfidence = result.detected_cdn.confidence ? (result.detected_cdn.confidence * 100).toFixed(1) : 95;
+                    } else {
+                        cdnName = 'Detected CDN';
+                    }
+                    if (!cdnConfidence) cdnConfidence = 95; // Default high confidence
+                }
+            } 
+            // For regular detection results or combined results
+            else {
+                // Safely check if detected_waf exists and is not null
+                if (detectionData && detectionData.detected_waf && detectionData.detected_waf !== null) {
+                    if (typeof detectionData.detected_waf === 'object' && detectionData.detected_waf.name) {
+                        wafDetected = true;
+                        wafName = detectionData.detected_waf.name;
+                        wafConfidence = detectionData.detected_waf.confidence ? (detectionData.detected_waf.confidence * 100).toFixed(1) : 0;
+                    } else if (typeof detectionData.detected_waf === 'string') {
+                        wafDetected = true;
+                        wafName = detectionData.detected_waf;
+                        wafConfidence = 95; // Default confidence for string detection
+                    }
+                }
+                
+                // Safely check if detected_cdn exists and is not null
+                if (detectionData && detectionData.detected_cdn && detectionData.detected_cdn !== null) {
+                    if (typeof detectionData.detected_cdn === 'object' && detectionData.detected_cdn.name) {
+                        cdnDetected = true;
+                        cdnName = detectionData.detected_cdn.name;
+                        cdnConfidence = detectionData.detected_cdn.confidence ? (detectionData.detected_cdn.confidence * 100).toFixed(1) : 0;
+                    } else if (typeof detectionData.detected_cdn === 'string') {
+                        cdnDetected = true;
+                        cdnName = detectionData.detected_cdn;
+                        cdnConfidence = 95; // Default confidence for string detection
+                    }
+                }
+            }
             
             return `
                 <div class="result-card">
                     <div class="result-header">
-                        <div class="result-url">${isCombined ? result.url : detectionData.url}</div>
-                        <div class="result-time">${isCombined ? result.total_time_ms : detectionData.detection_time_ms}ms</div>
+                        <div class="result-url">${escapeHtml(isSmokeTest && result.url ? result.url : 
+                                               isCombined && result.url ? result.url : 
+                                               detectionData && detectionData.url ? detectionData.url : 
+                                               "Unknown URL")}</div>
+                        <div class="result-time">${isSmokeTest && result.total_time_ms ? result.total_time_ms : 
+                                                isCombined && result.total_time_ms ? result.total_time_ms : 
+                                                detectionData && detectionData.detection_time_ms ? detectionData.detection_time_ms : 
+                                                "0"}ms</div>
                     </div>
-                    ${isCombined ? `
+                    ${isSmokeTest ? `
+                        <div style="margin-bottom: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #0ea5e9;">
+                            <h4 style="margin: 0 0 0.5rem 0; color: #0369a1;">🛡️ WAF Smoke Test Results</h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; font-size: 0.9rem;">
+                                <div><strong>Effectiveness:</strong> ${result.summary && result.summary.effectiveness_percentage !== undefined ? result.summary.effectiveness_percentage.toFixed(1) : '0.0'}%</div>
+                                <div><strong>Blocked:</strong> ${result.summary && result.summary.blocked_count !== undefined ? result.summary.blocked_count : 0}</div>
+                                <div><strong>Allowed:</strong> ${result.summary && result.summary.allowed_count !== undefined ? result.summary.allowed_count : 0}</div>
+                                <div><strong>Errors:</strong> ${result.summary && result.summary.error_count !== undefined ? result.summary.error_count : 0}</div>
+                            </div>
+                            <div style="margin-top: 1rem;">
+                                <table class="payload-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Category</th>
+                                            <th>Payload</th>
+                                            <th>Status</th>
+                                            <th>HTTP</th>
+                                            <th>Time (ms)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${result.test_results && Array.isArray(result.test_results) ? result.test_results.map((test, index) => {
+                                            const statusColor = test.classification === 'Blocked' || test.classification === 'Challenge' ? '#22c55e' : 
+                                                  test.classification === 'Allowed' ? '#ef4444' : '#f59e0b';
+                                            const statusIcon = test.classification === 'Blocked' || test.classification === 'Challenge' ? '🛡️' : 
+                                                  test.classification === 'Allowed' ? '⚠️' : '❓';
+                                            const rowColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+                                            return `<tr style="background: ${rowColor};">
+                                                <td>${escapeHtml(test.category)}</td>
+                                                <td style="font-family: monospace;">${escapeHtml((test.payload !== undefined && test.payload !== null && test.payload !== '') ? test.payload : '(empty)')}</td>
+                                                <td><span style="background: ${statusColor}; color: white; padding: 0.125rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block;">${statusIcon} ${escapeHtml(test.classification)}</span></td>
+                                                <td>${escapeHtml(String(test.response_status))}</td>
+                                                <td>${escapeHtml(String(test.response_time_ms))}</td>
+                                            </tr>`;
+                                        }).join('') : ''}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ` : isCombined ? `
                         <div style="margin-bottom: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #0ea5e9;">
                             <h4 style="margin: 0 0 0.5rem 0; color: #0369a1;">🛡️ WAF Effectiveness Testing</h4>
                             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; font-size: 0.9rem;">
@@ -660,6 +859,7 @@ pub const DASHBOARD_HTML: &str = r#"
                         </div>
                     ` : ''}
                     
+                    ${!isSmokeTest && !result.is_smoke_test ? `
                     <div class="detection-info">
                         <div class="detection-item ${wafDetected ? 'detected' : 'not-detected'}">
                             <div class="detection-label">
@@ -689,16 +889,19 @@ pub const DASHBOARD_HTML: &str = r#"
                             ` : ''}
                         </div>
                     </div>
+                    ` : ''}
                     
-                    ${detectionData.evidence && detectionData.evidence.length > 0 ? `
+                    ${!isSmokeTest && !result.is_smoke_test && detectionData && detectionData.evidence && Array.isArray(detectionData.evidence) && detectionData.evidence.length > 0 ? `
                         <div class="evidence-section">
                             <button class="evidence-toggle" onclick="toggleEvidence(this)">
                                 View Evidence (${detectionData.evidence.length} items)
                             </button>
                             <div class="evidence-list">
                                 ${detectionData.evidence.map(ev => {
+                                    if (!ev) return '';
+                                    
                                     const isTiming = ev.method_type === 'Timing';
-                                    const isDns = typeof ev.method_type === 'object' && ev.method_type.DNS;
+                                    const isDns = typeof ev.method_type === 'object' && ev.method_type && ev.method_type.DNS;
                                     const isPayload = ev.method_type === 'Payload';
                                     
                                     const timingIcon = isTiming ? '⏱️' : '';
@@ -713,13 +916,13 @@ pub const DASHBOARD_HTML: &str = r#"
                                     
                                     return `
                                         <div class="evidence-item ${cssClass}">
-                                            <strong>${icon} ${ev.description}</strong> 
-                                            <span class="confidence-badge confidence-${getConfidenceLevel(ev.confidence)}">${(ev.confidence * 100).toFixed(1)}%</span>
-                                            <br><em>Method:</em> ${isDns ? 'DNS (CNAME)' : isPayload ? 'Payload (WAF Blocking)' : ev.method_type}
-                                            ${isTiming ? `<br><em>Timing Data:</em> ${ev.raw_data}` : 
-                                              isDns ? `<br><em>DNS Record:</em> ${ev.raw_data}` :
-                                              isPayload ? `<br><em>Blocked Payloads:</em> ${ev.raw_data}` :
-                                              `<br><em>Data:</em> ${ev.raw_data}`}
+                                            <strong>${icon} ${escapeHtml(ev.description || 'Unknown evidence')}</strong> 
+                                            <span class="confidence-badge confidence-${getConfidenceLevel(ev.confidence || 0)}">${((ev.confidence || 0) * 100).toFixed(1)}%</span>
+                                            <br><em>Method:</em> ${isDns ? 'DNS (CNAME)' : isPayload ? 'Payload (WAF Blocking)' : escapeHtml(ev.method_type || 'Unknown')}
+                                            ${isTiming ? `<br><em>Timing Data:</em> ${escapeHtml(ev.raw_data || 'N/A')}` : 
+                                              isDns ? `<br><em>DNS Record:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
+                                              isPayload ? `<br><em>Blocked Payloads:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
+                                              `<br><em>Data:</em> ${escapeHtml(ev.raw_data || 'N/A')}`}
                                             ${isTiming ? `<br><span class="timing-info">⚡ WAF processing delay detected</span>` : ''}
                                             ${isDns ? `<br><span class="dns-info">🔒 Infrastructure-level detection</span>` : ''}
                                             ${isPayload ? `<br><span class="payload-info">🚫 Malicious payload blocked by WAF</span>` : ''}
@@ -729,7 +932,7 @@ pub const DASHBOARD_HTML: &str = r#"
                             </div>
                         </div>
                     ` : ''}
-                    ${isCombined && result.recommendations && result.recommendations.length > 0 ? `
+                    ${isCombined && result && result.recommendations && Array.isArray(result.recommendations) && result.recommendations.length > 0 ? `
                         <div class="evidence-section">
                             <button class="evidence-toggle" onclick="toggleEvidence(this)">
                                 View Recommendations (${result.recommendations.length} items)
@@ -737,7 +940,7 @@ pub const DASHBOARD_HTML: &str = r#"
                             <div class="evidence-list">
                                 ${result.recommendations.map(rec => `
                                     <div class="evidence-item">
-                                        ${rec}
+                                        ${escapeHtml(rec || 'No recommendation details available')}
                                     </div>
                                 `).join('')}
                             </div>
@@ -813,6 +1016,87 @@ pub const DASHBOARD_HTML: &str = r#"
         // Page load handler
         window.addEventListener('load', () => {
             // Page loaded - ready for user input
+        });
+        
+        // Fix for smoke test results display
+        function fixSmokeTestDisplay() {
+            // Override the runSmokeTest function
+            if (typeof window.runSmokeTest === 'function') {
+                window.originalRunSmokeTest = window.runSmokeTest;
+            }
+            
+            window.runSmokeTest = async function(url) {
+                const btn = document.querySelector('#smokeTestForm button');
+                const icon = document.getElementById('smokeTestIcon');
+                const text = document.getElementById('smokeTestText');
+                
+                setButtonLoading(btn, icon, text, true, 'Testing...');
+                
+                try {
+                    const response = await fetch('/api/smoke-test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success && data.result) {
+                        // Process the smoke test result before adding to results
+                        const processedResult = processRawSmokeTestResult(data.result);
+                        allResults.unshift(processedResult);
+                        displayResults();
+                        showSuccessMessage(`Smoke test completed for ${url} - ${data.result.test_results.length} payloads tested`);
+                    } else {
+                        showErrorMessage(data.error || 'Smoke test failed');
+                    }
+                } catch (error) {
+                    showErrorMessage(`Error: ${error.message}`);
+                } finally {
+                    setButtonLoading(btn, icon, text, false, 'Run Smoke Test');
+                }
+            };
+            
+            // Function to process raw smoke test results
+            function processRawSmokeTestResult(rawResult) {
+                console.log("Processing smoke test result:", rawResult);
+                
+                // Ensure the result has the correct structure for smoke test display
+                return {
+                    url: rawResult.url,
+                    // Flag this explicitly as a smoke test result
+                    is_smoke_test: true,
+                    test_results: Array.isArray(rawResult.test_results) ? rawResult.test_results.map(test => ({
+                        category: test.category || "Unknown",
+                        payload: (test.payload !== undefined && test.payload !== null) ? test.payload : '',
+                        status_code: test.response_status || test.status_code || 0,
+                        response_time_ms: test.response_time_ms || 0,
+                        classification: test.classification || "Unknown"
+                    })) : [],
+                    summary: rawResult.summary || {
+                        effectiveness_percentage: 0,
+                        total_tests: 0,
+                        blocked_tests: 0
+                    },
+                    effectiveness_percentage: rawResult.summary ? 
+                        rawResult.summary.effectiveness_percentage : 
+                        (rawResult.effectiveness_percentage || 0),
+                    waf_mode: rawResult.waf_mode || "Unknown",
+                    // Handle null values safely
+                    detected_waf: rawResult.detected_waf === null ? null : (rawResult.detected_waf || null),
+                    detected_cdn: rawResult.detected_cdn === null ? null : (rawResult.detected_cdn || null),
+                    total_time_ms: rawResult.total_time_ms || 0,
+                    timestamp: rawResult.timestamp || new Date().toISOString()
+                };
+            }
+            
+            console.log("Smoke test display fix applied");
+        }
+        
+        // Apply the fix when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            fixSmokeTestDisplay();
+            console.log("Smoke test display fix applied on page load");
         });
     </script>
 </body>
@@ -965,6 +1249,37 @@ pub const API_DOCS_HTML: &str = r#"
     { /* DetectionResult object */ }
   ],
   "error": null
+}</code></pre>
+        </div>
+        
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/smoke-test</h3>
+            <p>Run detailed WAF smoke test with individual payload results.</p>
+            
+            <h4>Request Body</h4>
+            <pre><code>{
+  "url": "https://example.com"
+}</code></pre>
+            
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "result": {
+    "url": "https://example.com",
+    "effectiveness_percentage": 85.7,
+    "waf_mode": "Blocking",
+    "identified_waf": "CloudFlare",
+    "total_time_ms": 1250,
+    "test_results": [
+      {
+        "category": "SQL Injection",
+        "payload": "' OR '1'='1",
+        "status": "BLOCKED",
+        "status_code": 403,
+        "response_time_ms": 95
+      }
+    ]
+  }
 }</code></pre>
         </div>
         

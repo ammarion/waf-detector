@@ -4,13 +4,13 @@
 //! payloads and analysis techniques. It replaces the bash script with better detection,
 //! colorful output, and structured results for both CLI and UI consumption.
 
-use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use crate::http::HttpClient;
 use crate::engine::waf_mode_detector::{PayloadType, WafMode};
+use anyhow::Error;
 
 /// WAF Smoke Test Configuration
 #[derive(Debug, Clone)]
@@ -105,9 +105,11 @@ pub struct SmokeTestResult {
     pub summary: TestSummary,
     pub waf_mode: Option<WafMode>,
     pub detected_waf: Option<String>,
+    pub detected_cdn: Option<String>,
     pub recommendations: Vec<String>,
     pub total_time_ms: u64,
     pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub is_smoke_test: bool,
 }
 
 /// Summary statistics for the smoke test
@@ -131,7 +133,7 @@ pub struct WafSmokeTest {
 }
 
 impl WafSmokeTest {
-    pub fn new(config: SmokeTestConfig) -> Result<Self> {
+    pub fn new(config: SmokeTestConfig) -> Result<Self, anyhow::Error> {
         let http_client = HttpClient::new()?;
         let payloads = Self::initialize_advanced_payloads();
 
@@ -228,7 +230,7 @@ impl WafSmokeTest {
     }
 
     /// Run comprehensive WAF smoke test
-    pub async fn run_test(&self, url: &str) -> Result<SmokeTestResult> {
+    pub async fn run_test(&self, url: &str) -> Result<SmokeTestResult, anyhow::Error> {
         let start_time = Instant::now();
         let mut test_results = Vec::new();
 
@@ -261,9 +263,11 @@ impl WafSmokeTest {
             summary,
             waf_mode,
             detected_waf,
+            detected_cdn: None,
             recommendations,
             total_time_ms: total_time.as_millis() as u64,
             timestamp: chrono::Utc::now(),
+            is_smoke_test: true,
         };
 
         Ok(result)
@@ -275,7 +279,7 @@ impl WafSmokeTest {
         url: &str,
         payload_type: PayloadType,
         payload: &str,
-    ) -> Result<PayloadTestResult> {
+    ) -> Result<PayloadTestResult, anyhow::Error> {
         let test_url = self.build_test_url(url, payload)?;
         let start_time = Instant::now();
 
@@ -317,7 +321,7 @@ impl WafSmokeTest {
     }
 
     /// Build test URL with payload
-    fn build_test_url(&self, base_url: &str, payload: &str) -> Result<String> {
+    fn build_test_url(&self, base_url: &str, payload: &str) -> Result<String, anyhow::Error> {
         let url = if base_url.contains("FUZZ") {
             base_url.replace("FUZZ", payload)
         } else if base_url.contains('?') {
@@ -652,7 +656,7 @@ impl WafSmokeTest {
     }
 
     /// Export results to JSON file
-    pub fn export_json(&self, result: &SmokeTestResult, output_file: &str) -> Result<()> {
+    pub fn export_json(&self, result: &SmokeTestResult, output_file: &str) -> Result<(), anyhow::Error> {
         let json = serde_json::to_string_pretty(result)?;
         std::fs::write(output_file, json)?;
         println!("📄 Results exported to: {}", output_file);

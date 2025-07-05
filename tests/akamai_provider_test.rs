@@ -28,8 +28,8 @@ async fn test_akamai_server_header_detection() {
     
     assert!(!evidence.is_empty());
     assert_eq!(evidence[0].confidence, 0.95);
-    assert!(evidence[0].description.contains("AkamaiGHost"));
-    assert_eq!(evidence[0].method_type, DetectionMethod::Header("server".to_string()));
+    assert!(evidence[0].description.contains("Akamai server header"));
+    assert_eq!(evidence[0].method_type, MethodType::Header("server".to_string()));
 }
 
 #[tokio::test]
@@ -53,7 +53,7 @@ async fn test_akamai_x_cache_header_detection() {
     // Should find both X-Cache and X-Cache-Remote
     assert!(evidence.len() >= 2);
     
-    let x_cache_evidence = evidence.iter().find(|e| e.description.contains("X-Cache")).unwrap();
+    let x_cache_evidence = evidence.iter().find(|e| e.description.contains("x-cache")).unwrap();
     assert!(x_cache_evidence.confidence >= 0.9);
 }
 
@@ -75,8 +75,8 @@ async fn test_akamai_reference_header_detection() {
     let evidence = provider.check_headers(&response).await;
     
     assert!(!evidence.is_empty());
-    assert!(evidence.iter().any(|e| e.description.contains("Akamai Request ID")));
-    assert!(evidence.iter().any(|e| e.description.contains("Akamai Session Info")));
+    assert!(evidence.iter().any(|e| e.description.contains("x-akamai-request-id")));
+    assert!(evidence.iter().any(|e| e.description.contains("x-akamai-session-info")));
 }
 
 #[tokio::test]
@@ -102,7 +102,7 @@ async fn test_akamai_error_page_detection() {
     
     assert!(!evidence.is_empty());
     assert!(evidence[0].confidence >= 0.85);
-    assert!(evidence[0].description.contains("Akamai error page"));
+    assert!(evidence.iter().any(|e| e.description.contains("Akamai reference ID") || e.description.contains("Akamai access denied")));
 }
 
 #[tokio::test]

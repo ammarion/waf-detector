@@ -5,7 +5,7 @@ use crate::{DetectionContext, DetectionResult, ProviderDetection, DetectionMetad
 use crate::confidence::AdvancedScoring; // NEW: Import advanced scoring
 use crate::timing::{TimingAnalyzer, TimingConfig}; // NEW: Import timing analysis
 use crate::dns::DnsAnalyzer; // NEW: Import DNS analysis
-use crate::payload::{PayloadAnalyzer, PayloadConfig}; // NEW: Import payload analysis
+use crate::payload::PayloadAnalyzer;
 use dashmap::DashMap;
 use std::sync::Arc;
 use std::collections::HashMap;

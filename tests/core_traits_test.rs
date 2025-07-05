@@ -4,7 +4,12 @@ use waf_detector::*;
 async fn test_detection_provider_interface() {
     // This test will fail initially - that's expected in TDD!
     let provider = MockProvider::new();
-    let context = DetectionContext::default();
+    let context = DetectionContext {
+        url: "https://example.com".to_string(),
+        response: None,
+        dns_info: None,
+        user_agent: "test-agent".to_string(),
+    };
     
     let _evidence = provider.detect(&context).await.unwrap();
     
@@ -20,13 +25,13 @@ async fn test_evidence_structure() {
         method_type: DetectionMethod::Header("server".to_string()),
         confidence: 0.9,
         description: "Test evidence".to_string(),
-        raw_data: Some("nginx".to_string()),
+        raw_data: "nginx".to_string(),
         signature_matched: "server-pattern".to_string(),
     };
     
     assert_eq!(evidence.confidence, 0.9);
     assert_eq!(evidence.description, "Test evidence");
-    assert_eq!(evidence.raw_data, Some("nginx".to_string()));
+    assert_eq!(evidence.raw_data, "nginx".to_string());
     
     match evidence.method_type {
         DetectionMethod::Header(ref header) => assert_eq!(header, "server"),
@@ -45,7 +50,7 @@ fn test_provider_type_variants() {
 #[test]
 fn test_detection_method_variants() {
     let header_method = DetectionMethod::Header("cf-ray".to_string());
-    let body_method = DetectionMethod::BodyPattern;
+    let body_method = DetectionMethod::Body("pattern".to_string());
     let status_method = DetectionMethod::StatusCode(403);
     
     assert_ne!(header_method, body_method);
@@ -73,8 +78,12 @@ impl MockProvider {
 #[async_trait::async_trait]
 impl DetectionProvider for MockProvider {
     fn name(&self) -> &str { "MockProvider" }
+    fn version(&self) -> &str { "1.0.0" }
+    fn description(&self) -> Option<String> { Some("Mock provider".to_string()) }
     fn provider_type(&self) -> ProviderType { ProviderType::WAF }
     fn confidence_base(&self) -> f64 { 0.8 }
+    fn priority(&self) -> u32 { 50 }
+    fn enabled(&self) -> bool { true }
     
     async fn detect(&self, _context: &DetectionContext) -> anyhow::Result<Vec<Evidence>> {
         Ok(vec![])

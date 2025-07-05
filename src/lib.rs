@@ -73,7 +73,7 @@ pub struct Evidence {
     pub signature_matched: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DetectionMethod {
     Header(String),
     Body(String),

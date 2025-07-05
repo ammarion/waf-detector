@@ -1,0 +1,69 @@
+🚀 Starting WAF Smoke Test...
+═══════════════════════════════════════════════════════════════
+📊 Test Type │ Payload                        │ Result       │ Code │ Time
+─────────────┼────────────────────────────────┼──────────────┼──────┼──────
+🔍 Starting Advanced WAF Effectiveness Test
+🎯 Target: https://frame.io/
+═══════════════════════════════════════════════════════════════
+⚠️ XssBasic             │ <script>alert('XSS')</script>  │ [31mALLOWED     [0m │ 200 │  215ms
+⚠️ XssBasic             │ <img src=x onerror=alert('X... │ [31mALLOWED     [0m │ 200 │   51ms
+⚠️ XssBasic             │ javascript:alert('XSS')        │ [31mALLOWED     [0m │ 200 │   44ms
+⚠️ XssBasic             │ <svg onload=alert('XSS')>      │ [31mALLOWED     [0m │ 200 │   55ms
+⚠️ Enumeration          │ admin                          │ [31mALLOWED     [0m │ 200 │   42ms
+⚠️ Enumeration          │ administrator                  │ [31mALLOWED     [0m │ 200 │   51ms
+⚠️ Enumeration          │ config.php                     │ [31mALLOWED     [0m │ 200 │   39ms
+⚠️ Enumeration          │ .env                           │ [31mALLOWED     [0m │ 200 │   36ms
+⚠️ Enumeration          │ wp-config.php                  │ [31mALLOWED     [0m │ 200 │   45ms
+⚠️ SqlInjectionBasic    │ ' OR '1'='1                    │ [31mALLOWED     [0m │ 200 │   48ms
+⚠️ SqlInjectionBasic    │ '; DROP TABLE users; --        │ [31mALLOWED     [0m │ 200 │   28ms
+⚠️ SqlInjectionBasic    │ 1' UNION SELECT NULL,NULL,N... │ [31mALLOWED     [0m │ 200 │   34ms
+⚠️ SqlInjectionBasic    │ admin'--                       │ [31mALLOWED     [0m │ 200 │   30ms
+⚠️ PathTraversal        │ ../../../etc/passwd            │ [31mALLOWED     [0m │ 200 │   37ms
+⚠️ PathTraversal        │ ..\..\..\windows\system32\d... │ [31mALLOWED     [0m │ 200 │   42ms
+⚠️ PathTraversal        │ ....//....//....//etc/passwd   │ [31mALLOWED     [0m │ 200 │   40ms
+⚠️ PathTraversal        │ %2e%2e%2f%2e%2e%2f%2e%2e%2f... │ [31mALLOWED     [0m │ 200 │   43ms
+⚠️ PathTraversal        │ ..%252f..%252f..%252fetc%25... │ [31mALLOWED     [0m │ 200 │   37ms
+⚠️ ScannerDetection     │ sqlmap                         │ [31mALLOWED     [0m │ 200 │   50ms
+⚠️ ScannerDetection     │ nikto                          │ [31mALLOWED     [0m │ 200 │   39ms
+⚠️ ScannerDetection     │ nessus                         │ [31mALLOWED     [0m │ 200 │   51ms
+⚠️ ScannerDetection     │ burpsuite                      │ [31mALLOWED     [0m │ 200 │   39ms
+⚠️ ScannerDetection     │ acunetix                       │ [31mALLOWED     [0m │ 200 │   52ms
+⚠️ SqlInjectionAdvanced │ 1' AND (SELECT COUNT(*) FRO... │ [31mALLOWED     [0m │ 200 │   41ms
+⚠️ SqlInjectionAdvanced │ '; WAITFOR DELAY '00:00:05'--  │ [31mALLOWED     [0m │ 200 │   49ms
+⚠️ SqlInjectionAdvanced │ ' OR 1=1 LIMIT 1 OFFSET 0--    │ [31mALLOWED     [0m │ 200 │   37ms
+⚠️ SqlInjectionAdvanced │ 1' AND EXTRACTVALUE(1, CONC... │ [31mALLOWED     [0m │ 200 │   53ms
+⚠️ SqlInjectionAdvanced │ 1' UNION SELECT 1,2,3,4,5,6... │ [31mALLOWED     [0m │ 200 │   46ms
+⚠️ CommandInjection     │ ; cat /etc/passwd              │ [31mALLOWED     [0m │ 200 │   43ms
+⚠️ CommandInjection     │ | whoami                       │ [31mALLOWED     [0m │ 200 │   34ms
+⚠️ CommandInjection     │ `id`                           │ [31mALLOWED     [0m │ 200 │   56ms
+⚠️ CommandInjection     │ $(whoami)                      │ [31mALLOWED     [0m │ 200 │   34ms
+⚠️ CommandInjection     │ && dir                         │ [31mALLOWED     [0m │ 200 │   56ms
+⚠️ CommandInjection     │ ; ls -la                       │ [31mALLOWED     [0m │ 200 │   40ms
+⚠️ FileUpload           │ shell.php                      │ [31mALLOWED     [0m │ 200 │   32ms
+⚠️ FileUpload           │ test.php%00.jpg                │ [31mALLOWED     [0m │ 200 │   32ms
+⚠️ FileUpload           │ ../../../shell.php             │ [31mALLOWED     [0m │ 200 │   44ms
+⚠️ FileUpload           │ shell.php.jpg                  │ [31mALLOWED     [0m │ 200 │   35ms
+⚠️ FileUpload           │ shell.pHp                      │ [31mALLOWED     [0m │ 200 │   33ms
+⚠️ XssAdvanced          │ "><script>alert('XSS')</scr... │ [31mALLOWED     [0m │ 200 │   36ms
+⚠️ XssAdvanced          │ ';alert('XSS');//              │ [31mALLOWED     [0m │ 200 │   39ms
+⚠️ XssAdvanced          │ <iframe src=javascript:aler... │ [31mALLOWED     [0m │ 200 │   42ms
+⚠️ XssAdvanced          │ <body onload=alert('XSS')>     │ [31mALLOWED     [0m │ 200 │   39ms
+⚠️ XssAdvanced          │ <<SCRIPT>alert('XSS')//<</S... │ [31mALLOWED     [0m │ 200 │   34ms
+
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                           WAF EFFECTIVENESS TEST RESULTS                     ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║ Target URL: https://frame.io/                                                 ║
+║ WAF Mode: Monitoring                                                        ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║ Total Tests: 44         │ Blocked: 0          │ Allowed: 44         ║
+║ Errors: 0             │ Rate Limited: 0      │ Challenges: 0       ║
+║ Effectiveness: 0.0   % │ Avg Response: 46    ms │ Total Time: 6640  ms ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║ RECOMMENDATIONS:                                                             ║
+║ • 🔴 Low WAF protection. Many attacks are getting through - review confi...    ║
+║ • ⚠️ WAF appears to be in monitoring mode - attacks are logged but not...     ║
+║ • Consider enabling blocking mode for better protection.                      ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+⚠️  WARNING: Low WAF effectiveness detected (0.0%)

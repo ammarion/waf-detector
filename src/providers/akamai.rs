@@ -50,7 +50,7 @@ impl AkamaiProvider {
         PATTERN.get_or_init(|| Regex::new(r"^x-akamai-").unwrap())
     }
 
-    async fn check_headers(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
+    pub async fn check_headers(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
         let mut evidence = Vec::new();
 
         // Check Server header for AkamaiGHost
@@ -123,7 +123,7 @@ impl AkamaiProvider {
         evidence
     }
 
-    async fn check_body_patterns(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
+    pub async fn check_body_patterns(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
         let mut evidence = Vec::new();
 
         // Check for Akamai reference ID patterns
@@ -162,7 +162,7 @@ impl AkamaiProvider {
         evidence
     }
 
-    async fn check_status_codes(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
+    pub async fn check_status_codes(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
         let mut evidence = Vec::new();
 
         match response.status {

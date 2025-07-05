@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAF Detector Debug</title>
+</head>
+<body>
+    <h1>WAF Detector Debug</h1>
+    <button id="testButton">Test API</button>
+    <pre id="result"></pre>
+
+    <script>
+        document.getElementById('testButton').addEventListener('click', async () => {
+            try {
+                const response = await fetch('http://localhost:8080/api/status');
+                const data = await response.json();
+                document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+                console.log('API Status:', data);
+            } catch (error) {
+                document.getElementById('result').textContent = 'Error: ' + error.message;
+                console.error('API Error:', error);
+            }
+        });
+    </script>
+</body>
+</html>

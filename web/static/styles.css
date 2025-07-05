@@ -1,0 +1,72 @@
+/* Additional styles for WAF Detector */
+.evidence-item {
+    margin-bottom: 10px;
+    padding: 10px;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+    border-left: 4px solid #4299e1;
+}
+
+.evidence-item.high {
+    border-left-color: #48bb78;
+}
+
+.evidence-item.medium {
+    border-left-color: #ecc94b;
+}
+
+.evidence-item.low {
+    border-left-color: #f56565;
+}
+
+.confidence-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-left: 8px;
+}
+
+.confidence-high {
+    background-color: #c6f6d5;
+    color: #22543d;
+}
+
+.confidence-medium {
+    background-color: #fefcbf;
+    color: #744210;
+}
+
+.confidence-low {
+    background-color: #fed7d7;
+    color: #822727;
+}
+
+.test-result-blocked {
+    color: #48bb78;
+    font-weight: bold;
+}
+
+.test-result-allowed {
+    color: #f56565;
+    font-weight: bold;
+}
+
+.test-result-error {
+    color: #ecc94b;
+    font-weight: bold;
+}
+
+.effectiveness-chart {
+    height: 200px;
+    margin: 20px 0;
+}
+
+.recommendation-item {
+    padding: 10px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    background-color: #ebf8ff;
+    border-left: 4px solid #4299e1;
+}

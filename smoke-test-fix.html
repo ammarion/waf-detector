@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAF Detector Smoke Test Fix</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 2rem;
+            max-width: 800px;
+            margin: 0 auto;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #4a5568;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        pre {
+            background: #f7fafc;
+            padding: 1rem;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .btn {
+            background: #4299e1;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn:hover {
+            background: #3182ce;
+        }
+    </style>
+</head>
+<body>
+    <h1>WAF Detector Smoke Test Fix</h1>
+    
+    <div class="card">
+        <h2>Instructions</h2>
+        <p>Follow these steps to fix the smoke test results display in the WAF Detector web interface:</p>
+        <ol>
+            <li>Stop the current WAF Detector web server if it's running</li>
+            <li>Add the JavaScript fix to the web interface</li>
+            <li>Restart the web server</li>
+            <li>Test the smoke test functionality</li>
+        </ol>
+    </div>
+    
+    <div class="card">
+        <h2>JavaScript Fix</h2>
+        <p>The issue is that the smoke test results structure doesn't match what the UI expects. This JavaScript fix adapts the results to the expected format.</p>
+        <pre><code id="jsCode"></code></pre>
+        <button class="btn" onclick="copyJsCode()">Copy JavaScript</button>
+    </div>
+    
+    <div class="card">
+        <h2>Implementation Options</h2>
+        <h3>Option 1: Add to Dashboard HTML</h3>
+        <p>Add the JavaScript code at the end of the dashboard HTML, just before the closing &lt;/body&gt; tag:</p>
+        <pre><code>&lt;script&gt;
+// Paste the JavaScript fix here
+&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+        
+        <h3>Option 2: Create a Separate JS File</h3>
+        <p>Create a new file in the static directory and reference it in the dashboard HTML:</p>
+        <pre><code>&lt;script src="/static/smoke-test-fix.js"&gt;&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+    </div>
+    
+    <script>
+        // Load the JavaScript fix
+        fetch('smoke-test-fix.js')
+            .then(response => response.text())
+            .then(code => {
+                document.getElementById('jsCode').textContent = code;
+            });
+        
+        // Copy function
+        function copyJsCode() {
+            const code = document.getElementById('jsCode').textContent;
+            navigator.clipboard.writeText(code)
+                .then(() => alert('JavaScript code copied to clipboard!'))
+                .catch(err => console.error('Failed to copy: ', err));
+        }
+    </script>
+</body>
+</html>

