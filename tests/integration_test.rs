@@ -8,7 +8,7 @@ async fn test_cloudflare_detection_integration() {
     headers.insert("cf-ray".to_string(), "1234567890abcdef-DFW".to_string());
     headers.insert("server".to_string(), "cloudflare".to_string());
     
-    let response = http::HttpResponse {
+    let _response = http::HttpResponse {
         status: 200,
         headers,
         body: "<!DOCTYPE html><html>".to_string(),

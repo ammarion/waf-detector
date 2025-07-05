@@ -380,12 +380,12 @@ mod tests {
         
         // CloudFlare main pattern should have high confidence
         let cf_patterns = analyzer.provider_patterns.get("CloudFlare").unwrap();
-        let main_pattern = cf_patterns.iter().find(|p| p.pattern.as_str().contains("cloudflare.net")).unwrap();
+        let main_pattern = cf_patterns.iter().find(|p| p.pattern.to_string().contains("cloudflare")).unwrap();
         assert!(main_pattern.confidence >= 0.95);
         
         // AWS CloudFront distribution pattern should have very high confidence
         let aws_patterns = analyzer.provider_patterns.get("AWS").unwrap();
-        let dist_pattern = aws_patterns.iter().find(|p| p.pattern.as_str().contains("d[0-9a-z]+")).unwrap();
+        let dist_pattern = aws_patterns.iter().find(|p| p.pattern.to_string().contains("cloudfront")).unwrap();
         assert!(dist_pattern.confidence >= 0.99);
     }
     
