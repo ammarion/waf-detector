@@ -259,13 +259,14 @@ async fn smoke_test(
     State(_server): State<WebServer>,
     Json(payload): Json<ScanRequest>,
 ) -> impl IntoResponse {
+    println!("[smoke_test] Handler entered for URL: {}", payload.url);
     // Create smoke test configuration
     let config = SmokeTestConfig::default();
-    
     // Create and run smoke test
     let smoke_test = match WafSmokeTest::new(config) {
         Ok(test) => test,
         Err(e) => {
+            eprintln!("[smoke_test] Failed to create smoke test for URL {}: {}", payload.url, e);
             let response = SmokeTestResponse {
                 success: false,
                 result: None,
@@ -274,12 +275,11 @@ async fn smoke_test(
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(response));
         }
     };
-    
     // Run the test
     match smoke_test.run_test(&payload.url).await {
         Ok(mut result) => {
-            // Ensure is_smoke_test is set (should already be true, but set explicitly)
             result.is_smoke_test = true;
+            println!("[smoke_test] Successfully ran smoke test for URL: {}", payload.url);
             let response = SmokeTestResponse {
                 success: true,
                 result: Some(result),
@@ -288,6 +288,7 @@ async fn smoke_test(
             (StatusCode::OK, Json(response))
         }
         Err(e) => {
+            eprintln!("[smoke_test] Smoke test failed for URL {}: {}", payload.url, e);
             let response = SmokeTestResponse {
                 success: false,
                 result: None,

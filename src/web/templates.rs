@@ -460,6 +460,52 @@ pub const DASHBOARD_HTML: &str = r#"
             margin: 1rem 0;
             border: 1px solid #9ae6b4;
         }
+
+        .payload-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .payload-table th {
+            background: #f8fafc;
+            padding: 0.75rem 0.5rem;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+            border-bottom: 1px solid #e5e7eb;
+            white-space: nowrap;
+        }
+
+        .payload-table td {
+            padding: 0.5rem;
+            border-bottom: 1px solid #f3f4f6;
+            vertical-align: top;
+            max-width: 300px;
+            word-wrap: break-word;
+            word-break: break-all;
+            overflow-wrap: break-word;
+        }
+
+        .payload-table td:nth-child(2) {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.75rem;
+            max-width: 200px;
+            white-space: pre-wrap;
+        }
+
+        .payload-table tr:hover {
+            background: #f9fafb;
+        }
+
+        .payload-table tr:last-child td {
+            border-bottom: none;
+        }
     </style>
 </head>
 <body>
@@ -551,7 +597,7 @@ pub const DASHBOARD_HTML: &str = r#"
         // HTML escaping utility to prevent XSS
         function escapeHtml(str) {
             if (typeof str !== 'string') return str;
-            return str.replace(/[&<>"'`=\/]/g, function(s) {
+            return str.replace(/[&<>\"'`=\\/]/g, function(s) {
                 return ({
                     '&': '&amp;',
                     '<': '&lt;',
@@ -563,6 +609,12 @@ pub const DASHBOARD_HTML: &str = r#"
                     '/': '&#47;'
                 })[s];
             });
+        }
+
+        // Helper function to display status codes safely
+        function displayStatusCode(val) {
+            if (val === undefined || val === null || isNaN(val)) return 'N/A';
+            return String(val);
         }
 
         // Single URL scan
@@ -836,11 +888,12 @@ pub const DASHBOARD_HTML: &str = r#"
                                             const statusIcon = test.classification === 'Blocked' || test.classification === 'Challenge' ? '🛡️' : 
                                                   test.classification === 'Allowed' ? '⚠️' : '❓';
                                             const rowColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+                                            console.log('Test row data:', test);
                                             return `<tr style="background: ${rowColor};">
                                                 <td>${escapeHtml(test.category)}</td>
                                                 <td style="font-family: monospace;">${escapeHtml((test.payload !== undefined && test.payload !== null && test.payload !== '') ? test.payload : '(empty)')}</td>
                                                 <td><span style="background: ${statusColor}; color: white; padding: 0.125rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block;">${statusIcon} ${escapeHtml(test.classification)}</span></td>
-                                                <td>${escapeHtml(String(test.response_status))}</td>
+                                                <td>${escapeHtml(displayStatusCode(parseInt(test.response_status) || 0))}</td>
                                                 <td>${escapeHtml(String(test.response_time_ms))}</td>
                                             </tr>`;
                                         }).join('') : ''}
@@ -1062,17 +1115,11 @@ pub const DASHBOARD_HTML: &str = r#"
                 console.log("Processing smoke test result:", rawResult);
                 
                 // Ensure the result has the correct structure for smoke test display
-                return {
+                let processedResult = {
                     url: rawResult.url,
                     // Flag this explicitly as a smoke test result
                     is_smoke_test: true,
-                    test_results: Array.isArray(rawResult.test_results) ? rawResult.test_results.map(test => ({
-                        category: test.category || "Unknown",
-                        payload: (test.payload !== undefined && test.payload !== null) ? test.payload : '',
-                        status_code: test.response_status || test.status_code || 0,
-                        response_time_ms: test.response_time_ms || 0,
-                        classification: test.classification || "Unknown"
-                    })) : [],
+                    test_results: [],
                     summary: rawResult.summary || {
                         effectiveness_percentage: 0,
                         total_tests: 0,
@@ -1088,6 +1135,24 @@ pub const DASHBOARD_HTML: &str = r#"
                     total_time_ms: rawResult.total_time_ms || 0,
                     timestamp: rawResult.timestamp || new Date().toISOString()
                 };
+                
+                // Process test results with careful handling of response_status
+                if (Array.isArray(rawResult.test_results)) {
+                    processedResult.test_results = rawResult.test_results.map(test => {
+                        // Log each test result for debugging
+                        console.log('Processing test result:', test);
+                        
+                        return {
+                            category: test.category || "Unknown",
+                            payload: (test.payload !== undefined && test.payload !== null) ? test.payload : '',
+                            response_status: parseInt(test.response_status) || 0,
+                            response_time_ms: test.response_time_ms || 0,
+                            classification: test.classification || "Unknown"
+                        };
+                    });
+                }
+                
+                return processedResult;
             }
             
             console.log("Smoke test display fix applied");
