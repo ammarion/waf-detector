@@ -512,7 +512,8 @@ pub const DASHBOARD_HTML: &str = r#"
     <div class="container">
         <div class="header">
             <h1>🛡️ WAF Detector</h1>
-            <p>Professional Web Application Firewall & CDN Detection</p>
+            <p>Advanced Security Infrastructure Analysis & Visualization</p>
+            <p style="font-size: 0.8rem; color: #f8fafc; background-color: rgba(0,0,0,0.3); padding: 0.5rem; border-radius: 6px; margin-top: 0.5rem;">⚠️ <strong>Important:</strong> This tool should only be used against your own web services or with explicit authorization. Unauthorized scanning may violate terms of service or laws in your jurisdiction.</p>
         </div>
 
         <div class="dashboard-grid">
@@ -864,6 +865,7 @@ pub const DASHBOARD_HTML: &str = r#"
                     ${isSmokeTest ? `
                         <div style="margin-bottom: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #0ea5e9;">
                             <h4 style="margin: 0 0 0.5rem 0; color: #0369a1;">🛡️ WAF Smoke Test Results</h4>
+                            <p style="font-size: 0.85rem; color: #4b5563; margin-bottom: 0.5rem;">Note: Scanner Detection tests use realistic User-Agent headers instead of query parameters to test if the WAF blocks security scanning tools.</p>
                             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; font-size: 0.9rem;">
                                 <div><strong>Effectiveness:</strong> ${result.summary && result.summary.effectiveness_percentage !== undefined ? result.summary.effectiveness_percentage.toFixed(1) : '0.0'}%</div>
                                 <div><strong>Blocked:</strong> ${result.summary && result.summary.blocked_count !== undefined ? result.summary.blocked_count : 0}</div>
@@ -889,8 +891,13 @@ pub const DASHBOARD_HTML: &str = r#"
                                                   test.classification === 'Allowed' ? '⚠️' : '❓';
                                             const rowColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
                                             console.log('Test row data:', test);
-                                            return `<tr style="background: ${rowColor};">
-                                                <td>${escapeHtml(test.category)}</td>
+                                            // Add special tooltip for scanner detection tests
+                                            const isScanner = test.category === 'ScannerDetection';
+                                            const tooltipAttr = isScanner ? 
+                                                `title="Testing if WAF blocks ${escapeHtml(test.payload)} scanner signature via User-Agent header"` : '';
+                                            
+                                            return `<tr style="background: ${rowColor};" ${tooltipAttr}>
+                                                <td>${escapeHtml(test.category)}${isScanner ? ' 🔍' : ''}</td>
                                                 <td style="font-family: monospace;">${escapeHtml((test.payload !== undefined && test.payload !== null && test.payload !== '') ? test.payload : '(empty)')}</td>
                                                 <td><span style="background: ${statusColor}; color: white; padding: 0.125rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block;">${statusIcon} ${escapeHtml(test.classification)}</span></td>
                                                 <td>${escapeHtml(displayStatusCode(parseInt(test.response_status) || 0))}</td>

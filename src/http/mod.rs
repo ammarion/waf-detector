@@ -42,6 +42,15 @@ impl HttpClient {
         self.response_to_http_response(response, url).await
     }
     
+    pub async fn get_with_headers(&self, url: &str, headers: &[(& str, & str)]) -> Result<HttpResponse> {
+        let mut request = self.client.get(url);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let response = request.send().await?;
+        self.response_to_http_response(response, url).await
+    }
+    
     pub async fn post(&self, url: &str, body: &str) -> Result<HttpResponse> {
         let response = self.client
             .post(url)

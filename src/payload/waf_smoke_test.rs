@@ -208,7 +208,7 @@ impl WafSmokeTest {
             "shell.pHp".to_string(),
         ]);
 
-        // Scanner Detection
+        // Scanner Detection - Using tool names that will be converted to proper User-Agents
         payloads.insert(PayloadType::ScannerDetection, vec![
             "sqlmap".to_string(),
             "nikto".to_string(),
@@ -283,20 +283,49 @@ impl WafSmokeTest {
         let test_url = self.build_test_url(url, payload)?;
         let start_time = Instant::now();
 
-        // Send request with payload
-        let response = match self.http_client.get(&test_url).await {
-            Ok(resp) => resp,
-            Err(e) => {
-                return Ok(PayloadTestResult {
-                    category: format!("{:?}", payload_type),
-                    payload: payload.to_string(),
-                    payload_type,
-                    response_status: 0,
-                    response_time_ms: start_time.elapsed().as_millis() as u64,
-                    classification: PayloadClassification::Error,
-                    evidence: vec![format!("Request failed: {}", e)],
-                    waf_indicators: vec![],
-                });
+        // For scanner detection, use realistic User-Agent headers instead of query params
+        let response = if payload_type == PayloadType::ScannerDetection {
+            // Use scanner name as User-Agent instead of query parameter
+            let scanner_user_agent = match payload {
+                "sqlmap" => "sqlmap/1.6.12 (https://sqlmap.org)",
+                "nikto" => "Mozilla/5.0 (Nikto/2.1.6) (Evasions:None) (Test:Port Check)",
+                "nessus" => "Mozilla/5.0 (compatible; Nessus; https://www.tenable.com/)",
+                "burpsuite" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 BurpSuite",
+                "acunetix" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Acunetix/1.0",
+                _ => "WAF-Detector/1.0 Scanner Test",
+            };
+            
+            match self.http_client.get_with_headers(url, &[("User-Agent", scanner_user_agent)]).await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    return Ok(PayloadTestResult {
+                        category: format!("{:?}", payload_type),
+                        payload: payload.to_string(),
+                        payload_type,
+                        response_status: 0,
+                        response_time_ms: start_time.elapsed().as_millis() as u64,
+                        classification: PayloadClassification::Error,
+                        evidence: vec![format!("Request failed: {}", e)],
+                        waf_indicators: vec![],
+                    });
+                }
+            }
+        } else {
+            // Regular payload testing via query parameters
+            match self.http_client.get(&test_url).await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    return Ok(PayloadTestResult {
+                        category: format!("{:?}", payload_type),
+                        payload: payload.to_string(),
+                        payload_type,
+                        response_status: 0,
+                        response_time_ms: start_time.elapsed().as_millis() as u64,
+                        classification: PayloadClassification::Error,
+                        evidence: vec![format!("Request failed: {}", e)],
+                        waf_indicators: vec![],
+                    });
+                }
             }
         };
 
@@ -305,6 +334,12 @@ impl WafSmokeTest {
         // Classify the response
         let (classification, evidence, waf_indicators) = self.classify_response(&response, payload);
 
+        // For scanner detection, add a special note about what's being tested
+        let mut final_evidence = evidence;
+        if payload_type == PayloadType::ScannerDetection {
+            final_evidence.push(format!("Testing if WAF blocks '{}' scanner signature via User-Agent header", payload));
+        }
+        
         // Print real-time result
         self.print_test_result(&payload_type, payload, &classification, response.status, response_time.as_millis() as u64);
 
@@ -315,7 +350,7 @@ impl WafSmokeTest {
             response_status: response.status,
             response_time_ms: response_time.as_millis() as u64,
             classification,
-            evidence,
+            evidence: final_evidence,
             waf_indicators,
         })
     }
