@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use anyhow::Result;
 
 /// Payload-based probing analyzer
 #[derive(Debug, Clone)]

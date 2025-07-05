@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use crate::http::HttpClient;
 use crate::engine::waf_mode_detector::{PayloadType, WafMode};
-use anyhow::Result;
 
 /// WAF Smoke Test Configuration
 #[derive(Debug, Clone)]

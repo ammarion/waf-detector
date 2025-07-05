@@ -1,6 +1,4 @@
-Error: error sending request for url (https://serve/): error trying to connect: dns error: failed to lookup address information: nodename nor servname provided, or not known
-
-Caused by:
-    0: error trying to connect: dns error: failed to lookup address information: nodename nor servname provided, or not known
-    1: dns error: failed to lookup address information: nodename nor servname provided, or not known
-    2: failed to lookup address information: nodename nor servname provided, or not known
+🌐 Starting WAF Detector Web Server...
+🌐 WAF Detector Web Server starting on http://localhost:8080
+📊 Dashboard: http://localhost:8080/dashboard
+📖 API Docs: http://localhost:8080/api-docs

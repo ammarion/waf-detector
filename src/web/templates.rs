@@ -506,6 +506,25 @@ pub const DASHBOARD_HTML: &str = r#"
         .payload-table tr:last-child td {
             border-bottom: none;
         }
+
+        /* API Docs code/pre color fix */
+        pre, code, .hljs, .highlight, [class^="language-"] {
+            background: #f5f5f5 !important;
+            color: #222 !important;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+        pre {
+            padding: 1rem !important;
+            overflow-x: auto;
+        }
+        code {
+            padding: 0.125rem 0.25rem !important;
+        }
+        /* Remove any text-shadow that might make text less readable */
+        pre, code, .hljs, .highlight, [class^="language-"] {
+            text-shadow: none !important;
+        }
     </style>
 </head>
 <body>
@@ -1232,15 +1251,16 @@ pub const API_DOCS_HTML: &str = r#"
         }
         
         code {
-            background: #edf2f7;
+            background: #f5f5f5;
+            color: #222;
             padding: 0.125rem 0.25rem;
             border-radius: 4px;
             font-family: 'Monaco', 'Consolas', monospace;
         }
         
         pre {
-            background: #2d3748;
-            color: #e2e8f0;
+            background: #f5f5f5;
+            color: #222;
             padding: 1rem;
             border-radius: 8px;
             overflow-x: auto;
