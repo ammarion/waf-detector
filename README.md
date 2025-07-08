@@ -1,4 +1,15 @@
-# WAF Detector 🛡️
+# WAF Detector
+
+![WAF Detector Dashboard](docs/ui-dashboard.png)
+
+> Advanced Security Infrastructure Analysis & Visualization
+
+## Features
+
+- **Single URL Detection (CDN & WAF):** Detects which CDN and WAF are protecting a single target.
+- **Batch URL Detection (CDN & WAF):** Scan multiple URLs at once for CDN and WAF detection.
+- **WAF Smoke Test:** Live payload testing with detailed results.
+- **Quick Actions:** Clear results, view API documentation, export results.
 
 A high-performance tool for detecting and testing Web Application Firewalls (WAFs) and Content Delivery Networks (CDNs).
 
@@ -127,3 +138,52 @@ MIT OR Apache-2.0
 ---
 
 **Built with ❤️ using Rust** 🦀
+
+## 🛠️ Getting Started as a New Developer
+
+Follow these steps to contribute a new feature or test:
+
+1. **Clone the repository:**
+   ```sh
+   git clone https://github.com/ammarion/waf-detector.git
+   cd waf-detector
+   ```
+
+2. **Create a new feature branch:**
+   ```sh
+   git checkout -b feature/your-feature-name
+   # or for a test:
+   git checkout -b test/your-test-name
+   ```
+
+3. **Build the project:**
+   ```sh
+   cargo build --release
+   ```
+
+4. **Run the server:**
+   ```sh
+   ./start_server.sh
+   # or for debug mode:
+   ./debug_server.sh
+   ```
+
+5. **Test the UI:**
+   - Open your browser to [http://localhost:8080](http://localhost:8080)
+   - Try out the features as described above.
+
+6. **Commit your changes:**
+   ```sh
+   git add .
+   git commit -m "Add <your feature or test>"
+   ```
+
+7. **Push your branch and open a Pull Request:**
+   ```sh
+   git push origin feature/your-feature-name
+   # Then open a PR on GitHub
+   ```
+
+8. **Get your code reviewed and merged!**
+
+> **Note:** Direct commits to `main` are not allowed. Always use a feature or test branch and open a PR.
