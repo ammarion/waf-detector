@@ -537,7 +537,8 @@ pub const DASHBOARD_HTML: &str = r#"
 
         <div class="dashboard-grid">
             <div class="card">
-                <h2>🚀 Single URL Detection</h2>
+                <h2>🚀 Single URL Detection (CDN & WAF)</h2>
+                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">Detect which CDN and WAF are protecting a single target URL.</p>
                 <form id="singleScanForm">
                     <div class="input-group">
                         <label for="singleUrl">Enter URL to scan:</label>
@@ -551,7 +552,8 @@ pub const DASHBOARD_HTML: &str = r#"
             </div>
 
             <div class="card">
-                <h2>⚡ Batch URL Detection</h2>
+                <h2>⚡ Batch URL Detection (CDN & WAF)</h2>
+                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">Detect which CDN and WAF are protecting multiple target URLs at once.</p>
                 <form id="batchScanForm">
                     <div class="input-group">
                         <label for="batchUrls">Enter URLs (one per line):</label>
