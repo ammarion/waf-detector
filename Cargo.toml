@@ -20,10 +20,10 @@ path = "test_integration.rs"
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 # Async runtime
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 
 # HTTP client
-reqwest = { version = "0.11", features = ["json", "gzip", "deflate", "brotli"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -95,3 +95,5 @@ providers-all = ["cloudflare", "akamai"]
 cloudflare = []
 akamai = []
 cli = []
+
+rand = "0.8.5"

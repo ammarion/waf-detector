@@ -7,6 +7,7 @@ use crate::{Evidence, MethodType};
 use std::collections::HashMap;
 use anyhow::Result;
 use regex::Regex;
+use std::sync::OnceLock;
 
 /// DNS analysis results
 #[derive(Debug, Clone)]
@@ -35,9 +36,83 @@ pub struct DnsAnalyzer {
 /// DNS pattern for provider identification
 #[derive(Debug, Clone)]
 pub struct DnsPattern {
-    pub pattern: Regex,
+    pub pattern_name: &'static str,
     pub confidence: f64,
     pub description: String,
+}
+
+fn get_dns_regex(pattern_name: &str) -> &'static Regex {
+    match pattern_name {
+        "cloudflare_net" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.cloudflare\.net$").unwrap())
+        }
+        "cloudflaressl_com" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.cloudflaressl\.com$").unwrap())
+        }
+        "cf_dns_com" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.cf-dns\.com$").unwrap())
+        }
+        "cloudfront_net" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.cloudfront\.net$").unwrap())
+        }
+        "cloudfront_dist" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r"d[0-9a-z]+\.cloudfront\.net$").unwrap())
+        }
+        "amazonaws_com" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.amazonaws\.com$").unwrap())
+        }
+        "fastly_com" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.fastly\.com$").unwrap())
+        }
+        "fastlylb_net" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.fastlylb\.net$").unwrap())
+        }
+        "global_fastly_net" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.global\.fastly\.net$").unwrap())
+        }
+        "akamai_net" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.akamai\.net$").unwrap())
+        }
+        "akamaized_net" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.akamaized\.net$").unwrap())
+        }
+        "akamaihd_net" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.akamaihd\.net$").unwrap())
+        }
+        "edgesuite_net" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.edgesuite\.net$").unwrap())
+        }
+        "vercel_app" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.vercel\.app$").unwrap())
+        }
+        "vercel_dns_com" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.vercel-dns\.com$").unwrap())
+        }
+        "keycdn_com" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.keycdn\.com$").unwrap())
+        }
+        "maxcdn_com" => {
+            static PATTERN: OnceLock<Regex> = OnceLock::new();
+            PATTERN.get_or_init(|| Regex::new(r".*\.maxcdn\.com$").unwrap())
+        }
+        _ => panic!("Unknown DNS regex pattern name: {}", pattern_name),
+    }
 }
 
 impl DnsAnalyzer {
@@ -47,17 +122,17 @@ impl DnsAnalyzer {
         // CloudFlare CNAME patterns
         provider_patterns.insert("CloudFlare".to_string(), vec![
             DnsPattern {
-                pattern: Regex::new(r".*\.cloudflare\.net$").unwrap(),
+                pattern_name: "cloudflare_net",
                 confidence: 0.98,
                 description: "CloudFlare CDN CNAME record".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r".*\.cloudflaressl\.com$").unwrap(),
+                pattern_name: "cloudflaressl_com",
                 confidence: 0.95,
                 description: "CloudFlare SSL CNAME record".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r".*\.cf-dns\.com$").unwrap(),
+                pattern_name: "cf_dns_com",
                 confidence: 0.90,
                 description: "CloudFlare DNS CNAME record".to_string(),
             },
@@ -66,17 +141,17 @@ impl DnsAnalyzer {
         // AWS CloudFront patterns
         provider_patterns.insert("AWS".to_string(), vec![
             DnsPattern {
-                pattern: Regex::new(r".*\.cloudfront\.net$").unwrap(),
+                pattern_name: "cloudfront_net",
                 confidence: 0.98,
                 description: "AWS CloudFront CNAME record".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r"d[0-9a-z]+\.cloudfront\.net$").unwrap(),
+                pattern_name: "cloudfront_dist",
                 confidence: 0.99,
                 description: "AWS CloudFront distribution CNAME".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r".*\.amazonaws\.com$").unwrap(),
+                pattern_name: "amazonaws_com",
                 confidence: 0.95,
                 description: "AWS service CNAME record".to_string(),
             },
@@ -85,17 +160,17 @@ impl DnsAnalyzer {
         // Fastly patterns
         provider_patterns.insert("Fastly".to_string(), vec![
             DnsPattern {
-                pattern: Regex::new(r".*\.fastly\.com$").unwrap(),
+                pattern_name: "fastly_com",
                 confidence: 0.98,
                 description: "Fastly CDN CNAME record".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r".*\.fastlylb\.net$").unwrap(),
+                pattern_name: "fastlylb_net",
                 confidence: 0.95,
                 description: "Fastly load balancer CNAME".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r".*\.global\.fastly\.net$").unwrap(),
+                pattern_name: "global_fastly_net",
                 confidence: 0.96,
                 description: "Fastly global network CNAME".to_string(),
             },
@@ -104,22 +179,22 @@ impl DnsAnalyzer {
         // Akamai patterns
         provider_patterns.insert("Akamai".to_string(), vec![
             DnsPattern {
-                pattern: Regex::new(r".*\.akamai\.net$").unwrap(),
+                pattern_name: "akamai_net",
                 confidence: 0.98,
                 description: "Akamai CDN CNAME record".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r".*\.akamaized\.net$").unwrap(),
+                pattern_name: "akamaized_net",
                 confidence: 0.95,
                 description: "Akamai edge network CNAME".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r".*\.akamaihd\.net$").unwrap(),
+                pattern_name: "akamaihd_net",
                 confidence: 0.96,
                 description: "Akamai HD network CNAME".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r".*\.edgesuite\.net$").unwrap(),
+                pattern_name: "edgesuite_net",
                 confidence: 0.94,
                 description: "Akamai EdgeSuite CNAME".to_string(),
             },
@@ -128,12 +203,12 @@ impl DnsAnalyzer {
         // Vercel patterns
         provider_patterns.insert("Vercel".to_string(), vec![
             DnsPattern {
-                pattern: Regex::new(r".*\.vercel\.app$").unwrap(),
+                pattern_name: "vercel_app",
                 confidence: 0.99,
                 description: "Vercel deployment CNAME".to_string(),
             },
             DnsPattern {
-                pattern: Regex::new(r".*\.vercel-dns\.com$").unwrap(),
+                pattern_name: "vercel_dns_com",
                 confidence: 0.96,
                 description: "Vercel DNS CNAME record".to_string(),
             },
@@ -142,7 +217,7 @@ impl DnsAnalyzer {
         // Additional common CDN patterns
         provider_patterns.insert("KeyCDN".to_string(), vec![
             DnsPattern {
-                pattern: Regex::new(r".*\.keycdn\.com$").unwrap(),
+                pattern_name: "keycdn_com",
                 confidence: 0.98,
                 description: "KeyCDN CNAME record".to_string(),
             },
@@ -150,7 +225,7 @@ impl DnsAnalyzer {
         
         provider_patterns.insert("MaxCDN".to_string(), vec![
             DnsPattern {
-                pattern: Regex::new(r".*\.maxcdn\.com$").unwrap(),
+                pattern_name: "maxcdn_com",
                 confidence: 0.98,
                 description: "MaxCDN CNAME record".to_string(),
             },
@@ -177,7 +252,8 @@ impl DnsAnalyzer {
         for cname in &cname_records {
             for (provider, patterns) in &self.provider_patterns {
                 for pattern in patterns {
-                    if pattern.pattern.is_match(cname) {
+                    let regex = get_dns_regex(pattern.pattern_name);
+                    if regex.is_match(cname) {
                         evidence.push(Evidence {
                             method_type: MethodType::DNS("cname".to_string()),
                             confidence: pattern.confidence,
@@ -356,22 +432,22 @@ mod tests {
         
         // Test CloudFlare patterns
         let cf_patterns = analyzer.provider_patterns.get("CloudFlare").unwrap();
-        assert!(cf_patterns.iter().any(|p| p.pattern.is_match("target.cloudflare.net")));
-        assert!(cf_patterns.iter().any(|p| p.pattern.is_match("ssl.cloudflaressl.com")));
+        assert!(cf_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("target.cloudflare.net")));
+        assert!(cf_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("ssl.cloudflaressl.com")));
         
         // Test AWS patterns
         let aws_patterns = analyzer.provider_patterns.get("AWS").unwrap();
-        assert!(aws_patterns.iter().any(|p| p.pattern.is_match("d123abc.cloudfront.net")));
-        assert!(aws_patterns.iter().any(|p| p.pattern.is_match("example.amazonaws.com")));
+        assert!(aws_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("d123abc.cloudfront.net")));
+        assert!(aws_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("example.amazonaws.com")));
         
         // Test Fastly patterns
         let fastly_patterns = analyzer.provider_patterns.get("Fastly").unwrap();
-        assert!(fastly_patterns.iter().any(|p| p.pattern.is_match("target.fastly.com")));
+        assert!(fastly_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("target.fastly.com")));
         
         // Test Akamai patterns
         let akamai_patterns = analyzer.provider_patterns.get("Akamai").unwrap();
-        assert!(akamai_patterns.iter().any(|p| p.pattern.is_match("target.akamai.net")));
-        assert!(akamai_patterns.iter().any(|p| p.pattern.is_match("target.edgesuite.net")));
+        assert!(akamai_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("target.akamai.net")));
+        assert!(akamai_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("target.edgesuite.net")));
     }
     
     #[test]
@@ -379,11 +455,11 @@ mod tests {
         let analyzer = DnsAnalyzer::new();
         // CloudFlare main pattern should have high confidence
         let cf_patterns = analyzer.provider_patterns.get("CloudFlare").unwrap();
-        let main_pattern = cf_patterns.iter().find(|p| p.pattern.to_string().contains("cloudflare")).unwrap();
+        let main_pattern = cf_patterns.iter().find(|p| get_dns_regex(p.pattern_name).to_string().contains("cloudflare")).unwrap();
         assert!(main_pattern.confidence >= 0.95, "CloudFlare confidence was {}", main_pattern.confidence);
         // AWS CloudFront distribution pattern should have very high confidence
         let aws_patterns = analyzer.provider_patterns.get("AWS").unwrap();
-        let dist_pattern = aws_patterns.iter().find(|p| p.pattern.to_string().contains("cloudfront")).unwrap();
+        let dist_pattern = aws_patterns.iter().find(|p| get_dns_regex(p.pattern_name).to_string().contains("cloudfront")).unwrap();
         assert!(dist_pattern.confidence >= 0.95, "AWS CloudFront confidence was {}", dist_pattern.confidence);
     }
     
