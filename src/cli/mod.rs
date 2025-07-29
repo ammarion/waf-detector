@@ -50,6 +50,17 @@ impl SimpleCliApp {
             return self.list_providers().await;
         }
 
+        // Handle consent command
+        if let Some(consent_args) = matches.get_many::<String>("consent") {
+            let args: Vec<String> = consent_args.cloned().collect();
+            return crate::effectiveness::consent::manage_consent_cli(args);
+        }
+
+        // Handle effectiveness testing
+        if let Some(url) = matches.get_one::<String>("effectiveness") {
+            return self.run_effectiveness_test(url).await;
+        }
+
         // Handle smoke test command
         if matches.get_flag("smoke-test") {
             return self.run_smoke_test(&matches).await;
@@ -453,6 +464,38 @@ impl SimpleCliApp {
         Ok(())
     }
 
+    async fn run_effectiveness_test(&self, url: &str) -> Result<()> {
+        use crate::effectiveness::{EffectivenessConfig, EffectivenessTest};
+
+        println!("🔍 WAF Effectiveness Testing");
+        println!("════════════════════════════════════════════════════════════════");
+
+        // Create effectiveness test with default config
+        let config = EffectivenessConfig::default();
+        let mut test = EffectivenessTest::new(config).await?;
+
+        // Run the test
+        println!("🎯 Target: {url}");
+        println!("⏳ Running comprehensive effectiveness tests...\n");
+
+        let report = test.test_effectiveness(url).await?;
+
+        // Display results
+        println!("\n{}", report.generate_summary());
+
+        // Save report if high risk
+        if report.risk_score > 50.0 {
+            let filename = format!(
+                "waf-effectiveness-{}.json",
+                chrono::Utc::now().format("%Y%m%d_%H%M%S")
+            );
+            std::fs::write(&filename, report.to_json()?)?;
+            println!("\n📁 High-risk report saved to: {filename}");
+        }
+
+        Ok(())
+    }
+
     async fn run_smoke_test(&self, matches: &ArgMatches) -> Result<()> {
         // Parse URL argument
         let url = matches.get_one::<String>("targets").ok_or_else(|| {
@@ -640,6 +683,20 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Enable aggressive testing mode (more payloads, faster)")
                 .action(clap::ArgAction::SetTrue)
                 .requires("smoke-test"),
+        )
+        .arg(
+            Arg::new("consent")
+                .long("consent")
+                .help("Manage consent for effectiveness testing")
+                .value_name("COMMAND")
+                .num_args(0..),
+        )
+        .arg(
+            Arg::new("effectiveness")
+                .long("effectiveness")
+                .help("Run comprehensive WAF effectiveness testing (requires consent)")
+                .value_name("URL")
+                .num_args(1),
         )
 }
 

@@ -3,12 +3,15 @@
 ![WAF Detector Dashboard](docs/ui-dashboard.png)
 
 > Advanced Security Infrastructure Analysis & Visualization
+> 
+> **Dual Purpose Tool**: Detection + Effectiveness Testing for Web Application Firewalls
 
 ## Features
 
 - **Single URL Detection (CDN & WAF):** Detects which CDN and WAF are protecting a single target.
 - **Batch URL Detection (CDN & WAF):** Scan multiple URLs at once for CDN and WAF detection.
 - **WAF Smoke Test:** Live payload testing with detailed results.
+- **WAF Effectiveness Testing:** Comprehensive security validation with evasion techniques.
 - **Quick Actions:** Clear results, view API documentation, export results.
 
 A high-performance tool for detecting and testing Web Application Firewalls (WAFs) and Content Delivery Networks (CDNs).
@@ -88,6 +91,32 @@ Test how well a WAF blocks common attack patterns:
 - Path Traversal
 - Remote/Local File Inclusion
 - Scanner Detection (Nikto, SQLmap, etc.)
+
+## 🔐 WAF Effectiveness Testing (Advanced)
+
+Test your WAF's ability to block sophisticated attacks and evasion techniques:
+
+```bash
+# First-time setup: provide consent and authorized targets
+./target/release/waf-detect --consent request
+
+# Run comprehensive effectiveness testing
+./target/release/waf-detect --effectiveness example.com
+
+# Check consent status
+./target/release/waf-detect --consent
+```
+
+### Effectiveness Testing Features
+
+- **Multi-Phase Testing**: Baseline, detection, and evasion phases
+- **Evasion Techniques**: Tests WAF against bypass methods
+- **Risk Scoring**: Comprehensive vulnerability assessment
+- **Detailed Reporting**: HTML/JSON reports with remediation guidance
+- **Rate Limiting**: Responsible testing with configurable limits
+- **Audit Trail**: All tests are logged for compliance
+
+⚠️ **Ethical Use Required**: Effectiveness testing includes advanced techniques that could bypass security controls. Only use on systems you own or have explicit permission to test.
 
 ## 📊 Output Options
 

@@ -3,6 +3,8 @@
 //! Provides definitive provider identification through CNAME record analysis.
 //! DNS records directly reveal the infrastructure being used.
 
+pub mod optimized;
+
 use crate::{Evidence, MethodType};
 use anyhow::Result;
 use regex::Regex;

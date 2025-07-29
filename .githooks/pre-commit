@@ -1,0 +1,37 @@
+#!/bin/bash
+# Pre-commit hook for Rust projects to minimize compilation errors
+
+echo "🔍 Running pre-commit checks..."
+
+# 1. Format check
+echo "📝 Checking code formatting..."
+if ! cargo fmt --check; then
+    echo "❌ Code needs formatting. Running 'cargo fmt'..."
+    cargo fmt
+    echo "✅ Code formatted. Please review and stage the changes."
+    exit 1
+fi
+
+# 2. Clippy check
+echo "🔎 Running Clippy linter..."
+if ! cargo clippy --all-targets --all-features -- -D warnings; then
+    echo "❌ Clippy found issues. Please fix them before committing."
+    echo "💡 Tip: Run 'cargo clippy --fix' to auto-fix some issues."
+    exit 1
+fi
+
+# 3. Check compilation
+echo "🔨 Checking compilation..."
+if ! cargo check --all-targets; then
+    echo "❌ Code doesn't compile. Please fix errors before committing."
+    exit 1
+fi
+
+# 4. Run tests
+echo "🧪 Running tests..."
+if ! cargo test --lib --quiet; then
+    echo "❌ Tests failed. Please fix them before committing."
+    exit 1
+fi
+
+echo "✅ All pre-commit checks passed!"

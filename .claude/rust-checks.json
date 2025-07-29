@@ -1,0 +1,47 @@
+{
+  "rust_development": {
+    "pre_implementation": [
+      "cargo check --all-targets",
+      "cargo fmt --check",
+      "cargo clippy -- -D warnings"
+    ],
+    "post_implementation": [
+      "cargo fmt",
+      "cargo clippy --fix --allow-dirty",
+      "cargo test --lib",
+      "cargo doc --no-deps"
+    ],
+    "error_patterns": {
+      "borrow_checker": {
+        "pattern": "cannot borrow .* as mutable more than once",
+        "solution": "Consider using RefCell or splitting the borrow into separate scopes"
+      },
+      "lifetime": {
+        "pattern": "lifetime .* does not live long enough",
+        "solution": "Ensure the referenced value lives as long as the reference, or use owned types"
+      },
+      "trait_not_implemented": {
+        "pattern": "the trait .* is not implemented for",
+        "solution": "Add #[derive()] or implement the trait manually"
+      },
+      "unused_code": {
+        "pattern": "warning: .* is never used",
+        "solution": "Remove unused code or add #[allow(dead_code)] if intentional"
+      }
+    },
+    "common_fixes": {
+      "async_trait": "Use #[async_trait] macro for async trait methods",
+      "error_handling": "Prefer Result<T, E> over panic! and use ? operator",
+      "string_types": "Use &str for borrowed strings, String for owned strings",
+      "iterator": "Prefer iterator methods over manual loops"
+    },
+    "workflow": {
+      "1_planning": "Define types, traits, and module structure",
+      "2_checking": "Run cargo check to validate structure",
+      "3_implementing": "Implement methods with minimal viable code",
+      "4_testing": "Write and run unit tests",
+      "5_refining": "Apply clippy suggestions and format",
+      "6_documenting": "Add documentation comments and examples"
+    }
+  }
+}
