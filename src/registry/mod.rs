@@ -1,15 +1,15 @@
 //! Provider registry for managing detection providers
 
-use crate::providers::{Provider, ProviderMetadata};
-use crate::{DetectionContext, DetectionResult, ProviderDetection, DetectionMetadata};
 use crate::confidence::AdvancedScoring; // NEW: Import advanced scoring
-use crate::timing::{TimingAnalyzer, TimingConfig}; // NEW: Import timing analysis
 use crate::dns::DnsAnalyzer; // NEW: Import DNS analysis
 use crate::payload::PayloadAnalyzer; // NEW: Import payload analysis
-use dashmap::DashMap;
-use std::sync::Arc;
-use std::collections::HashMap;
+use crate::providers::{Provider, ProviderMetadata};
+use crate::timing::{TimingAnalyzer, TimingConfig}; // NEW: Import timing analysis
+use crate::{DetectionContext, DetectionMetadata, DetectionResult, ProviderDetection};
 use anyhow::Result;
+use dashmap::DashMap;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Registry for managing detection providers
 #[derive(Debug, Clone)]
@@ -17,8 +17,8 @@ pub struct ProviderRegistry {
     providers: Arc<DashMap<String, Provider>>,
     provider_metadata: Arc<DashMap<String, ProviderMetadata>>,
     advanced_scoring: Arc<AdvancedScoring>, // NEW: Advanced confidence scoring
-    timing_analyzer: Arc<TimingAnalyzer>, // NEW: Timing analysis
-    dns_analyzer: Arc<DnsAnalyzer>, // NEW: DNS analysis
+    timing_analyzer: Arc<TimingAnalyzer>,   // NEW: Timing analysis
+    dns_analyzer: Arc<DnsAnalyzer>,         // NEW: DNS analysis
     payload_analyzer: Arc<PayloadAnalyzer>, // NEW: Payload analysis
 }
 
@@ -36,7 +36,7 @@ impl ProviderRegistry {
 
     pub fn register_provider(&self, provider: Provider) -> Result<()> {
         let name = provider.name().to_string();
-        
+
         if self.providers.contains_key(&name) {
             return Err(anyhow::anyhow!("Provider '{}' is already registered", name));
         }
@@ -44,7 +44,7 @@ impl ProviderRegistry {
         let metadata = ProviderMetadata::from(&provider);
         self.providers.insert(name.clone(), provider);
         self.provider_metadata.insert(name, metadata);
-        
+
         Ok(())
     }
 
@@ -55,9 +55,10 @@ impl ProviderRegistry {
     /// Detect using all registered providers - matches working binary structure
     pub async fn detect_all(&self, context: &DetectionContext) -> Result<DetectionResult> {
         let start_time = std::time::Instant::now();
-        
+
         // Filter enabled providers and sort by priority
-        let mut providers: Vec<_> = self.providers
+        let mut providers: Vec<_> = self
+            .providers
             .iter()
             .filter(|entry| {
                 self.provider_metadata
@@ -68,14 +69,15 @@ impl ProviderRegistry {
             .map(|entry| {
                 let provider = entry.value().clone();
                 let name = entry.key().clone();
-                let priority = self.provider_metadata
+                let priority = self
+                    .provider_metadata
                     .get(&name)
                     .map(|meta| meta.priority)
                     .unwrap_or(0);
                 (name, provider, priority)
             })
             .collect();
-        
+
         providers.sort_by(|a, b| b.2.cmp(&a.2)); // Sort by priority descending
 
         let futures: Vec<_> = providers
@@ -86,7 +88,7 @@ impl ProviderRegistry {
                     match provider.detect(&context).await {
                         Ok(evidence) => Some((name, evidence, provider.confidence_base())),
                         Err(e) => {
-                            eprintln!("Provider '{}' failed: {}", name, e);
+                            eprintln!("Provider '{name}' failed: {e}");
                             None
                         }
                     }
@@ -108,7 +110,7 @@ impl ProviderRegistry {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Timing analysis failed: {}", e);
+                        eprintln!("Timing analysis failed: {e}");
                         None
                     }
                 }
@@ -129,7 +131,7 @@ impl ProviderRegistry {
                         }
                     }
                     Err(e) => {
-                        eprintln!("DNS analysis failed: {}", e);
+                        eprintln!("DNS analysis failed: {e}");
                         None
                     }
                 }
@@ -145,13 +147,17 @@ impl ProviderRegistry {
                     Ok(payload_result) => {
                         let evidence = payload_analyzer.to_evidence(&payload_result);
                         if !evidence.is_empty() {
-                            Some(("PayloadAnalysis".to_string(), evidence, payload_result.confidence))
+                            Some((
+                                "PayloadAnalysis".to_string(),
+                                evidence,
+                                payload_result.confidence,
+                            ))
                         } else {
                             None
                         }
                     }
                     Err(e) => {
-                        eprintln!("Payload analysis failed: {}", e);
+                        eprintln!("Payload analysis failed: {e}");
                         None
                     }
                 }
@@ -163,8 +169,9 @@ impl ProviderRegistry {
             futures::future::join_all(futures),
             timing_future,
             dns_future,
-            payload_future
-        ).await;
+            payload_future,
+        )
+        .await;
 
         let mut results = provider_results;
         if let Some(timing_result) = timing_result {
@@ -176,7 +183,7 @@ impl ProviderRegistry {
         if let Some(payload_result) = payload_result {
             results.push(Some(payload_result));
         }
-        
+
         let mut provider_scores = HashMap::new();
         let mut evidence_map = HashMap::new();
         let mut best_waf = None;
@@ -187,7 +194,7 @@ impl ProviderRegistry {
         for provider_name in self.providers.iter().map(|entry| entry.key().clone()) {
             evidence_map.insert(provider_name, Vec::new());
         }
-        
+
         // Initialize evidence map for additional analysis types
         evidence_map.insert("TimingAnalysis".to_string(), Vec::new());
         evidence_map.insert("DnsAnalysis".to_string(), Vec::new());
@@ -199,26 +206,29 @@ impl ProviderRegistry {
 
         for result in results.into_iter().flatten() {
             let (name, evidence, _base_confidence) = result;
-            
+
             // Always insert evidence (even if empty) to match working binary structure
             evidence_map.insert(name.clone(), evidence.clone());
-            
+
             if !evidence.is_empty() {
                 // NEW: Use advanced confidence scoring instead of simple average
-                let response_headers = context.response
+                let response_headers = context
+                    .response
                     .as_ref()
                     .map(|r| r.headers.clone())
                     .unwrap_or_default();
-                let confidence_result = self.advanced_scoring.calculate_confidence(&name, &evidence, &response_headers);
+                let confidence_result =
+                    self.advanced_scoring
+                        .calculate_confidence(&name, &evidence, &response_headers);
                 let final_confidence = confidence_result.score;
-                
+
                 provider_scores.insert(name.clone(), final_confidence);
-                
+
                 // Update max_confidence for backward compatibility
                 if final_confidence > max_confidence {
                     max_confidence = final_confidence;
                 }
-                
+
                 // Determine best WAF and CDN providers separately
                 if let Some(metadata) = self.provider_metadata.get(&name) {
                     match metadata.provider_type.as_str() {
@@ -284,11 +294,12 @@ impl ProviderRegistry {
     }
 
     pub fn list_providers(&self) -> Vec<ProviderMetadata> {
-        let mut providers: Vec<_> = self.provider_metadata
+        let mut providers: Vec<_> = self
+            .provider_metadata
             .iter()
             .map(|entry| entry.value().clone())
             .collect();
-        
+
         providers.sort_by(|a, b| b.priority.cmp(&a.priority));
         providers
     }

@@ -1,25 +1,24 @@
-use url::Url;
 use std::time::Duration;
+use url::Url;
 
 /// Validate and normalize URL
 pub fn validate_url(url: &str) -> anyhow::Result<String> {
-    let parsed = Url::parse(url)
-        .map_err(|e| anyhow::anyhow!("Invalid URL '{}': {}", url, e))?;
-    
+    let parsed = Url::parse(url).map_err(|e| anyhow::anyhow!("Invalid URL '{}': {}", url, e))?;
+
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err(anyhow::anyhow!("URL must use http or https scheme"));
     }
-    
+
     if parsed.host().is_none() {
         return Err(anyhow::anyhow!("URL must have a host"));
     }
-    
+
     Ok(parsed.to_string())
 }
 
 /// Parse timeout from seconds to Duration
 pub fn parse_timeout(seconds: u64) -> Duration {
-    Duration::from_secs(seconds.max(1).min(300)) // 1 second to 5 minutes
+    Duration::from_secs(seconds.clamp(1, 300)) // 1 second to 5 minutes
 }
 
 /// Sanitize header value for display
@@ -35,7 +34,8 @@ pub fn sanitize_header_value(value: &str) -> String {
 /// Extract domain from URL
 pub fn extract_domain(url: &str) -> anyhow::Result<String> {
     let parsed = Url::parse(url)?;
-    parsed.host_str()
+    parsed
+        .host_str()
         .map(|host| host.to_lowercase())
         .ok_or_else(|| anyhow::anyhow!("Could not extract domain from URL"))
 }
@@ -44,7 +44,7 @@ pub fn extract_domain(url: &str) -> anyhow::Result<String> {
 pub fn format_duration(duration: Duration) -> String {
     let ms = duration.as_millis();
     if ms < 1000 {
-        format!("{}ms", ms)
+        format!("{ms}ms")
     } else {
         format!("{:.1}s", duration.as_secs_f64())
     }
@@ -72,13 +72,22 @@ mod tests {
     #[test]
     fn test_sanitize_header_value() {
         assert_eq!(sanitize_header_value("normal-value"), "normal-value");
-        assert_eq!(sanitize_header_value("value\nwith\tcontrol"), "valuewithcontrol");
+        assert_eq!(
+            sanitize_header_value("value\nwith\tcontrol"),
+            "valuewithcontrol"
+        );
     }
 
     #[test]
     fn test_extract_domain() {
-        assert_eq!(extract_domain("https://Example.COM/path").unwrap(), "example.com");
-        assert_eq!(extract_domain("http://sub.example.com").unwrap(), "sub.example.com");
+        assert_eq!(
+            extract_domain("https://Example.COM/path").unwrap(),
+            "example.com"
+        );
+        assert_eq!(
+            extract_domain("http://sub.example.com").unwrap(),
+            "sub.example.com"
+        );
         assert!(extract_domain("invalid-url").is_err());
     }
 
@@ -87,4 +96,4 @@ mod tests {
         assert_eq!(format_duration(Duration::from_millis(500)), "500ms");
         assert_eq!(format_duration(Duration::from_secs(2)), "2.0s");
     }
-} 
+}

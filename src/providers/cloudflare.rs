@@ -1,9 +1,9 @@
 //! CloudFlare WAF/CDN Detection Provider
 
-use crate::{DetectionProvider, DetectionContext, Evidence, ProviderType, MethodType};
+use crate::{DetectionContext, DetectionProvider, Evidence, MethodType, ProviderType};
+use anyhow::Result;
 use regex::Regex;
 use std::sync::OnceLock;
-use anyhow::Result;
 
 /// CloudFlare detection provider
 #[derive(Debug, Clone)]
@@ -32,7 +32,9 @@ impl CloudFlareProvider {
 
     fn cf_cache_pattern() -> &'static Regex {
         static PATTERN: OnceLock<Regex> = OnceLock::new();
-        PATTERN.get_or_init(|| Regex::new(r"(?i)(HIT|MISS|EXPIRED|BYPASS|DYNAMIC|REVALIDATED)").unwrap())
+        PATTERN.get_or_init(|| {
+            Regex::new(r"(?i)(HIT|MISS|EXPIRED|BYPASS|DYNAMIC|REVALIDATED)").unwrap()
+        })
     }
 
     fn cf_server_pattern() -> &'static Regex {
@@ -54,7 +56,9 @@ impl CloudFlareProvider {
 
     fn cf_js_pattern() -> &'static Regex {
         static PATTERN: OnceLock<Regex> = OnceLock::new();
-        PATTERN.get_or_init(|| Regex::new(r"(?i)(cf_chl_jschl_tk|cf_clearance|cf_chl_captcha_tk)").unwrap())
+        PATTERN.get_or_init(|| {
+            Regex::new(r"(?i)(cf_chl_jschl_tk|cf_clearance|cf_chl_captcha_tk)").unwrap()
+        })
     }
 
     async fn check_headers(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
@@ -101,10 +105,30 @@ impl CloudFlareProvider {
 
         // Check other CloudFlare headers
         let cf_headers = [
-            ("cf-connecting-ip", "CloudFlare connecting IP header", 0.80, "cf-connecting-ip-header"),
-            ("cf-ipcountry", "CloudFlare IP country header", 0.75, "cf-ipcountry-header"),
-            ("cf-visitor", "CloudFlare visitor header", 0.75, "cf-visitor-header"),
-            ("cf-request-id", "CloudFlare request ID header", 0.85, "cf-request-id-header"),
+            (
+                "cf-connecting-ip",
+                "CloudFlare connecting IP header",
+                0.80,
+                "cf-connecting-ip-header",
+            ),
+            (
+                "cf-ipcountry",
+                "CloudFlare IP country header",
+                0.75,
+                "cf-ipcountry-header",
+            ),
+            (
+                "cf-visitor",
+                "CloudFlare visitor header",
+                0.75,
+                "cf-visitor-header",
+            ),
+            (
+                "cf-request-id",
+                "CloudFlare request ID header",
+                0.85,
+                "cf-request-id-header",
+            ),
         ];
 
         for (header_name, description, confidence, signature) in cf_headers {
@@ -167,8 +191,9 @@ impl CloudFlareProvider {
         match response.status {
             403 => {
                 // Check if it's a CloudFlare 403
-                if response.headers.get("cf-ray").is_some() || 
-                   Self::cf_challenge_pattern().is_match(&response.body) {
+                if response.headers.contains_key("cf-ray")
+                    || Self::cf_challenge_pattern().is_match(&response.body)
+                {
                     evidence.push(Evidence {
                         method_type: MethodType::StatusCode(403),
                         confidence: 0.75,
@@ -180,7 +205,7 @@ impl CloudFlareProvider {
             }
             429 => {
                 // CloudFlare rate limiting
-                if response.headers.get("cf-ray").is_some() {
+                if response.headers.contains_key("cf-ray") {
                     evidence.push(Evidence {
                         method_type: MethodType::StatusCode(429),
                         confidence: 0.80,

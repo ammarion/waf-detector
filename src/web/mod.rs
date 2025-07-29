@@ -1,3 +1,8 @@
+use crate::engine::DetectionEngine;
+use crate::payload::waf_smoke_test::{SmokeTestConfig, SmokeTestResult, WafSmokeTest};
+use crate::script_executor::{CombinedResult, ScriptExecutor};
+use crate::DetectionResult;
+use anyhow::Result;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -5,14 +10,9 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use std::sync::Arc;
-use tower_http::{services::ServeDir, cors::CorsLayer};
 use serde::{Deserialize, Serialize};
-use crate::engine::DetectionEngine;
-use crate::DetectionResult;
-use crate::script_executor::{ScriptExecutor, CombinedResult};
-use crate::payload::waf_smoke_test::{WafSmokeTest, SmokeTestConfig, SmokeTestResult};
-use anyhow::Result;
+use std::sync::Arc;
+use tower_http::{cors::CorsLayer, services::ServeDir};
 
 pub mod templates;
 
@@ -87,14 +87,14 @@ impl WebServer {
             .layer(CorsLayer::permissive())
             .with_state(self);
 
-        let addr = format!("0.0.0.0:{}", port);
-        println!("🌐 WAF Detector Web Server starting on http://localhost:{}", port);
-        println!("📊 Dashboard: http://localhost:{}/dashboard", port);
-        println!("📖 API Docs: http://localhost:{}/api-docs", port);
-        
+        let addr = format!("0.0.0.0:{port}");
+        println!("🌐 WAF Detector Web Server starting on http://localhost:{port}");
+        println!("📊 Dashboard: http://localhost:{port}/dashboard");
+        println!("📖 API Docs: http://localhost:{port}/api-docs");
+
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         axum::serve(listener, app).await?;
-        
+
         Ok(())
     }
 }
@@ -140,7 +140,7 @@ async fn batch_scan(
     Json(payload): Json<BatchScanRequest>,
 ) -> impl IntoResponse {
     let mut results = Vec::new();
-    
+
     for url in &payload.urls {
         match server.engine.detect(url).await {
             Ok(result) => results.push(result),
@@ -148,13 +148,13 @@ async fn batch_scan(
                 let response = BatchScanResponse {
                     success: false,
                     results: vec![],
-                    error: Some(format!("Error scanning {}: {}", url, e)),
+                    error: Some(format!("Error scanning {url}: {e}")),
                 };
                 return (StatusCode::INTERNAL_SERVER_ERROR, Json(response));
             }
         }
     }
-    
+
     let response = BatchScanResponse {
         success: true,
         results,
@@ -174,18 +174,18 @@ async fn list_providers() -> impl IntoResponse {
         }),
         serde_json::json!({
             "name": "AWS",
-            "version": "1.0.0", 
+            "version": "1.0.0",
             "type": "Both",
             "description": "AWS WAF and CloudFront CDN detection"
         }),
         serde_json::json!({
             "name": "Akamai",
             "version": "1.0.0",
-            "type": "Both", 
+            "type": "Both",
             "description": "Akamai WAF and CDN detection"
         }),
     ];
-    
+
     Json(serde_json::json!({
         "success": true,
         "providers": providers
@@ -213,7 +213,7 @@ async fn combined_scan(
     Json(payload): Json<ScanRequest>,
 ) -> impl IntoResponse {
     let start_time = std::time::Instant::now();
-    
+
     // First, run detection
     let detection_result = match server.engine.detect(&payload.url).await {
         Ok(result) => result,
@@ -221,36 +221,35 @@ async fn combined_scan(
             let response = CombinedScanResponse {
                 success: false,
                 result: None,
-                error: Some(format!("Detection failed: {}", e)),
+                error: Some(format!("Detection failed: {e}")),
             };
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(response));
         }
     };
-    
+
     // Then, run effectiveness testing (optional, may fail)
     let effectiveness_result = match server.script_executor.execute_test(&payload.url).await {
         Ok(result) => Some(result),
         Err(e) => {
-            println!("Warning: Effectiveness testing failed: {}", e);
+            println!("Warning: Effectiveness testing failed: {e}");
             None // Continue without effectiveness testing
         }
     };
-    
+
     let total_time = start_time.elapsed().as_millis() as u64;
-    
+
     // Combine results
-    let combined_result = server.script_executor.combine_results(
-        detection_result,
-        effectiveness_result,
-        total_time,
-    );
-    
+    let combined_result =
+        server
+            .script_executor
+            .combine_results(detection_result, effectiveness_result, total_time);
+
     let response = CombinedScanResponse {
         success: true,
         result: Some(combined_result),
         error: None,
     };
-    
+
     (StatusCode::OK, Json(response))
 }
 
@@ -266,11 +265,14 @@ async fn smoke_test(
     let smoke_test = match WafSmokeTest::new(config) {
         Ok(test) => test,
         Err(e) => {
-            eprintln!("[smoke_test] Failed to create smoke test for URL {}: {}", payload.url, e);
+            eprintln!(
+                "[smoke_test] Failed to create smoke test for URL {}: {}",
+                payload.url, e
+            );
             let response = SmokeTestResponse {
                 success: false,
                 result: None,
-                error: Some(format!("Failed to create smoke test: {}", e)),
+                error: Some(format!("Failed to create smoke test: {e}")),
             };
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(response));
         }
@@ -279,7 +281,10 @@ async fn smoke_test(
     match smoke_test.run_test(&payload.url).await {
         Ok(mut result) => {
             result.is_smoke_test = true;
-            println!("[smoke_test] Successfully ran smoke test for URL: {}", payload.url);
+            println!(
+                "[smoke_test] Successfully ran smoke test for URL: {}",
+                payload.url
+            );
             let response = SmokeTestResponse {
                 success: true,
                 result: Some(result),
@@ -288,15 +293,16 @@ async fn smoke_test(
             (StatusCode::OK, Json(response))
         }
         Err(e) => {
-            eprintln!("[smoke_test] Smoke test failed for URL {}: {}", payload.url, e);
+            eprintln!(
+                "[smoke_test] Smoke test failed for URL {}: {}",
+                payload.url, e
+            );
             let response = SmokeTestResponse {
                 success: false,
                 result: None,
-                error: Some(format!("Smoke test failed: {}", e)),
+                error: Some(format!("Smoke test failed: {e}")),
             };
             (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
         }
     }
 }
-
- 

@@ -1,10 +1,9 @@
 //! Detection engine for coordinating WAF/CDN detection
 
-use crate::{DetectionContext, DetectionResult, registry::ProviderRegistry, http::HttpClient};
+use crate::{http::HttpClient, registry::ProviderRegistry, DetectionContext, DetectionResult};
 use anyhow::Result;
-use std::sync::Arc;
 use std::collections::HashMap;
-
+use std::sync::Arc;
 
 pub mod waf_mode_detector;
 use waf_mode_detector::WafModeDetector;
@@ -34,7 +33,7 @@ impl DetectionEngine {
     pub async fn detect(&self, url: &str) -> Result<DetectionResult> {
         // Make HTTP request
         let response = self.http_client.get(url).await?;
-        
+
         // Create detection context
         let context = DetectionContext {
             url: url.to_string(),
@@ -47,20 +46,24 @@ impl DetectionEngine {
         self.registry.detect_all(&context).await
     }
 
-    pub async fn detect_batch(&self, urls: &[&str], workers: usize) -> Result<HashMap<String, DetectionResult>> {
+    pub async fn detect_batch(
+        &self,
+        urls: &[&str],
+        workers: usize,
+    ) -> Result<HashMap<String, DetectionResult>> {
         use futures::stream::{self, StreamExt};
         use tokio::time::{sleep, Duration};
-        
+
         let results = stream::iter(urls)
             .map(|&url| async move {
                 // Add small delay to prevent overwhelming servers
                 sleep(Duration::from_millis(100)).await;
-                
+
                 match self.detect(url).await {
                     Ok(result) => Some((url.to_string(), result)),
                     Err(e) => {
-                        eprintln!("⚠️  Failed to detect {}: {}", url, e);
-                        
+                        eprintln!("⚠️  Failed to detect {url}: {e}");
+
                         // Create a failed result instead of None so we maintain the URL in output
                         let failed_result = DetectionResult {
                             url: url.to_string(),
@@ -86,9 +89,12 @@ impl DetectionEngine {
         Ok(results.into_iter().flatten().collect())
     }
 
-    pub async fn detect_with_mode_analysis(&self, url: &str) -> Result<(DetectionResult, Option<waf_mode_detector::WafModeResult>)> {
+    pub async fn detect_with_mode_analysis(
+        &self,
+        url: &str,
+    ) -> Result<(DetectionResult, Option<waf_mode_detector::WafModeResult>)> {
         let detection_result = self.detect(url).await?;
-        
+
         let mode_result = if let Some(detector) = &self.waf_mode_detector {
             if detection_result.detected() {
                 Some(detector.detect_mode(url, None).await?)

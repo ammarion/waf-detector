@@ -1423,4 +1423,4 @@ pub const API_DOCS_HTML: &str = r#"
     </div>
 </body>
 </html>
-"#; 
+"#;

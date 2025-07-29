@@ -1,7 +1,7 @@
+use anyhow::Result;
 use reqwest::{Client, Response};
 use std::collections::HashMap;
 use std::time::Duration;
-use anyhow::Result;
 
 #[derive(Debug, Clone)]
 pub struct HttpClient {
@@ -33,16 +33,20 @@ impl HttpClient {
             .user_agent("WAF-Detector/1.0")
             .danger_accept_invalid_certs(true) // For testing purposes
             .build()?;
-            
+
         Ok(Self { client })
     }
-    
+
     pub async fn get(&self, url: &str) -> Result<HttpResponse> {
         let response = self.client.get(url).send().await?;
         self.response_to_http_response(response, url).await
     }
-    
-    pub async fn get_with_headers(&self, url: &str, headers: &[(& str, & str)]) -> Result<HttpResponse> {
+
+    pub async fn get_with_headers(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<HttpResponse> {
         let mut request = self.client.get(url);
         for (name, value) in headers {
             request = request.header(*name, *value);
@@ -50,9 +54,10 @@ impl HttpClient {
         let response = request.send().await?;
         self.response_to_http_response(response, url).await
     }
-    
+
     pub async fn post(&self, url: &str, body: &str) -> Result<HttpResponse> {
-        let response = self.client
+        let response = self
+            .client
             .post(url)
             .body(body.to_string())
             .header("Content-Type", "application/x-www-form-urlencoded")
@@ -60,24 +65,28 @@ impl HttpClient {
             .await?;
         self.response_to_http_response(response, url).await
     }
-    
+
     pub async fn head(&self, url: &str) -> Result<HttpResponse> {
         let response = self.client.head(url).send().await?;
         self.response_to_http_response(response, url).await
     }
-    
-    async fn response_to_http_response(&self, response: Response, url: &str) -> Result<HttpResponse> {
+
+    async fn response_to_http_response(
+        &self,
+        response: Response,
+        url: &str,
+    ) -> Result<HttpResponse> {
         let status = response.status().as_u16();
-        
+
         let mut headers = HashMap::new();
         for (name, value) in response.headers() {
             if let Ok(value_str) = value.to_str() {
                 headers.insert(name.to_string().to_lowercase(), value_str.to_string());
             }
         }
-        
+
         let body = response.text().await.unwrap_or_default();
-        
+
         Ok(HttpResponse {
             status,
             headers,
@@ -90,27 +99,27 @@ impl HttpClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_http_client_creation() {
         let client = HttpClient::new();
         assert!(client.is_ok());
     }
-    
+
     #[test]
     fn test_http_response_structure() {
         let mut headers = HashMap::new();
         headers.insert("server".to_string(), "nginx".to_string());
-        
+
         let response = HttpResponse {
             status: 200,
             headers,
             body: "test body".to_string(),
             url: "https://example.com".to_string(),
         };
-        
+
         assert_eq!(response.status, 200);
         assert_eq!(response.body, "test body");
         assert_eq!(response.headers.get("server"), Some(&"nginx".to_string()));
     }
-} 
+}

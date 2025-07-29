@@ -1,15 +1,18 @@
 //! Simple CLI Interface - Modern and intuitive WAF detection
 
 use crate::engine::DetectionEngine;
-use crate::providers::{Provider, cloudflare::CloudFlareProvider, akamai::AkamaiProvider, aws::AwsProvider, fastly::FastlyProvider, vercel::VercelProvider};
+use crate::payload::waf_smoke_test::{SmokeTestConfig, WafSmokeTest};
+use crate::providers::{
+    akamai::AkamaiProvider, aws::AwsProvider, azure::AzureProvider, cloudflare::CloudFlareProvider,
+    f5::F5Provider, fastly::FastlyProvider, vercel::VercelProvider, Provider,
+};
 use crate::registry::ProviderRegistry;
-use crate::payload::waf_smoke_test::{WafSmokeTest, SmokeTestConfig};
 use crate::DetectionResult;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use clap::{Arg, ArgMatches, Command};
-use std::time::Instant;
-use std::fs;
 use std::collections::HashMap;
+use std::fs;
+use std::time::Instant;
 use url::Url;
 
 pub struct SimpleCliApp {
@@ -19,29 +22,30 @@ pub struct SimpleCliApp {
 impl SimpleCliApp {
     pub async fn new() -> Result<Self> {
         let registry = ProviderRegistry::new();
-        
+
         // Register providers
         registry.register_provider(Provider::CloudFlare(CloudFlareProvider::new()))?;
         registry.register_provider(Provider::Akamai(AkamaiProvider::new()))?;
         registry.register_provider(Provider::AWS(AwsProvider::new()))?;
         registry.register_provider(Provider::Fastly(FastlyProvider::new()))?;
         registry.register_provider(Provider::Vercel(VercelProvider::new()))?;
-        
-        let engine = DetectionEngine::new(registry)
-            .with_waf_mode_detection();
+        registry.register_provider(Provider::Azure(AzureProvider::new()))?;
+        registry.register_provider(Provider::F5(F5Provider::new()))?;
+
+        let engine = DetectionEngine::new(registry).with_waf_mode_detection();
 
         Ok(Self { engine })
     }
 
     pub async fn run(&self) -> Result<()> {
         let matches = build_simple_cli().get_matches();
-        
+
         // Handle special commands first
         if matches.get_flag("web") {
             let port = matches.get_one::<u16>("port").copied().unwrap_or(8080);
             return self.start_web_server(port).await;
         }
-        
+
         if matches.get_flag("list") {
             return self.list_providers().await;
         }
@@ -53,7 +57,7 @@ impl SimpleCliApp {
 
         // Get targets to scan
         let targets = self.parse_targets(&matches)?;
-        
+
         if targets.is_empty() {
             println!("❌ No targets specified. Use --help for usage.");
             return Ok(());
@@ -78,12 +82,11 @@ impl SimpleCliApp {
         // Get targets from direct arguments
         if let Some(domains) = matches.get_many::<String>("targets") {
             for domain in domains {
-                if domain.starts_with('@') {
+                if let Some(filename) = domain.strip_prefix('@') {
                     // File input: @file.txt
-                    let filename = &domain[1..];
                     let content = fs::read_to_string(filename)
                         .map_err(|e| anyhow!("Failed to read file '{}': {}", filename, e))?;
-                    
+
                     for line in content.lines() {
                         let line = line.trim();
                         if !line.is_empty() && !line.starts_with('#') {
@@ -107,7 +110,7 @@ impl SimpleCliApp {
         }
 
         // Try adding https://
-        let with_https = format!("https://{}", input);
+        let with_https = format!("https://{input}");
         if let Ok(url) = Url::parse(&with_https) {
             return Ok(url.to_string());
         }
@@ -129,7 +132,7 @@ impl SimpleCliApp {
 
     async fn scan_single(&self, url: &str, format: &str, debug: bool, verbose: bool) -> Result<()> {
         if verbose {
-            println!("🔍 Scanning: {}", url);
+            println!("🔍 Scanning: {url}");
         }
 
         let start_time = Instant::now();
@@ -158,24 +161,30 @@ impl SimpleCliApp {
         Ok(())
     }
 
-    async fn scan_batch(&self, urls: &[String], format: &str, debug: bool, verbose: bool) -> Result<()> {
+    async fn scan_batch(
+        &self,
+        urls: &[String],
+        format: &str,
+        debug: bool,
+        verbose: bool,
+    ) -> Result<()> {
         if verbose {
             println!("🔍 Scanning {} targets...", urls.len());
         }
 
         let total_start = Instant::now();
-        
+
         // Use parallel batch detection with rate limiting (max 3 concurrent requests)
         let url_refs: Vec<&str> = urls.iter().map(|s| s.as_str()).collect();
         let batch_results = self.engine.detect_batch(&url_refs, 3).await?;
-        
+
         // Convert HashMap results back to Vec in original order for consistent output
         let mut results = Vec::new();
         for (i, url) in urls.iter().enumerate() {
             if verbose {
                 println!("({}/{}) {} - Processing...", i + 1, urls.len(), url);
             }
-            
+
             if let Some(result) = batch_results.get(url) {
                 results.push(result.clone());
             }
@@ -221,20 +230,41 @@ impl SimpleCliApp {
 
         match (&result.detected_waf, &result.detected_cdn) {
             (Some(waf), Some(cdn)) if waf.name == cdn.name => {
-                println!("{:<40} {} ({:.1}%)", url_short, waf.name, waf.confidence * 100.0);
+                println!(
+                    "{:<40} {} ({:.1}%)",
+                    url_short,
+                    waf.name,
+                    waf.confidence * 100.0
+                );
             }
             (Some(waf), Some(cdn)) => {
-                println!("{:<40} WAF: {}, CDN: {} ({:.1}%/{:.1}%)", 
-                        url_short, waf.name, cdn.name, waf.confidence * 100.0, cdn.confidence * 100.0);
+                println!(
+                    "{:<40} WAF: {}, CDN: {} ({:.1}%/{:.1}%)",
+                    url_short,
+                    waf.name,
+                    cdn.name,
+                    waf.confidence * 100.0,
+                    cdn.confidence * 100.0
+                );
             }
             (Some(waf), None) => {
-                println!("{:<40} WAF: {} ({:.1}%)", url_short, waf.name, waf.confidence * 100.0);
+                println!(
+                    "{:<40} WAF: {} ({:.1}%)",
+                    url_short,
+                    waf.name,
+                    waf.confidence * 100.0
+                );
             }
             (None, Some(cdn)) => {
-                println!("{:<40} CDN: {} ({:.1}%)", url_short, cdn.name, cdn.confidence * 100.0);
+                println!(
+                    "{:<40} CDN: {} ({:.1}%)",
+                    url_short,
+                    cdn.name,
+                    cdn.confidence * 100.0
+                );
             }
             (None, None) => {
-                println!("{:<40} Not Detected", url_short);
+                println!("{url_short:<40} Not Detected");
             }
         }
     }
@@ -248,45 +278,56 @@ impl SimpleCliApp {
         println!("┌─────────────────────────────────────────────────────────────────────────┐");
         println!("│                            WAF/CDN Detection Results                    │");
         println!("├─────────────────────────────────────────────────────────────────────────┤");
-        
+
         // URL (truncate if too long)
         let url_display = if result.url.len() > 67 {
             format!("{}...", &result.url[..64])
         } else {
             result.url.clone()
         };
-        println!("│ URL: {:<67} │", url_display);
+        println!("│ URL: {url_display:<67} │");
         println!("├─────────────────────────────────────────────────────────────────────────┤");
-        
+
         // WAF Detection
         if let Some(waf_detection) = &result.detected_waf {
-            println!("│ WAF: {:<20} Confidence: {:<6.1}%                    │", 
-                    waf_detection.name, waf_detection.confidence * 100.0);
+            println!(
+                "│ WAF: {:<20} Confidence: {:<6.1}%                    │",
+                waf_detection.name,
+                waf_detection.confidence * 100.0
+            );
         } else {
             println!("│ WAF: Not Detected                                                      │");
         }
-        
+
         // CDN Detection
         if let Some(cdn_detection) = &result.detected_cdn {
-            println!("│ CDN: {:<20} Confidence: {:<6.1}%                    │", 
-                    cdn_detection.name, cdn_detection.confidence * 100.0);
+            println!(
+                "│ CDN: {:<20} Confidence: {:<6.1}%                    │",
+                cdn_detection.name,
+                cdn_detection.confidence * 100.0
+            );
         } else {
             println!("│ CDN: Not Detected                                                      │");
         }
-        
+
         println!("├─────────────────────────────────────────────────────────────────────────┤");
-        println!("│ Detection Time: {:<8} ms                                          │", 
-                result.detection_time_ms);
-        
+        println!(
+            "│ Detection Time: {:<8} ms                                          │",
+            result.detection_time_ms
+        );
+
         if !result.evidence_map.is_empty() {
             println!("├─────────────────────────────────────────────────────────────────────────┤");
             println!("│ Evidence Summary:                                                       │");
-            
+
             for (provider_name, evidence_list) in &result.evidence_map {
                 if !evidence_list.is_empty() {
-                    println!("│ • {:<20} Evidence Count: {:<3}                          │", 
-                            provider_name, evidence_list.len());
-                    
+                    println!(
+                        "│ • {:<20} Evidence Count: {:<3}                          │",
+                        provider_name,
+                        evidence_list.len()
+                    );
+
                     for (i, evidence) in evidence_list.iter().enumerate() {
                         if i < 3 {
                             let desc = if evidence.description.len() > 45 {
@@ -300,26 +341,33 @@ impl SimpleCliApp {
                             }
                         }
                     }
-                    
+
                     if evidence_list.len() > 3 {
-                        println!("│   ... and {} more evidence items                             │", 
-                                evidence_list.len() - 3);
+                        println!(
+                            "│   ... and {} more evidence items                             │",
+                            evidence_list.len() - 3
+                        );
                     }
                 }
             }
         }
-        
+
         println!("└─────────────────────────────────────────────────────────────────────────┘");
     }
 
     fn print_debug_info(&self, result: &DetectionResult) {
         println!("🐛 DEBUG INFO:");
-        println!("─────────────────────────────────────────────────────────────────────────────────────");
+        println!(
+            "─────────────────────────────────────────────────────────────────────────────────────"
+        );
         println!("URL: {}", result.url);
         println!("Detection Time: {}ms", result.detection_time_ms);
-        println!("Timestamp: {}", result.metadata.timestamp.format("%Y-%m-%d %H:%M:%S UTC"));
+        println!(
+            "Timestamp: {}",
+            result.metadata.timestamp.format("%Y-%m-%d %H:%M:%S UTC")
+        );
         println!();
-        
+
         println!("🔍 Provider Scores:");
         if result.provider_scores.is_empty() {
             println!("  No provider scores - no evidence found");
@@ -329,14 +377,18 @@ impl SimpleCliApp {
             }
         }
         println!();
-        
+
         println!("📝 Evidence Details:");
         for (provider, evidence_list) in &result.evidence_map {
             if !evidence_list.is_empty() {
-                println!("  {}:", provider);
+                println!("  {provider}:");
                 for (i, evidence) in evidence_list.iter().enumerate() {
-                    println!("    {}. {} (Confidence: {:.1}%)", 
-                             i + 1, evidence.description, evidence.confidence * 100.0);
+                    println!(
+                        "    {}. {} (Confidence: {:.1}%)",
+                        i + 1,
+                        evidence.description,
+                        evidence.confidence * 100.0
+                    );
                     println!("       Method: {:?}", evidence.method_type);
                     println!("       Data: {}", evidence.raw_data);
                     println!("       Signature: {}", evidence.signature_matched);
@@ -344,7 +396,7 @@ impl SimpleCliApp {
                 println!();
             }
         }
-        
+
         if result.evidence_map.is_empty() {
             println!("  No evidence found");
             println!("  This means either:");
@@ -352,8 +404,10 @@ impl SimpleCliApp {
             println!("    • The site uses a WAF/CDN not supported by this tool");
             println!("    • The WAF/CDN is configured to hide its presence");
         }
-        
-        println!("─────────────────────────────────────────────────────────────────────────────────────");
+
+        println!(
+            "─────────────────────────────────────────────────────────────────────────────────────"
+        );
         println!();
     }
 
@@ -362,17 +416,25 @@ impl SimpleCliApp {
         println!();
 
         let providers = self.engine.list_providers();
-        
+
         for provider in &providers {
             let status_icon = if provider.enabled { "✅" } else { "❌" };
-            
+
             println!("🔌 {} v{}", provider.name, provider.version);
             println!("   Type: {}", provider.provider_type);
-            println!("   Status: {} {}", status_icon, if provider.enabled { "Enabled" } else { "Disabled" });
+            println!(
+                "   Status: {} {}",
+                status_icon,
+                if provider.enabled {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                }
+            );
             println!("   Priority: {}", provider.priority);
-            
+
             if let Some(desc) = &provider.description {
-                println!("   Description: {}", desc);
+                println!("   Description: {desc}");
             }
             println!("   Author: WAF-Detector Team");
             println!();
@@ -384,17 +446,18 @@ impl SimpleCliApp {
 
     async fn start_web_server(&self, port: u16) -> Result<()> {
         println!("🌐 Starting WAF Detector Web Server...");
-        
+
         let web_server = crate::web::WebServer::new(self.engine.clone());
         web_server.start(port).await?;
-        
+
         Ok(())
     }
 
     async fn run_smoke_test(&self, matches: &ArgMatches) -> Result<()> {
         // Parse URL argument
-        let url = matches.get_one::<String>("targets")
-            .ok_or_else(|| anyhow!("URL is required for smoke test. Usage: waf-detect --smoke-test <URL>"))?;
+        let url = matches.get_one::<String>("targets").ok_or_else(|| {
+            anyhow!("URL is required for smoke test. Usage: waf-detect --smoke-test <URL>")
+        })?;
 
         let normalized_url = self.normalize_url(url)?;
 
@@ -405,14 +468,19 @@ impl SimpleCliApp {
                 if let Some((key, value)) = header.split_once(':') {
                     custom_headers.insert(key.trim().to_string(), value.trim().to_string());
                 } else {
-                    return Err(anyhow!("Invalid header format: {}. Use 'Key: Value'", header));
+                    return Err(anyhow!(
+                        "Invalid header format: {}. Use 'Key: Value'",
+                        header
+                    ));
                 }
             }
         }
 
         // Configure smoke test
-        let mut config = SmokeTestConfig::default();
-        config.custom_headers = custom_headers;
+        let mut config = SmokeTestConfig {
+            custom_headers,
+            ..Default::default()
+        };
 
         if matches.get_flag("aggressive") {
             config.include_advanced_payloads = true;
@@ -421,7 +489,7 @@ impl SimpleCliApp {
 
         // Create and run smoke test
         let smoke_test = WafSmokeTest::new(config)?;
-        
+
         println!("🚀 Starting WAF Smoke Test...");
         println!("═══════════════════════════════════════════════════════════════");
         println!("📊 Test Type │ Payload                        │ Result       │ Code │ Time");
@@ -439,8 +507,10 @@ impl SimpleCliApp {
 
         // Exit with non-zero code if effectiveness is low
         if result.summary.effectiveness_percentage < 50.0 {
-            println!("\n⚠️  WARNING: Low WAF effectiveness detected ({:.1}%)", 
-                    result.summary.effectiveness_percentage);
+            println!(
+                "\n⚠️  WARNING: Low WAF effectiveness detected ({:.1}%)",
+                result.summary.effectiveness_percentage
+            );
             std::process::exit(1);
         }
 
@@ -453,7 +523,8 @@ pub fn build_simple_cli() -> Command {
         .version("0.1.0")
         .author("WAF Detector Team")
         .about("🔍 Simple WAF/CDN Detection - Just specify domains!")
-        .long_about(r#"
+        .long_about(
+            r#"
 🔍 WAF/CDN Detection Tool - Modern CLI
 
 DETECTION USAGE:
@@ -476,53 +547,54 @@ OTHER:
   waf-detect --list                            # List providers
 
 The tool automatically adds https:// if needed and supports both domain names and full URLs.
-        "#)
+        "#,
+        )
         .arg(
             Arg::new("targets")
                 .help("Domain names, URLs, or @file.txt to scan")
                 .value_name("TARGET")
                 .action(clap::ArgAction::Append)
-                .num_args(0..)
+                .num_args(0..),
         )
         .arg(
             Arg::new("json")
                 .long("json")
                 .help("Output results in JSON format")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("yaml")
                 .long("yaml")
                 .help("Output results in YAML format")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("compact")
                 .long("compact")
                 .short('c')
                 .help("Compact one-line output format")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("debug")
                 .long("debug")
                 .short('d')
                 .help("Show detailed debug information")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("verbose")
                 .long("verbose")
                 .short('v')
                 .help("Show verbose scanning progress")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("web")
                 .long("web")
                 .short('w')
                 .help("Start web server mode with beautiful dashboard")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("port")
@@ -531,19 +603,19 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Port for web server (default: 8080)")
                 .value_name("PORT")
                 .value_parser(clap::value_parser!(u16))
-                .default_value("8080")
+                .default_value("8080"),
         )
         .arg(
             Arg::new("list")
                 .long("list")
                 .help("List available detection providers")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("smoke-test")
                 .long("smoke-test")
                 .help("Run comprehensive WAF effectiveness smoke test")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("output")
@@ -551,7 +623,7 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .short('o')
                 .help("Export results to JSON file")
                 .value_name("FILE")
-                .requires("smoke-test")
+                .requires("smoke-test"),
         )
         .arg(
             Arg::new("headers")
@@ -560,17 +632,17 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Custom headers for smoke test (format: 'Key: Value')")
                 .value_name("HEADER")
                 .action(clap::ArgAction::Append)
-                .requires("smoke-test")
+                .requires("smoke-test"),
         )
         .arg(
             Arg::new("aggressive")
                 .long("aggressive")
                 .help("Enable aggressive testing mode (more payloads, faster)")
                 .action(clap::ArgAction::SetTrue)
-                .requires("smoke-test")
+                .requires("smoke-test"),
         )
 }
 
 // Backward compatibility aliases
-pub use SimpleCliApp as CliApp;
 pub use build_simple_cli as build_cli;
+pub use SimpleCliApp as CliApp;

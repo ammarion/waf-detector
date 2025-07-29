@@ -1,9 +1,9 @@
 //! Fastly Next CDN/WAF Detection Provider
 
-use crate::{DetectionProvider, DetectionContext, Evidence, ProviderType, MethodType};
+use crate::{DetectionContext, DetectionProvider, Evidence, MethodType, ProviderType};
+use anyhow::Result;
 use regex::Regex;
 use std::sync::OnceLock;
-use anyhow::Result;
 
 /// Fastly Next CDN/WAF detection provider
 #[derive(Debug, Clone)]
@@ -60,7 +60,8 @@ impl FastlyProvider {
                 evidence.push(Evidence {
                     method_type: MethodType::Header("fastly-restarts".to_string()),
                     confidence: 0.98,
-                    description: "Fastly restart counter header detected (definitive signature)".to_string(),
+                    description: "Fastly restart counter header detected (definitive signature)"
+                        .to_string(),
                     raw_data: restarts.clone(),
                     signature_matched: "fastly-restarts-pattern".to_string(),
                 });
@@ -96,9 +97,10 @@ impl FastlyProvider {
         // Check x-cache header for Fastly cache status
         if let Some(cache) = response.headers.get("x-cache") {
             // Exclude CloudFront patterns explicitly
-            if Self::fastly_cache_pattern().is_match(cache) && 
-               !cache.to_lowercase().contains("cloudfront") &&
-               !cache.to_lowercase().contains("from cloudfront") {
+            if Self::fastly_cache_pattern().is_match(cache)
+                && !cache.to_lowercase().contains("cloudfront")
+                && !cache.to_lowercase().contains("from cloudfront")
+            {
                 evidence.push(Evidence {
                     method_type: MethodType::Header("x-cache".to_string()),
                     confidence: 0.85,
@@ -159,8 +161,12 @@ impl FastlyProvider {
         match response.status {
             403 => {
                 // Check if it's a Fastly WAF 403
-                if response.headers.get("fastly-restarts").is_some() ||
-                   response.headers.get("x-served-by").map_or(false, |v| Self::fastly_served_by_pattern().is_match(v)) {
+                if response.headers.contains_key("fastly-restarts")
+                    || response
+                        .headers
+                        .get("x-served-by")
+                        .is_some_and(|v| Self::fastly_served_by_pattern().is_match(v))
+                {
                     evidence.push(Evidence {
                         method_type: MethodType::StatusCode(403),
                         confidence: 0.80,
@@ -172,7 +178,7 @@ impl FastlyProvider {
             }
             429 => {
                 // Fastly rate limiting
-                if response.headers.get("fastly-restarts").is_some() {
+                if response.headers.contains_key("fastly-restarts") {
                     evidence.push(Evidence {
                         method_type: MethodType::StatusCode(429),
                         confidence: 0.85,
@@ -225,10 +231,10 @@ impl DetectionProvider for FastlyProvider {
         if let Some(response) = &context.response {
             // Check headers (most reliable)
             all_evidence.extend(self.check_headers(response).await);
-            
+
             // Check body patterns
             all_evidence.extend(self.check_body_patterns(response).await);
-            
+
             // Check status codes
             all_evidence.extend(self.check_status_codes(response).await);
         }
@@ -251,4 +257,4 @@ impl Default for FastlyProvider {
     fn default() -> Self {
         Self::new()
     }
-} 
+}
