@@ -5,12 +5,8 @@ use std::collections::HashMap;
 pub mod advanced_scoring;
 
 pub use advanced_scoring::{
-    AdvancedScoring, 
-    EvidenceWeight, 
-    EvidenceCategory, 
-    ConfidenceResult, 
-    ConfidenceLevel,
-    ConfidenceThresholds
+    AdvancedScoring, ConfidenceLevel, ConfidenceResult, ConfidenceThresholds, EvidenceCategory,
+    EvidenceWeight,
 };
 
 #[derive(Debug, Clone)]
@@ -31,18 +27,23 @@ impl ConfidenceEngine {
         }
     }
 
-    pub fn calculate_confidence(&self, provider_name: &str, evidence_count: usize, evidence_strength: f64) -> f64 {
+    pub fn calculate_confidence(
+        &self,
+        provider_name: &str,
+        evidence_count: usize,
+        evidence_strength: f64,
+    ) -> f64 {
         let provider_weight = *self.provider_weights.get(provider_name).unwrap_or(&0.8);
-        
+
         // Bayesian-inspired calculation
         let prior = self.base_confidence;
         let likelihood = evidence_strength * provider_weight;
         let evidence_factor = 1.0 + (evidence_count as f64 * 0.1);
-        
-        let posterior = (prior * likelihood * evidence_factor) / 
-                       (prior * likelihood * evidence_factor + (1.0 - prior) * (1.0 - likelihood));
-        
-        posterior.min(1.0).max(0.0)
+
+        let posterior = (prior * likelihood * evidence_factor)
+            / (prior * likelihood * evidence_factor + (1.0 - prior) * (1.0 - likelihood));
+
+        posterior.clamp(0.0, 1.0)
     }
 
     pub fn combine_confidences(&self, confidences: &[f64]) -> f64 {
@@ -51,14 +52,16 @@ impl ConfidenceEngine {
         }
 
         // Use probability combination: 1 - ∏(1 - pi)
-        let combined = 1.0 - confidences.iter()
-            .map(|&c| 1.0 - c)
-            .product::<f64>();
+        let combined = 1.0 - confidences.iter().map(|&c| 1.0 - c).product::<f64>();
 
-        combined.min(1.0).max(0.0)
+        combined.clamp(0.0, 1.0)
     }
 
-    pub fn adjust_for_false_positives(&self, confidence: f64, false_positive_indicators: usize) -> f64 {
+    pub fn adjust_for_false_positives(
+        &self,
+        confidence: f64,
+        false_positive_indicators: usize,
+    ) -> f64 {
         let penalty = false_positive_indicators as f64 * 0.1;
         (confidence - penalty).max(0.0)
     }

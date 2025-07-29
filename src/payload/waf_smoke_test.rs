@@ -1,17 +1,17 @@
 //! WAF Smoke Test - Advanced WAF Effectiveness Testing
-//! 
+//!
 //! This module provides comprehensive WAF effectiveness testing using sophisticated
 //! payloads and analysis techniques. It replaces the bash script with better detection,
 //! colorful output, and structured results for both CLI and UI consumption.
 
+use crate::engine::waf_mode_detector::{PayloadType, WafMode};
+use crate::http::HttpClient;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
-use tokio::time::sleep;
-use crate::http::HttpClient;
-use crate::engine::waf_mode_detector::{PayloadType, WafMode};
-use tempfile::NamedTempFile;
 use std::io::Write;
+use std::time::{Duration, Instant};
+use tempfile::NamedTempFile;
+use tokio::time::sleep;
 
 /// WAF Smoke Test Configuration
 #[derive(Debug, Clone)]
@@ -67,11 +67,11 @@ impl PayloadClassification {
     /// Get the color code for terminal output
     pub fn color_code(&self) -> &'static str {
         match self {
-            PayloadClassification::Blocked => "\x1b[32m",      // Green
-            PayloadClassification::Allowed => "\x1b[31m",      // Red  
-            PayloadClassification::Error => "\x1b[33m",        // Yellow
-            PayloadClassification::RateLimited => "\x1b[35m",  // Magenta
-            PayloadClassification::Challenge => "\x1b[36m",    // Cyan
+            PayloadClassification::Blocked => "\x1b[32m", // Green
+            PayloadClassification::Allowed => "\x1b[31m", // Red
+            PayloadClassification::Error => "\x1b[33m",   // Yellow
+            PayloadClassification::RateLimited => "\x1b[35m", // Magenta
+            PayloadClassification::Challenge => "\x1b[36m", // Cyan
         }
     }
 
@@ -150,82 +150,109 @@ impl WafSmokeTest {
         let mut payloads = HashMap::new();
 
         // XSS Payloads - Basic and Advanced
-        payloads.insert(PayloadType::XssBasic, vec![
-            "<script>alert('XSS')</script>".to_string(),
-            "<img src=x onerror=alert('XSS')>".to_string(),
-            "javascript:alert('XSS')".to_string(),
-            "<svg onload=alert('XSS')>".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::XssBasic,
+            vec![
+                "<script>alert('XSS')</script>".to_string(),
+                "<img src=x onerror=alert('XSS')>".to_string(),
+                "javascript:alert('XSS')".to_string(),
+                "<svg onload=alert('XSS')>".to_string(),
+            ],
+        );
 
-        payloads.insert(PayloadType::XssAdvanced, vec![
-            "\"><script>alert('XSS')</script>".to_string(),
-            "';alert('XSS');//".to_string(),
-            "<iframe src=javascript:alert('XSS')>".to_string(),
-            "<body onload=alert('XSS')>".to_string(),
-            "<<SCRIPT>alert('XSS')//<</SCRIPT>".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::XssAdvanced,
+            vec![
+                "\"><script>alert('XSS')</script>".to_string(),
+                "';alert('XSS');//".to_string(),
+                "<iframe src=javascript:alert('XSS')>".to_string(),
+                "<body onload=alert('XSS')>".to_string(),
+                "<<SCRIPT>alert('XSS')//<</SCRIPT>".to_string(),
+            ],
+        );
 
         // SQL Injection Payloads
-        payloads.insert(PayloadType::SqlInjectionBasic, vec![
-            "' OR '1'='1".to_string(),
-            "'; DROP TABLE users; --".to_string(),
-            "1' UNION SELECT NULL,NULL,NULL--".to_string(),
-            "admin'--".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::SqlInjectionBasic,
+            vec![
+                "' OR '1'='1".to_string(),
+                "'; DROP TABLE users; --".to_string(),
+                "1' UNION SELECT NULL,NULL,NULL--".to_string(),
+                "admin'--".to_string(),
+            ],
+        );
 
-        payloads.insert(PayloadType::SqlInjectionAdvanced, vec![
-            "1' AND (SELECT COUNT(*) FROM information_schema.tables)>0--".to_string(),
-            "'; WAITFOR DELAY '00:00:05'--".to_string(),
-            "' OR 1=1 LIMIT 1 OFFSET 0--".to_string(),
-            "1' AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT version()), 0x7e))--".to_string(),
-            "1' UNION SELECT 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20--".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::SqlInjectionAdvanced,
+            vec![
+                "1' AND (SELECT COUNT(*) FROM information_schema.tables)>0--".to_string(),
+                "'; WAITFOR DELAY '00:00:05'--".to_string(),
+                "' OR 1=1 LIMIT 1 OFFSET 0--".to_string(),
+                "1' AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT version()), 0x7e))--".to_string(),
+                "1' UNION SELECT 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20--".to_string(),
+            ],
+        );
 
         // Path Traversal
-        payloads.insert(PayloadType::PathTraversal, vec![
-            "../../../etc/passwd".to_string(),
-            "..\\..\\..\\windows\\system32\\drivers\\etc\\hosts".to_string(),
-            "....//....//....//etc/passwd".to_string(),
-            "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd".to_string(),
-            "..%252f..%252f..%252fetc%252fpasswd".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::PathTraversal,
+            vec![
+                "../../../etc/passwd".to_string(),
+                "..\\..\\..\\windows\\system32\\drivers\\etc\\hosts".to_string(),
+                "....//....//....//etc/passwd".to_string(),
+                "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd".to_string(),
+                "..%252f..%252f..%252fetc%252fpasswd".to_string(),
+            ],
+        );
 
         // Command Injection
-        payloads.insert(PayloadType::CommandInjection, vec![
-            "; cat /etc/passwd".to_string(),
-            "| whoami".to_string(),
-            "`id`".to_string(),
-            "$(whoami)".to_string(),
-            "&& dir".to_string(),
-            "; ls -la".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::CommandInjection,
+            vec![
+                "; cat /etc/passwd".to_string(),
+                "| whoami".to_string(),
+                "`id`".to_string(),
+                "$(whoami)".to_string(),
+                "&& dir".to_string(),
+                "; ls -la".to_string(),
+            ],
+        );
 
         // File Upload Attacks
-        payloads.insert(PayloadType::FileUpload, vec![
-            "shell.php".to_string(),
-            "test.php%00.jpg".to_string(),
-            "../../../shell.php".to_string(),
-            "shell.php.jpg".to_string(),
-            "shell.pHp".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::FileUpload,
+            vec![
+                "shell.php".to_string(),
+                "test.php%00.jpg".to_string(),
+                "../../../shell.php".to_string(),
+                "shell.php.jpg".to_string(),
+                "shell.pHp".to_string(),
+            ],
+        );
 
         // Scanner Detection - Using tool names that will be converted to proper User-Agents
-        payloads.insert(PayloadType::ScannerDetection, vec![
-            "sqlmap".to_string(),
-            "nikto".to_string(),
-            "nessus".to_string(),
-            "burpsuite".to_string(),
-            "acunetix".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::ScannerDetection,
+            vec![
+                "sqlmap".to_string(),
+                "nikto".to_string(),
+                "nessus".to_string(),
+                "burpsuite".to_string(),
+                "acunetix".to_string(),
+            ],
+        );
 
         // Enumeration
-        payloads.insert(PayloadType::Enumeration, vec![
-            "admin".to_string(),
-            "administrator".to_string(),
-            "config.php".to_string(),
-            ".env".to_string(),
-            "wp-config.php".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::Enumeration,
+            vec![
+                "admin".to_string(),
+                "administrator".to_string(),
+                "config.php".to_string(),
+                ".env".to_string(),
+                "wp-config.php".to_string(),
+            ],
+        );
 
         payloads
     }
@@ -236,13 +263,15 @@ impl WafSmokeTest {
         let mut test_results = Vec::new();
 
         println!("🔍 Starting Advanced WAF Effectiveness Test");
-        println!("🎯 Target: {}", url);
+        println!("🎯 Target: {url}");
         println!("═══════════════════════════════════════════════════════════════");
 
         // Test each payload type
         for (payload_type, payloads) in &self.payloads {
             for payload in payloads {
-                let result = self.test_single_payload(url, payload_type.clone(), payload).await?;
+                let result = self
+                    .test_single_payload(url, payload_type.clone(), payload)
+                    .await?;
                 test_results.push(result);
 
                 // Delay between requests to avoid overwhelming the target
@@ -291,22 +320,30 @@ impl WafSmokeTest {
                 "sqlmap" => "sqlmap/1.6.12 (https://sqlmap.org)",
                 "nikto" => "Mozilla/5.0 (Nikto/2.1.6) (Evasions:None) (Test:Port Check)",
                 "nessus" => "Mozilla/5.0 (compatible; Nessus; https://www.tenable.com/)",
-                "burpsuite" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 BurpSuite",
-                "acunetix" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Acunetix/1.0",
+                "burpsuite" => {
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 BurpSuite"
+                }
+                "acunetix" => {
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Acunetix/1.0"
+                }
                 _ => "WAF-Detector/1.0 Scanner Test",
             };
-            
-            match self.http_client.get_with_headers(url, &[("User-Agent", scanner_user_agent)]).await {
+
+            match self
+                .http_client
+                .get_with_headers(url, &[("User-Agent", scanner_user_agent)])
+                .await
+            {
                 Ok(resp) => resp,
                 Err(e) => {
                     return Ok(PayloadTestResult {
-                        category: format!("{:?}", payload_type),
+                        category: format!("{payload_type:?}"),
                         payload: payload.to_string(),
                         payload_type,
                         response_status: 0,
                         response_time_ms: start_time.elapsed().as_millis() as u64,
                         classification: PayloadClassification::Error,
-                        evidence: vec![format!("Request failed: {}", e)],
+                        evidence: vec![format!("Request failed: {e}")],
                         waf_indicators: vec![],
                     });
                 }
@@ -317,13 +354,13 @@ impl WafSmokeTest {
                 Ok(resp) => resp,
                 Err(e) => {
                     return Ok(PayloadTestResult {
-                        category: format!("{:?}", payload_type),
+                        category: format!("{payload_type:?}"),
                         payload: payload.to_string(),
                         payload_type,
                         response_status: 0,
                         response_time_ms: start_time.elapsed().as_millis() as u64,
                         classification: PayloadClassification::Error,
-                        evidence: vec![format!("Request failed: {}", e)],
+                        evidence: vec![format!("Request failed: {e}")],
                         waf_indicators: vec![],
                     });
                 }
@@ -338,14 +375,22 @@ impl WafSmokeTest {
         // For scanner detection, add a special note about what's being tested
         let mut final_evidence = evidence;
         if payload_type == PayloadType::ScannerDetection {
-            final_evidence.push(format!("Testing if WAF blocks '{}' scanner signature via User-Agent header", payload));
+            final_evidence.push(format!(
+                "Testing if WAF blocks '{payload}' scanner signature via User-Agent header"
+            ));
         }
-        
+
         // Print real-time result
-        self.print_test_result(&payload_type, payload, &classification, response.status, response_time.as_millis() as u64);
+        self.print_test_result(
+            &payload_type,
+            payload,
+            &classification,
+            response.status,
+            response_time.as_millis() as u64,
+        );
 
         Ok(PayloadTestResult {
-            category: format!("{:?}", payload_type),
+            category: format!("{payload_type:?}"),
             payload: payload.to_string(),
             payload_type,
             response_status: response.status,
@@ -361,9 +406,9 @@ impl WafSmokeTest {
         let url = if base_url.contains("FUZZ") {
             base_url.replace("FUZZ", payload)
         } else if base_url.contains('?') {
-            format!("{}&test={}", base_url, urlencoding::encode(payload))
+            format!("{base_url}&test={}", urlencoding::encode(payload))
         } else {
-            format!("{}?test={}", base_url, urlencoding::encode(payload))
+            format!("{base_url}?test={}", urlencoding::encode(payload))
         };
         Ok(url)
     }
@@ -396,7 +441,10 @@ impl WafSmokeTest {
                 PayloadClassification::Blocked
             }
             200 | 301 | 302 => {
-                evidence.push(format!("HTTP {} - Request allowed through", response.status));
+                evidence.push(format!(
+                    "HTTP {} - Request allowed through",
+                    response.status
+                ));
                 PayloadClassification::Allowed
             }
             _ => {
@@ -413,49 +461,62 @@ impl WafSmokeTest {
             // CloudFlare indicators
             if name_lower.contains("cf-") || value_lower.contains("cloudflare") {
                 waf_indicators.push("CloudFlare".to_string());
-                evidence.push(format!("CloudFlare header detected: {}: {}", name, value));
+                evidence.push(format!("CloudFlare header detected: {name}: {value}"));
             }
 
             // AWS WAF indicators
             if name_lower.contains("x-amz") || value_lower.contains("aws") {
                 waf_indicators.push("AWS WAF".to_string());
-                evidence.push(format!("AWS WAF header detected: {}: {}", name, value));
+                evidence.push(format!("AWS WAF header detected: {name}: {value}"));
             }
 
             // Akamai indicators
             if name_lower.contains("akamai") || value_lower.contains("akamai") {
                 waf_indicators.push("Akamai".to_string());
-                evidence.push(format!("Akamai header detected: {}: {}", name, value));
+                evidence.push(format!("Akamai header detected: {name}: {value}"));
             }
 
             // Generic blocking indicators
-            if name_lower.contains("blocked") || name_lower.contains("security") ||
-               value_lower.contains("blocked") || value_lower.contains("denied") {
-                evidence.push(format!("Blocking header detected: {}: {}", name, value));
+            if name_lower.contains("blocked")
+                || name_lower.contains("security")
+                || value_lower.contains("blocked")
+                || value_lower.contains("denied")
+            {
+                evidence.push(format!("Blocking header detected: {name}: {value}"));
             }
         }
 
         // Check response body for indicators
         let body_lower = response.body.to_lowercase();
-        
+
         // Challenge page indicators
-        if body_lower.contains("checking your browser") || 
-           body_lower.contains("challenge") ||
-           body_lower.contains("captcha") {
+        if body_lower.contains("checking your browser")
+            || body_lower.contains("challenge")
+            || body_lower.contains("captcha")
+        {
             evidence.push("Challenge page detected".to_string());
             return (PayloadClassification::Challenge, evidence, waf_indicators);
         }
 
         // Blocking page indicators
         let blocking_keywords = [
-            "access denied", "blocked", "forbidden", "not allowed",
-            "security violation", "malicious request", "attack detected",
-            "waf", "firewall", "protection", "security policy", "threat detected"
+            "access denied",
+            "blocked",
+            "forbidden",
+            "not allowed",
+            "security violation",
+            "malicious request",
+            "attack detected",
+            "waf",
+            "firewall",
+            "protection",
+            "security policy",
+            "threat detected",
         ];
 
         for keyword in &blocking_keywords {
             if body_lower.contains(keyword) {
-                evidence.push(format!("Blocking keyword detected: {}", keyword));
+                evidence.push(format!("Blocking keyword detected: {keyword}"));
                 break;
             }
         }
@@ -480,7 +541,7 @@ impl WafSmokeTest {
         let color = classification.color_code();
         let reset = "\x1b[0m";
         let emoji = classification.emoji();
-        
+
         let payload_display = if payload.len() > 30 {
             format!("{}...", &payload[..27])
         } else {
@@ -503,14 +564,30 @@ impl WafSmokeTest {
     /// Calculate summary statistics
     fn calculate_summary(&self, results: &[PayloadTestResult]) -> TestSummary {
         let total_tests = results.len();
-        let blocked_count = results.iter().filter(|r| r.classification == PayloadClassification::Blocked).count();
-        let allowed_count = results.iter().filter(|r| r.classification == PayloadClassification::Allowed).count();
-        let error_count = results.iter().filter(|r| r.classification == PayloadClassification::Error).count();
-        let rate_limited_count = results.iter().filter(|r| r.classification == PayloadClassification::RateLimited).count();
-        let challenge_count = results.iter().filter(|r| r.classification == PayloadClassification::Challenge).count();
+        let blocked_count = results
+            .iter()
+            .filter(|r| r.classification == PayloadClassification::Blocked)
+            .count();
+        let allowed_count = results
+            .iter()
+            .filter(|r| r.classification == PayloadClassification::Allowed)
+            .count();
+        let error_count = results
+            .iter()
+            .filter(|r| r.classification == PayloadClassification::Error)
+            .count();
+        let rate_limited_count = results
+            .iter()
+            .filter(|r| r.classification == PayloadClassification::RateLimited)
+            .count();
+        let challenge_count = results
+            .iter()
+            .filter(|r| r.classification == PayloadClassification::Challenge)
+            .count();
 
         let effectiveness_percentage = if total_tests > 0 {
-            ((blocked_count + rate_limited_count + challenge_count) as f64 / total_tests as f64) * 100.0
+            ((blocked_count + rate_limited_count + challenge_count) as f64 / total_tests as f64)
+                * 100.0
         } else {
             0.0
         };
@@ -540,11 +617,16 @@ impl WafSmokeTest {
             return None;
         }
 
-        let blocked_tests = results.iter()
-            .filter(|r| matches!(r.classification, 
-                PayloadClassification::Blocked | 
-                PayloadClassification::RateLimited | 
-                PayloadClassification::Challenge))
+        let blocked_tests = results
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.classification,
+                    PayloadClassification::Blocked
+                        | PayloadClassification::RateLimited
+                        | PayloadClassification::Challenge
+                )
+            })
             .count();
 
         let block_rate = blocked_tests as f64 / total_tests as f64;
@@ -556,9 +638,11 @@ impl WafSmokeTest {
             _ => {
                 // Check for monitoring indicators
                 let has_monitoring = results.iter().any(|r| {
-                    r.evidence.iter().any(|e| e.contains("monitoring") || e.contains("reflected"))
+                    r.evidence
+                        .iter()
+                        .any(|e| e.contains("monitoring") || e.contains("reflected"))
                 });
-                
+
                 if has_monitoring {
                     Some(WafMode::Monitoring)
                 } else {
@@ -578,7 +662,8 @@ impl WafSmokeTest {
             }
         }
 
-        waf_votes.into_iter()
+        waf_votes
+            .into_iter()
             .max_by_key(|(_, count)| *count)
             .map(|(waf, _)| waf)
     }
@@ -595,13 +680,21 @@ impl WafSmokeTest {
         // Effectiveness recommendations
         match summary.effectiveness_percentage {
             p if p >= 90.0 => {
-                recommendations.push("🟢 Excellent WAF protection! Very few attacks would succeed.".to_string());
+                recommendations.push(
+                    "🟢 Excellent WAF protection! Very few attacks would succeed.".to_string(),
+                );
             }
             p if p >= 70.0 => {
-                recommendations.push("🟡 Good WAF protection, but some attack vectors may still be exploitable.".to_string());
+                recommendations.push(
+                    "🟡 Good WAF protection, but some attack vectors may still be exploitable."
+                        .to_string(),
+                );
             }
             p if p >= 50.0 => {
-                recommendations.push("🟠 Moderate WAF protection. Consider tuning rules for better coverage.".to_string());
+                recommendations.push(
+                    "🟠 Moderate WAF protection. Consider tuning rules for better coverage."
+                        .to_string(),
+                );
             }
             _ => {
                 recommendations.push("🔴 Low WAF protection. Many attacks are getting through - review configuration.".to_string());
@@ -612,18 +705,25 @@ impl WafSmokeTest {
         if let Some(mode) = waf_mode {
             match mode {
                 WafMode::Blocking => {
-                    recommendations.push("WAF is in blocking mode - actively preventing attacks.".to_string());
+                    recommendations
+                        .push("WAF is in blocking mode - actively preventing attacks.".to_string());
                 }
                 WafMode::Monitoring => {
                     recommendations.push("⚠️ WAF appears to be in monitoring mode - attacks are logged but not blocked.".to_string());
-                    recommendations.push("Consider enabling blocking mode for better protection.".to_string());
+                    recommendations
+                        .push("Consider enabling blocking mode for better protection.".to_string());
                 }
                 WafMode::Mixed => {
-                    recommendations.push("WAF is in mixed mode - some attacks blocked, others allowed.".to_string());
-                    recommendations.push("Review WAF rules to ensure consistent protection.".to_string());
+                    recommendations.push(
+                        "WAF is in mixed mode - some attacks blocked, others allowed.".to_string(),
+                    );
+                    recommendations
+                        .push("Review WAF rules to ensure consistent protection.".to_string());
                 }
                 WafMode::Unknown => {
-                    recommendations.push("Unable to determine WAF mode. May need manual investigation.".to_string());
+                    recommendations.push(
+                        "Unable to determine WAF mode. May need manual investigation.".to_string(),
+                    );
                 }
             }
         }
@@ -638,17 +738,25 @@ impl WafSmokeTest {
                     recommendations.push("☁️ AWS WAF detected - review CloudWatch metrics and consider AWS Managed Rules.".to_string());
                 }
                 "Akamai" => {
-                    recommendations.push("🌐 Akamai detected - consider Bot Manager for advanced bot protection.".to_string());
+                    recommendations.push(
+                        "🌐 Akamai detected - consider Bot Manager for advanced bot protection."
+                            .to_string(),
+                    );
                 }
                 _ => {
-                    recommendations.push(format!("WAF identified as {} - consult vendor documentation for optimization.", waf));
+                    recommendations.push(format!(
+                        "WAF identified as {waf} - consult vendor documentation for optimization."
+                    ));
                 }
             }
         }
 
         // Performance recommendations
         if summary.average_response_time_ms > 1000.0 {
-            recommendations.push("⏰ High response times detected - WAF may be causing performance impact.".to_string());
+            recommendations.push(
+                "⏰ High response times detected - WAF may be causing performance impact."
+                    .to_string(),
+            );
         }
 
         recommendations
@@ -656,47 +764,75 @@ impl WafSmokeTest {
 
     /// Print comprehensive summary table
     pub fn print_summary(&self, result: &SmokeTestResult) {
-        println!("\n╔═══════════════════════════════════════════════════════════════════════════════╗");
-        println!("║                           WAF EFFECTIVENESS TEST RESULTS                     ║");
-        println!("╠═══════════════════════════════════════════════════════════════════════════════╣");
-        println!("║ Target URL: {:<65} ║", self.truncate_string(&result.url, 65));
-        
+        println!(
+            "\n╔═══════════════════════════════════════════════════════════════════════════════╗"
+        );
+        println!(
+            "║                           WAF EFFECTIVENESS TEST RESULTS                     ║"
+        );
+        println!(
+            "╠═══════════════════════════════════════════════════════════════════════════════╣"
+        );
+        println!(
+            "║ Target URL: {:<65} ║",
+            self.truncate_string(&result.url, 65)
+        );
+
         if let Some(waf) = &result.detected_waf {
-            println!("║ Detected WAF: {:<61} ║", waf);
+            println!("║ Detected WAF: {waf:<61} ║");
         }
-        
+
         if let Some(mode) = &result.waf_mode {
-            println!("║ WAF Mode: {:<65} ║", format!("{}", mode));
+            println!("║ WAF Mode: {mode:<65} ║");
         }
-        
-        println!("╠═══════════════════════════════════════════════════════════════════════════════╣");
-        
+
+        println!(
+            "╠═══════════════════════════════════════════════════════════════════════════════╣"
+        );
+
         let s = &result.summary;
-        println!("║ Total Tests: {:<10} │ Blocked: {:<10} │ Allowed: {:<10} ║", 
-                s.total_tests, s.blocked_count, s.allowed_count);
-        println!("║ Errors: {:<13} │ Rate Limited: {:<6} │ Challenges: {:<7} ║", 
-                s.error_count, s.rate_limited_count, s.challenge_count);
-        println!("║ Effectiveness: {:<6.1}% │ Avg Response: {:<6.0}ms │ Total Time: {:<6}ms ║", 
-                s.effectiveness_percentage, s.average_response_time_ms, result.total_time_ms);
-        
-        println!("╠═══════════════════════════════════════════════════════════════════════════════╣");
-        println!("║ RECOMMENDATIONS:                                                             ║");
-        
+        println!(
+            "║ Total Tests: {:<10} │ Blocked: {:<10} │ Allowed: {:<10} ║",
+            s.total_tests, s.blocked_count, s.allowed_count
+        );
+        println!(
+            "║ Errors: {:<13} │ Rate Limited: {:<6} │ Challenges: {:<7} ║",
+            s.error_count, s.rate_limited_count, s.challenge_count
+        );
+        println!(
+            "║ Effectiveness: {:<6.1}% │ Avg Response: {:<6.0}ms │ Total Time: {:<6}ms ║",
+            s.effectiveness_percentage, s.average_response_time_ms, result.total_time_ms
+        );
+
+        println!(
+            "╠═══════════════════════════════════════════════════════════════════════════════╣"
+        );
+        println!(
+            "║ RECOMMENDATIONS:                                                             ║"
+        );
+
         for (i, rec) in result.recommendations.iter().enumerate() {
-            if i < 5 { // Limit to 5 recommendations in summary
+            if i < 5 {
+                // Limit to 5 recommendations in summary
                 println!("║ • {:<75} ║", self.truncate_string(rec, 75));
             }
         }
-        
-        println!("╚═══════════════════════════════════════════════════════════════════════════════╝");
+
+        println!(
+            "╚═══════════════════════════════════════════════════════════════════════════════╝"
+        );
     }
 
     /// Export results to JSON file
-    pub fn export_json(&self, result: &SmokeTestResult, output_file: &str) -> Result<(), anyhow::Error> {
+    pub fn export_json(
+        &self,
+        result: &SmokeTestResult,
+        output_file: &str,
+    ) -> Result<(), anyhow::Error> {
         let json = serde_json::to_string_pretty(result)?;
         let mut temp_file = NamedTempFile::new()?;
         temp_file.write_all(json.as_bytes())?;
-        println!("📄 Results exported to: {}", output_file);
+        println!("📄 Results exported to: {output_file}");
         Ok(())
     }
 
@@ -704,7 +840,7 @@ impl WafSmokeTest {
         if s.len() <= max_len {
             s.to_string()
         } else {
-            format!("{}...", &s[..max_len-3])
+            format!("{}...", &s[..max_len - 3])
         }
     }
 }
@@ -722,7 +858,7 @@ mod tests {
     #[test]
     fn test_payload_classification() {
         let smoke_test = WafSmokeTest::default();
-        
+
         // Test blocked response
         let response = crate::http::HttpResponse {
             status: 403,
@@ -730,7 +866,7 @@ mod tests {
             body: "Access Denied".to_string(),
             url: "test".to_string(),
         };
-        
+
         let (classification, evidence, _) = smoke_test.classify_response(&response, "test");
         assert_eq!(classification, PayloadClassification::Blocked);
         assert!(!evidence.is_empty());
@@ -760,13 +896,13 @@ mod tests {
                 waf_indicators: vec![],
             },
         ];
-        
+
         let smoke_test = WafSmokeTest::default();
         let summary = smoke_test.calculate_summary(&results);
-        
+
         assert_eq!(summary.total_tests, 2);
         assert_eq!(summary.blocked_count, 1);
         assert_eq!(summary.allowed_count, 1);
         assert_eq!(summary.effectiveness_percentage, 50.0);
     }
-} 
+}

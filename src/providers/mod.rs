@@ -1,10 +1,12 @@
-pub mod cloudflare;
 pub mod akamai;
 pub mod aws;
+pub mod azure;
+pub mod cloudflare;
+pub mod f5;
 pub mod fastly;
 pub mod vercel;
 
-use crate::{DetectionContext, Evidence, http::HttpClient, ProviderType, DetectionProvider};
+use crate::{http::HttpClient, DetectionContext, DetectionProvider, Evidence, ProviderType};
 use anyhow::Result;
 
 /// Provider enum to solve async trait object issue
@@ -15,6 +17,8 @@ pub enum Provider {
     AWS(aws::AwsProvider),
     Fastly(fastly::FastlyProvider),
     Vercel(vercel::VercelProvider),
+    Azure(azure::AzureProvider),
+    F5(f5::F5Provider),
 }
 
 impl Provider {
@@ -25,6 +29,8 @@ impl Provider {
             Provider::AWS(p) => p.name(),
             Provider::Fastly(p) => p.name(),
             Provider::Vercel(p) => p.name(),
+            Provider::Azure(p) => p.name(),
+            Provider::F5(p) => p.name(),
         }
     }
 
@@ -35,6 +41,8 @@ impl Provider {
             Provider::AWS(p) => p.version(),
             Provider::Fastly(p) => p.version(),
             Provider::Vercel(p) => p.version(),
+            Provider::Azure(p) => p.version(),
+            Provider::F5(p) => p.version(),
         }
     }
 
@@ -45,6 +53,8 @@ impl Provider {
             Provider::AWS(p) => p.description(),
             Provider::Fastly(p) => p.description(),
             Provider::Vercel(p) => p.description(),
+            Provider::Azure(p) => p.description(),
+            Provider::F5(p) => p.description(),
         }
     }
 
@@ -55,6 +65,8 @@ impl Provider {
             Provider::AWS(p) => p.provider_type(),
             Provider::Fastly(p) => p.provider_type(),
             Provider::Vercel(p) => p.provider_type(),
+            Provider::Azure(p) => p.provider_type(),
+            Provider::F5(p) => p.provider_type(),
         }
     }
 
@@ -65,6 +77,8 @@ impl Provider {
             Provider::AWS(p) => p.confidence_base(),
             Provider::Fastly(p) => p.confidence_base(),
             Provider::Vercel(p) => p.confidence_base(),
+            Provider::Azure(p) => p.confidence_base(),
+            Provider::F5(p) => p.confidence_base(),
         }
     }
 
@@ -75,6 +89,8 @@ impl Provider {
             Provider::AWS(p) => p.priority(),
             Provider::Fastly(p) => p.priority(),
             Provider::Vercel(p) => p.priority(),
+            Provider::Azure(p) => p.priority(),
+            Provider::F5(p) => p.priority(),
         }
     }
 
@@ -85,6 +101,8 @@ impl Provider {
             Provider::AWS(p) => p.enabled(),
             Provider::Fastly(p) => p.enabled(),
             Provider::Vercel(p) => p.enabled(),
+            Provider::Azure(p) => p.enabled(),
+            Provider::F5(p) => p.enabled(),
         }
     }
 
@@ -95,16 +113,23 @@ impl Provider {
             Provider::AWS(p) => p.detect(context).await,
             Provider::Fastly(p) => p.detect(context).await,
             Provider::Vercel(p) => p.detect(context).await,
+            Provider::Azure(p) => p.detect(context).await,
+            Provider::F5(p) => p.detect(context).await,
         }
     }
 
-    pub async fn passive_detect(&self, response: &crate::http::HttpResponse) -> Result<Vec<Evidence>> {
+    pub async fn passive_detect(
+        &self,
+        response: &crate::http::HttpResponse,
+    ) -> Result<Vec<Evidence>> {
         match self {
             Provider::CloudFlare(p) => p.passive_detect(response).await,
             Provider::Akamai(p) => p.passive_detect(response).await,
             Provider::AWS(p) => p.passive_detect(response).await,
             Provider::Fastly(p) => p.passive_detect(response).await,
             Provider::Vercel(p) => p.passive_detect(response).await,
+            Provider::Azure(p) => p.passive_detect(response).await,
+            Provider::F5(p) => p.passive_detect(response).await,
         }
     }
 
@@ -115,6 +140,8 @@ impl Provider {
             Provider::AWS(p) => p.active_detect(client, url).await,
             Provider::Fastly(p) => p.active_detect(client, url).await,
             Provider::Vercel(p) => p.active_detect(client, url).await,
+            Provider::Azure(p) => p.active_detect(client, url).await,
+            Provider::F5(p) => p.active_detect(client, url).await,
         }
     }
 }
