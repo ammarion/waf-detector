@@ -62,7 +62,7 @@ echo "https://example.com" >> urls.txt
 ## 🛡️ Features
 
 - **WAF & CDN Detection**: Identifies protection systems with high accuracy
-- **Multiple Providers**: CloudFlare, AWS WAF, Akamai, Fastly, Vercel
+- **Multiple Providers**: CloudFlare, AWS WAF, Akamai, Fastly, Vercel, Azure, F5 BIG-IP
 - **Security Testing**: Tests WAF effectiveness against common attacks
 - **User-friendly Interface**: Web dashboard for easy visualization
 - **Detailed Reports**: Evidence collection and confidence scoring
