@@ -78,6 +78,7 @@ tempfile = "3.20.0"
 tokio-test = "0.4"
 mockito = "1.2"
 criterion = { version = "0.5", features = ["html_reports"] }
+urlencoding = "2.1"
 
 [profile.release]
 opt-level = 3

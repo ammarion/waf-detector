@@ -132,6 +132,7 @@ impl EffectivenessReport {
 
         self.test_results.insert(name, result);
         self.update_statistics();
+        self.recalculate_risk_score();
     }
 
     /// Add a baseline result
@@ -139,22 +140,32 @@ impl EffectivenessReport {
         self.baseline_results.insert(name.to_string(), result);
     }
 
-    /// Recalculate risk score based on vulnerabilities
+    /// Recalculate risk score based on vulnerabilities and block rate
     fn recalculate_risk_score(&mut self) {
-        let mut score: f64 = 0.0;
+        // Base risk score calculation based on block rate
+        let block_rate = if self.statistics.total_tests > 0 {
+            self.statistics.blocked_requests as f64 / self.statistics.total_tests as f64
+        } else {
+            0.0
+        };
 
+        // Base risk score: inverse of block rate (100% blocked = 0 risk, 0% blocked = 100 risk)
+        let base_risk = (1.0 - block_rate) * 100.0;
+
+        // Add penalties for vulnerabilities
+        let mut penalty: f64 = 0.0;
         for vuln in &self.vulnerabilities {
             match vuln.severity.as_str() {
-                "CRITICAL" => score += 25.0,
-                "HIGH" => score += 15.0,
-                "MEDIUM" => score += 8.0,
-                "LOW" => score += 3.0,
+                "CRITICAL" => penalty += 5.0,
+                "HIGH" => penalty += 3.0,
+                "MEDIUM" => penalty += 2.0,
+                "LOW" => penalty += 1.0,
                 _ => {}
             }
         }
 
         // Cap at 100
-        self.risk_score = score.min(100.0);
+        self.risk_score = (base_risk + penalty).min(100.0);
     }
 
     /// Update statistics

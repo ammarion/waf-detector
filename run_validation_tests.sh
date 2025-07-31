@@ -28,7 +28,7 @@ echo ""
 
 # Run CI validation
 echo -e "${YELLOW}Running CI validation tests...${NC}"
-python3 ci_validation.py ./target/release/waf-detector
+python3 ci_validation.py ./target/release/waf-detect
 CI_EXIT_CODE=$?
 if [ $CI_EXIT_CODE -eq 0 ]; then
     echo -e "${GREEN}✓ CI validation passed${NC}"

@@ -16,10 +16,16 @@ use tracing::{info, warn};
 pub mod consent;
 pub mod patterns;
 pub mod report;
+pub mod static_detection;
 pub mod techniques;
+pub mod waffled_techniques;
+
+#[cfg(test)]
+mod tests;
 
 use consent::ConsentManager;
 use report::{EffectivenessReport, Recommendation, Vulnerability};
+use static_detection::{analyze_static_page, format_static_page_warning};
 use techniques::TestingTechnique;
 
 /// Configuration for WAF effectiveness testing
@@ -61,6 +67,35 @@ pub struct EffectivenessTest {
 }
 
 impl EffectivenessTest {
+    /// Check if a response indicates blocking
+    pub fn is_blocked(status_code: u16, body: &str) -> bool {
+        // Check common block status codes
+        if status_code == 403 || status_code == 406 || status_code == 429 || status_code == 503 {
+            return true;
+        }
+
+        // Check for block patterns in response body
+        let body_lower = body.to_lowercase();
+        let block_indicators = [
+            "access denied",
+            "forbidden",
+            "blocked",
+            "firewall",
+            "security policy",
+            "violation",
+            "suspicious",
+            "malicious",
+            "threat detected",
+            "request rejected",
+            "ok bot",
+            "waf protection",
+        ];
+
+        block_indicators
+            .iter()
+            .any(|indicator| body_lower.contains(indicator))
+    }
+
     /// Create a new effectiveness test instance
     pub async fn new(config: EffectivenessConfig) -> Result<Self> {
         // Ensure user has acknowledged responsible use
@@ -85,6 +120,18 @@ impl EffectivenessTest {
 
         // Validate URL and permissions
         self.validate_target(url)?;
+
+        // Check if target appears to be serving static content
+        match analyze_static_page(url).await {
+            Ok(analysis) => {
+                if analysis.is_likely_static {
+                    warn!("{}", format_static_page_warning(&analysis));
+                }
+            }
+            Err(e) => {
+                warn!("Could not analyze if target is static: {}", e);
+            }
+        }
 
         let mut report = EffectivenessReport::new(url);
 
@@ -140,14 +187,48 @@ impl EffectivenessTest {
             ("Large header", "GET", ""), // Will add large header in implementation
         ];
 
+        let mut response_bodies = Vec::new();
+
         for (test_name, method, body) in baseline_tests {
             self.rate_limit().await?;
 
+            // Add large header for the large header test
+            let mut headers = HashMap::new();
+            if test_name == "Large header" {
+                headers.insert(
+                    "X-Large-Header".to_string(),
+                    "A".repeat(1000), // 1KB header
+                );
+            }
+
             // Perform test and record results
-            let result = self
-                .perform_request(url, method, body, HashMap::new())
-                .await?;
+            let result = self.perform_request(url, method, body, headers).await?;
+
+            // Store response for similarity check
+            response_bodies.push(result.evidence.clone());
+
             report.add_baseline_result(test_name, result);
+        }
+
+        // Check if all responses are suspiciously similar (indicating no parameter processing)
+        if response_bodies.len() >= 2 {
+            let all_similar = response_bodies.windows(2).all(|w| {
+                let similarity = static_detection::calculate_similarity(&w[0], &w[1]);
+                similarity > 0.95
+            });
+
+            if all_similar {
+                warn!("⚠️  All baseline requests returned nearly identical responses!");
+                warn!("   This suggests the server may not be processing parameters.");
+                report.add_recommendation(Recommendation {
+                    priority: "WARNING".to_string(),
+                    category: "Parameter Processing".to_string(),
+                    description: "Server returns identical responses regardless of parameters".to_string(),
+                    implementation: "Ensure you're testing endpoints that actually process user input. \
+                                   Consider testing form submissions, API endpoints, or search functionality."
+                        .to_string(),
+                });
+            }
         }
 
         Ok(())

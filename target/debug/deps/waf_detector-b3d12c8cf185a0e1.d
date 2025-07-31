@@ -1,6 +1,6 @@
-/Users/ammar/waf-detector/target/debug/deps/waf_detector-b3d12c8cf185a0e1.d: src/lib.rs src/cli/mod.rs src/confidence/mod.rs src/confidence/advanced_scoring.rs src/engine/mod.rs src/engine/waf_mode_detector.rs src/http/mod.rs src/providers/mod.rs src/providers/akamai.rs src/providers/aws.rs src/providers/azure.rs src/providers/cloudflare.rs src/providers/f5.rs src/providers/fastly.rs src/providers/vercel.rs src/registry/mod.rs src/script_executor.rs src/utils/mod.rs src/web/mod.rs src/web/templates.rs src/dns/mod.rs src/dns/optimized.rs src/payload/mod.rs src/payload/waf_smoke_test.rs src/testing/mod.rs src/testing/validation_framework.rs src/timing/mod.rs src/effectiveness/mod.rs src/effectiveness/consent.rs src/effectiveness/patterns.rs src/effectiveness/report.rs src/effectiveness/techniques.rs Cargo.toml
+/Users/ammar/waf-detector/target/debug/deps/waf_detector-b3d12c8cf185a0e1.d: src/lib.rs src/cli/mod.rs src/confidence/mod.rs src/confidence/advanced_scoring.rs src/engine/mod.rs src/engine/waf_mode_detector.rs src/http/mod.rs src/providers/mod.rs src/providers/akamai.rs src/providers/aws.rs src/providers/azure.rs src/providers/cloudflare.rs src/providers/f5.rs src/providers/fastly.rs src/providers/vercel.rs src/registry/mod.rs src/script_executor.rs src/utils/mod.rs src/web/mod.rs src/web/templates.rs src/dns/mod.rs src/dns/optimized.rs src/payload/mod.rs src/payload/waf_smoke_test.rs src/testing/mod.rs src/testing/validation_framework.rs src/timing/mod.rs src/effectiveness/mod.rs src/effectiveness/consent.rs src/effectiveness/patterns.rs src/effectiveness/report.rs src/effectiveness/static_detection.rs src/effectiveness/techniques.rs src/effectiveness/waffled_techniques.rs src/effectiveness/tests.rs Cargo.toml
 
-/Users/ammar/waf-detector/target/debug/deps/libwaf_detector-b3d12c8cf185a0e1.rmeta: src/lib.rs src/cli/mod.rs src/confidence/mod.rs src/confidence/advanced_scoring.rs src/engine/mod.rs src/engine/waf_mode_detector.rs src/http/mod.rs src/providers/mod.rs src/providers/akamai.rs src/providers/aws.rs src/providers/azure.rs src/providers/cloudflare.rs src/providers/f5.rs src/providers/fastly.rs src/providers/vercel.rs src/registry/mod.rs src/script_executor.rs src/utils/mod.rs src/web/mod.rs src/web/templates.rs src/dns/mod.rs src/dns/optimized.rs src/payload/mod.rs src/payload/waf_smoke_test.rs src/testing/mod.rs src/testing/validation_framework.rs src/timing/mod.rs src/effectiveness/mod.rs src/effectiveness/consent.rs src/effectiveness/patterns.rs src/effectiveness/report.rs src/effectiveness/techniques.rs Cargo.toml
+/Users/ammar/waf-detector/target/debug/deps/libwaf_detector-b3d12c8cf185a0e1.rmeta: src/lib.rs src/cli/mod.rs src/confidence/mod.rs src/confidence/advanced_scoring.rs src/engine/mod.rs src/engine/waf_mode_detector.rs src/http/mod.rs src/providers/mod.rs src/providers/akamai.rs src/providers/aws.rs src/providers/azure.rs src/providers/cloudflare.rs src/providers/f5.rs src/providers/fastly.rs src/providers/vercel.rs src/registry/mod.rs src/script_executor.rs src/utils/mod.rs src/web/mod.rs src/web/templates.rs src/dns/mod.rs src/dns/optimized.rs src/payload/mod.rs src/payload/waf_smoke_test.rs src/testing/mod.rs src/testing/validation_framework.rs src/timing/mod.rs src/effectiveness/mod.rs src/effectiveness/consent.rs src/effectiveness/patterns.rs src/effectiveness/report.rs src/effectiveness/static_detection.rs src/effectiveness/techniques.rs src/effectiveness/waffled_techniques.rs src/effectiveness/tests.rs Cargo.toml
 
 src/lib.rs:
 src/cli/mod.rs:
@@ -33,7 +33,10 @@ src/effectiveness/mod.rs:
 src/effectiveness/consent.rs:
 src/effectiveness/patterns.rs:
 src/effectiveness/report.rs:
+src/effectiveness/static_detection.rs:
 src/effectiveness/techniques.rs:
+src/effectiveness/waffled_techniques.rs:
+src/effectiveness/tests.rs:
 Cargo.toml:
 
 # env-dep:CLIPPY_ARGS=-D__CLIPPY_HACKERY__warnings__CLIPPY_HACKERY__
