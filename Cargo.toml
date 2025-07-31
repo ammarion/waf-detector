@@ -34,6 +34,12 @@ serde_yaml = "0.9"
 regex = "1.10"
 once_cell = "1.19"
 
+# Random number generation
+rand = "0.8"
+
+# Directory paths
+dirs = "5.0"
+
 # CLI
 clap = { version = "4.4", features = ["derive"] }
 
@@ -72,6 +78,7 @@ tempfile = "3.20.0"
 tokio-test = "0.4"
 mockito = "1.2"
 criterion = { version = "0.5", features = ["html_reports"] }
+urlencoding = "2.1"
 
 [profile.release]
 opt-level = 3

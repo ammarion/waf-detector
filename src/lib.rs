@@ -18,6 +18,9 @@ pub mod payload;
 pub mod testing;
 pub mod timing;
 
+// NEW: WAF Effectiveness Testing module
+pub mod effectiveness;
+
 #[derive(Debug, Clone)]
 pub struct DetectionContext {
     pub url: String,

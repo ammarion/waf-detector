@@ -1,0 +1,144 @@
+name: Accuracy Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at 2 AM UTC to catch any external changes
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  validate-accuracy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build WAF Detector
+      run: cargo build --release
+    
+    - name: Run Rust tests
+      run: cargo test --all
+    
+    - name: Install Python dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        pip install aiohttp pyyaml
+    
+    - name: Run CI validation
+      run: |
+        chmod +x ci_validation.py
+        python3 ci_validation.py ./target/release/waf-detector
+    
+    - name: Run comprehensive accuracy validation
+      run: |
+        chmod +x accuracy_validation.py
+        python3 accuracy_validation.py
+      continue-on-error: true
+    
+    - name: Run header comparison tests
+      run: |
+        chmod +x header_comparison_test.py
+        python3 header_comparison_test.py
+      continue-on-error: true
+    
+    - name: Upload validation results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: validation-results
+        path: |
+          ci_validation_results.json
+          validation_report.md
+          validation_results.json
+          validation_metrics.json
+          header_comparison_report.md
+          header_comparison_results.json
+          missed_header_patterns.json
+    
+    - name: Comment PR with results
+      uses: actions/github-script@v6
+      if: github.event_name == 'pull_request'
+      with:
+        script: |
+          const fs = require('fs');
+          
+          // Read CI validation results
+          let ciResults = {};
+          try {
+            ciResults = JSON.parse(fs.readFileSync('ci_validation_results.json', 'utf8'));
+          } catch (e) {
+            console.error('Failed to read CI results:', e);
+          }
+          
+          // Create comment
+          let comment = '## 🔍 WAF Detector Accuracy Validation\n\n';
+          
+          if (ciResults.passed) {
+            comment += '✅ **All validation tests passed!**\n\n';
+          } else {
+            comment += '❌ **Some validation tests failed**\n\n';
+          }
+          
+          // Add metrics
+          if (ciResults.metrics) {
+            comment += '### Accuracy Metrics\n';
+            comment += `- Overall Accuracy: ${(ciResults.metrics.overall_accuracy * 100).toFixed(1)}%\n`;
+            comment += `- WAF Precision: ${(ciResults.metrics.waf_precision * 100).toFixed(1)}%\n`;
+            comment += `- WAF Recall: ${(ciResults.metrics.waf_recall * 100).toFixed(1)}%\n`;
+            comment += `- CDN Precision: ${(ciResults.metrics.cdn_precision * 100).toFixed(1)}%\n`;
+            comment += `- CDN Recall: ${(ciResults.metrics.cdn_recall * 100).toFixed(1)}%\n\n`;
+          }
+          
+          // Add performance metrics
+          if (ciResults.performance) {
+            comment += '### Performance\n';
+            comment += `- Average Detection Time: ${ciResults.performance.average_time.toFixed(2)}s\n`;
+            comment += `- Max Detection Time: ${ciResults.performance.max_time.toFixed(2)}s\n\n`;
+          }
+          
+          // Add failed tests summary
+          if (ciResults.failed_tests && ciResults.failed_tests.length > 0) {
+            comment += '### Failed Tests\n';
+            ciResults.failed_tests.slice(0, 5).forEach(test => {
+              comment += `- ${test.test}: ${test.error || 'Unknown error'}\n`;
+            });
+            if (ciResults.failed_tests.length > 5) {
+              comment += `- ... and ${ciResults.failed_tests.length - 5} more\n`;
+            }
+          }
+          
+          // Post comment
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+    
+    - name: Check validation status
+      run: |
+        if [ -f ci_validation_results.json ]; then
+          passed=$(python3 -c "import json; print(json.load(open('ci_validation_results.json'))['passed'])")
+          if [ "$passed" != "True" ]; then
+            echo "Validation failed!"
+            exit 1
+          fi
+        fi

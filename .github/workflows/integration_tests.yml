@@ -1,0 +1,210 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  integration-tests:
+    name: Run Integration Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable, beta]
+        include:
+          - os: ubuntu-latest
+            rust: nightly
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ matrix.rust }}
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev pkg-config
+    
+    - name: Build
+      run: cargo build --release --verbose
+    
+    - name: Run unit tests
+      run: cargo test --lib --verbose
+    
+    - name: Run integration tests
+      run: |
+        cargo test --test "*integration*" --verbose
+        cargo test --test "run_integration_tests" --verbose
+    
+    - name: Run provider-specific tests
+      run: |
+        cargo test --test "cloudflare_integration_test" --verbose
+        cargo test --test "aws_integration_test" --verbose
+    
+    - name: Run smoke tests
+      run: |
+        ./target/release/waf-detect https://cloudflare.com --json
+        ./target/release/waf-detect https://aws.amazon.com --json
+        ./target/release/waf-detect https://example.com --json
+    
+    - name: Run validation suite
+      if: matrix.os == 'ubuntu-latest' && matrix.rust == 'stable'
+      run: |
+        pip3 install -r requirements-test.txt || echo "No test requirements file"
+        python3 ci_validation.py ./target/release/waf-detect || true
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results-${{ matrix.os }}-${{ matrix.rust }}
+        path: |
+          integration_test_report.txt
+          ci_validation_results.json
+          validation_report.md
+    
+    - name: Check code coverage
+      if: matrix.os == 'ubuntu-latest' && matrix.rust == 'stable'
+      uses: actions-rs/tarpaulin@v0.1
+      with:
+        version: '0.15.0'
+        args: '-- --test-threads 1'
+    
+    - name: Upload coverage to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.rust == 'stable'
+      uses: codecov/codecov-action@v3
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: false
+
+  performance-tests:
+    name: Performance Regression Tests
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+    
+    - name: Build optimized binary
+      run: cargo build --release
+    
+    - name: Run performance benchmarks
+      run: |
+        cargo bench --bench detection_benchmarks -- --output-format bencher | tee output.txt
+        
+    - name: Store benchmark result
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'cargo'
+        output-file-path: output.txt
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Run security audit
+      uses: actions-rs/audit-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  docker-integration:
+    name: Docker Integration Test
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Build Docker image
+      run: docker build -t waf-detector:test .
+    
+    - name: Run Docker tests
+      run: |
+        docker run --rm waf-detector:test --help
+        docker run --rm waf-detector:test https://cloudflare.com --json
+
+  release-test:
+    name: Release Build Test
+    runs-on: ${{ matrix.os }}
+    needs: [integration-tests, security-audit]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+    
+    - name: Build release
+      run: cargo build --release
+    
+    - name: Package release
+      run: |
+        mkdir -p dist
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          cp target/release/waf-detect.exe dist/
+        else
+          cp target/release/waf-detect dist/
+        fi
+        cp README.md dist/
+        cp LICENSE dist/ || echo "No LICENSE file"
+    
+    - name: Upload release artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-${{ matrix.os }}
+        path: dist/
