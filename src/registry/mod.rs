@@ -119,21 +119,18 @@ impl ProviderRegistry {
 
         // NEW: Run DNS analysis in parallel with provider detection
         let dns_future = {
-            let url = context.url.clone();
+            let dns_info = context.dns_info.clone();
             let dns_analyzer = Arc::clone(&self.dns_analyzer);
             async move {
-                match dns_analyzer.analyze(&url).await {
-                    Ok(dns_evidence) => {
-                        if !dns_evidence.is_empty() {
-                            Some(("DnsAnalysis".to_string(), dns_evidence, 0.95))
-                        } else {
-                            None
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("DNS analysis failed: {e}");
+                if let Some(info) = dns_info {
+                    let dns_evidence = dns_analyzer.analyze_from_info(&info);
+                    if !dns_evidence.is_empty() {
+                        Some(("DnsAnalysis".to_string(), dns_evidence, 0.95))
+                    } else {
                         None
                     }
+                } else {
+                    None
                 }
             }
         };

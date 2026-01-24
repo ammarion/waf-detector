@@ -29,10 +29,18 @@ pub struct DetectionContext {
     pub user_agent: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DnsInfo {
-    pub ip_addresses: Vec<String>,
-    pub nameservers: Vec<String>,
+    #[serde(default)]
+    pub cnames: Vec<String>,
+    #[serde(default)]
+    pub a_records: Vec<String>,
+    #[serde(default)]
+    pub txt_records: Vec<String>,
+    #[serde(default)]
+    pub mx_records: Vec<String>,
+    #[serde(default)]
+    pub ns_records: Vec<String>,
 }
 
 #[async_trait::async_trait]

@@ -1,5 +1,13 @@
-node_modules
-node_modules
-node_modules
-node_modules
-node_modules
+# Rust
+target/
+**/*.rs.bk
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Node (just in case)
+node_modules/

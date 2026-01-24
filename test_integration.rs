@@ -14,22 +14,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test DNS analyzer
     writeln!(temp_file, "Testing DNS analyzer...")?;
     let dns_analyzer = DnsAnalyzer::new();
+    let resolver = waf_detector::dns::optimized::DnsResolver::new()?;
 
     // Test multiple domains to find CNAME records
     let test_domains = vec!["www.github.com", "www.discord.com", "blog.cloudflare.com"];
 
     for domain in test_domains {
         writeln!(temp_file, "Testing DNS for {domain}...")?;
-        let dns_result = dns_analyzer.analyze(domain).await;
-        writeln!(temp_file, "  DNS analysis result: {:?}", dns_result.is_ok())?;
-        if let Ok(evidence) = &dns_result {
-            writeln!(temp_file, "  DNS evidence count: {}", evidence.len())?;
-            for ev in evidence {
-                writeln!(
-                    temp_file,
-                    "    - DNS: {} (confidence: {:.2})",
-                    ev.description, ev.confidence
-                )?;
+        let dns_info = resolver.resolve(domain).await;
+
+        match dns_info {
+            Ok(info) => {
+                let evidence = dns_analyzer.analyze_from_info(&info);
+                writeln!(temp_file, "  DNS evidence count: {}", evidence.len())?;
+                for ev in evidence {
+                    writeln!(
+                        temp_file,
+                        "    - DNS: {} (confidence: {:.2})",
+                        ev.description, ev.confidence
+                    )?;
+                }
+            }
+            Err(e) => {
+                writeln!(temp_file, "  DNS resolution failed: {e}")?;
             }
         }
     }
