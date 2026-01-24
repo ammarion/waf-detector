@@ -324,26 +324,74 @@ impl EffectivenessTest {
     /// Perform an HTTP request with rate limiting
     async fn perform_request(
         &mut self,
-        _url: &str,
-        _method: &str,
-        _body: &str,
-        _headers: HashMap<String, String>,
+        url: &str,
+        method: &str,
+        body: &str,
+        headers: HashMap<String, String>,
     ) -> Result<TestResult> {
-        // This is a placeholder - in real implementation, this would use the HTTP client
-        // For now, we'll return a mock result
-
         self.request_count += 1;
 
         // Add request delay for stealth
         sleep(self.config.request_delay).await;
 
-        // Mock implementation
-        Ok(TestResult {
-            blocked: false,
-            status_code: 200,
-            evidence: "Mock response".to_string(),
-            response_time: Duration::from_millis(100),
-        })
+        // Build client with timeout
+        let client = reqwest::Client::builder()
+            .timeout(self.config.request_timeout)
+            .danger_accept_invalid_certs(true) // Allow testing sites with invalid certs (common in testing)
+            .build()?;
+
+        let mut request_builder = match method {
+            "POST" => client.post(url).body(body.to_string()),
+            "PUT" => client.put(url).body(body.to_string()),
+            _ => client.get(url), // Default to GET
+        };
+
+        // Add headers
+        for (key, value) in &headers {
+            request_builder = request_builder.header(key, value);
+        }
+
+        // Add User-Agent if not present (to look more like a browser or scanner)
+        // We check the input map since checking the builder is tricky
+        if !headers.keys().any(|k| k.eq_ignore_ascii_case("user-agent")) {
+            request_builder = request_builder.header("User-Agent", "WAF-Detector/1.0");
+        }
+
+        let start = Instant::now();
+        let response_result = request_builder.send().await;
+        let duration = start.elapsed();
+
+        match response_result {
+            Ok(response) => {
+                let status_code = response.status().as_u16();
+                let response_text = response.text().await.unwrap_or_default();
+
+                let blocked = Self::is_blocked(status_code, &response_text);
+
+                Ok(TestResult {
+                    blocked,
+                    status_code,
+                    evidence: if blocked {
+                        format!(
+                            "Blocked with status {}: {}",
+                            status_code,
+                            &response_text.chars().take(200).collect::<String>()
+                        )
+                    } else {
+                        "Request allowed".to_string()
+                    },
+                    response_time: duration,
+                })
+            }
+            Err(e) => {
+                Ok(TestResult {
+                    blocked: true, // Treat network failure as potential block (fail-open vs fail-close discussion)
+                    status_code: 0,
+                    evidence: format!("Connection failed: {e}"),
+                    response_time: duration,
+                })
+            }
+        }
     }
 
     /// Enforce rate limiting
@@ -394,6 +442,16 @@ impl EffectivenessTest {
                 category: "Configuration".to_string(),
                 description: "WAF appears to be in detection-only mode or misconfigured".to_string(),
                 implementation: "Review WAF mode settings and ensure blocking is enabled for high-confidence attacks".to_string(),
+            });
+        }
+
+        // Specific check for "Monitoring Mode" (WAF present but not blocking)
+        if report.statistics.blocked_requests == 0 && report.statistics.total_tests > 0 {
+            report.add_recommendation(Recommendation {
+                priority: "CRITICAL".to_string(),
+                category: "WAF Mode".to_string(),
+                description: "No attacks were blocked (0% block rate).".to_string(),
+                implementation: "If a WAF is present, it is likely in 'Monitoring' or 'Log-Only' mode. Change to 'Blocking' mode to prevent attacks.".to_string(),
             });
         }
     }
