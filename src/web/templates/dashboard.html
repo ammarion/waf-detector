@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -34,7 +35,7 @@
             font-size: 3rem;
             font-weight: 700;
             margin-bottom: 0.5rem;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         }
 
         .header p {
@@ -53,13 +54,13 @@
             background: white;
             border-radius: 16px;
             padding: 2rem;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
 
         .card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
         }
 
         .card h2 {
@@ -132,7 +133,7 @@
             background: white;
             border-radius: 16px;
             padding: 2rem;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
             margin-top: 2rem;
         }
 
@@ -252,15 +253,15 @@
             border-radius: 8px;
             display: none;
         }
-        
+
         .evidence-list table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 1rem;
             font-size: 0.9rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         }
-        
+
         .evidence-list th {
             background-color: #f1f5f9;
             padding: 0.75rem;
@@ -270,21 +271,21 @@
             top: 0;
             z-index: 10;
         }
-        
+
         .evidence-list td {
             padding: 0.75rem;
             vertical-align: middle;
             border-bottom: 1px solid #e2e8f0;
         }
-        
+
         .evidence-list tr:nth-child(even) {
             background-color: #f8fafc;
         }
-        
+
         .evidence-list tr:hover {
             background-color: #f0f9ff;
         }
-        
+
         .status-badge {
             display: inline-block;
             padding: 0.25rem 0.75rem;
@@ -293,19 +294,19 @@
             font-weight: 600;
             color: white;
         }
-        
+
         .status-blocked {
             background-color: #22c55e;
         }
-        
+
         .status-allowed {
             background-color: #ef4444;
         }
-        
+
         .status-challenge {
             background-color: #0ea5e9;
         }
-        
+
         .summary-table {
             margin-top: 1.5rem;
             background-color: #f0f9ff;
@@ -400,7 +401,9 @@
         }
 
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         .status-indicator {
@@ -428,15 +431,15 @@
             .dashboard-grid {
                 grid-template-columns: 1fr;
             }
-            
+
             .detection-info {
                 grid-template-columns: 1fr;
             }
-            
+
             .container {
                 padding: 1rem;
             }
-            
+
             .header h1 {
                 font-size: 2rem;
             }
@@ -507,37 +510,54 @@
         }
 
         /* API Docs code/pre color fix */
-        pre, code, .hljs, .highlight, [class^="language-"] {
+        pre,
+        code,
+        .hljs,
+        .highlight,
+        [class^="language-"] {
             background: #f5f5f5 !important;
             color: #222 !important;
             border-radius: 6px;
             font-family: 'Monaco', 'Consolas', monospace;
         }
+
         pre {
             padding: 1rem !important;
             overflow-x: auto;
         }
+
         code {
             padding: 0.125rem 0.25rem !important;
         }
+
         /* Remove any text-shadow that might make text less readable */
-        pre, code, .hljs, .highlight, [class^="language-"] {
+        pre,
+        code,
+        .hljs,
+        .highlight,
+        [class^="language-"] {
             text-shadow: none !important;
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="header">
             <h1>🛡️ WAF Detector</h1>
             <p>Advanced Security Infrastructure Analysis & Visualization</p>
-            <p style="font-size: 0.8rem; color: #f8fafc; background-color: rgba(0,0,0,0.3); padding: 0.5rem; border-radius: 6px; margin-top: 0.5rem;">⚠️ <strong>Important:</strong> This tool should only be used against your own web services or with explicit authorization. Unauthorized scanning may violate terms of service or laws in your jurisdiction.</p>
+            <p
+                style="font-size: 0.8rem; color: #f8fafc; background-color: rgba(0,0,0,0.3); padding: 0.5rem; border-radius: 6px; margin-top: 0.5rem;">
+                ⚠️ <strong>Important:</strong> This tool should only be used against your own web services or with
+                explicit authorization. Unauthorized scanning may violate terms of service or laws in your jurisdiction.
+            </p>
         </div>
 
         <div class="dashboard-grid">
             <div class="card">
                 <h2>🚀 Single URL Detection (CDN & WAF)</h2>
-                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">Detect which CDN and WAF are protecting a single target URL.</p>
+                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">Detect which CDN and WAF are protecting
+                    a single target URL.</p>
                 <form id="singleScanForm">
                     <div class="input-group">
                         <label for="singleUrl">Enter URL to scan:</label>
@@ -552,11 +572,13 @@
 
             <div class="card">
                 <h2>⚡ Batch URL Detection (CDN & WAF)</h2>
-                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">Detect which CDN and WAF are protecting multiple target URLs at once.</p>
+                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">Detect which CDN and WAF are protecting
+                    multiple target URLs at once.</p>
                 <form id="batchScanForm">
                     <div class="input-group">
                         <label for="batchUrls">Enter URLs (one per line):</label>
-                        <textarea id="batchUrls" class="input-field" rows="4" placeholder="https://example1.com&#10;https://example2.com" required></textarea>
+                        <textarea id="batchUrls" class="input-field" rows="4"
+                            placeholder="https://example1.com&#10;https://example2.com" required></textarea>
                     </div>
                     <button type="submit" class="btn">
                         <span id="batchScanIcon">⚡</span>
@@ -575,7 +597,8 @@
                 <form id="smokeTestForm">
                     <div class="input-group">
                         <label for="smokeTestUrl">Enter URL to test:</label>
-                        <input type="url" id="smokeTestUrl" class="input-field" placeholder="https://example.com" required>
+                        <input type="url" id="smokeTestUrl" class="input-field" placeholder="https://example.com"
+                            required>
                     </div>
                     <button type="submit" class="btn">
                         <span id="smokeTestIcon">🛡️</span>
@@ -618,7 +641,7 @@
         // HTML escaping utility to prevent XSS
         function escapeHtml(str) {
             if (typeof str !== 'string') return str;
-            return str.replace(/[&<>\"'`=\\/]/g, function(s) {
+            return str.replace(/[&<>\"'`=\\/]/g, function (s) {
                 return ({
                     '&': '&amp;',
                     '<': '&lt;',
@@ -664,18 +687,18 @@
             const btn = document.querySelector('#singleScanForm button');
             const icon = document.getElementById('singleScanIcon');
             const text = document.getElementById('singleScanText');
-            
+
             setButtonLoading(btn, icon, text, true);
-            
+
             try {
                 const response = await fetch('/api/scan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url, debug: true })
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.success && data.result) {
                     allResults.unshift(data.result);
                     displayResults();
@@ -694,18 +717,18 @@
             const btn = document.querySelector('#batchScanForm button');
             const icon = document.getElementById('batchScanIcon');
             const text = document.getElementById('batchScanText');
-            
+
             setButtonLoading(btn, icon, text, true);
-            
+
             try {
                 const response = await fetch('/api/batch-scan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ urls, debug: true })
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.success && data.results) {
                     allResults.unshift(...data.results.reverse());
                     displayResults();
@@ -724,18 +747,18 @@
             const btn = document.querySelector('#smokeTestForm button');
             const icon = document.getElementById('smokeTestIcon');
             const text = document.getElementById('smokeTestText');
-            
+
             setButtonLoading(btn, icon, text, true, 'Testing...');
-            
+
             try {
                 const response = await fetch('/api/smoke-test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url })
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.success && data.result) {
                     // Mark this as a smoke test result explicitly
                     data.result.is_smoke_test = true;
@@ -777,10 +800,10 @@
             const section = document.getElementById('resultsSection');
             const container = document.getElementById('resultsContainer');
             const count = document.getElementById('resultsCount');
-            
+
             section.style.display = 'block';
             count.textContent = `${allResults.length} result${allResults.length !== 1 ? 's' : ''}`;
-            
+
             container.innerHTML = allResults.map(result => createResultCard(result)).join('');
         }
 
@@ -790,19 +813,19 @@
                 console.error("Result is undefined");
                 return '<div class="result-card">Error: Invalid result data</div>';
             }
-            
+
             // Check if this is a smoke test result (has test_results property AND other smoke test indicators)
-            const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) || 
-                               result.is_smoke_test === true ||
-                               (result.summary && result.summary.effectiveness_percentage !== undefined);
-            
+            const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) ||
+                result.is_smoke_test === true ||
+                (result.summary && result.summary.effectiveness_percentage !== undefined);
+
             console.log("Creating result card for:", result);
             console.log("isSmokeTest:", isSmokeTest, "is_smoke_test flag:", result.is_smoke_test, "detected_waf:", result.detected_waf, "detected_cdn:", result.detected_cdn);
             console.log("test_results array:", Array.isArray(result.test_results), "length:", result.test_results ? result.test_results.length : 0);
             // Check if this is a combined result (has detection_result property)
             const isCombined = result.detection_result !== undefined;
             const detectionData = isCombined && result.detection_result ? result.detection_result : result;
-            
+
             // Initialize variables safely
             let wafDetected = false;
             let cdnDetected = false;
@@ -810,7 +833,7 @@
             let cdnName = 'Not Detected';
             let wafConfidence = 0;
             let cdnConfidence = 0;
-            
+
             // For smoke test results, use the detected_waf property directly
             if (isSmokeTest) {
                 // Handle detected_waf safely (can be null, string, or object)
@@ -826,7 +849,7 @@
                     }
                     if (!wafConfidence) wafConfidence = 95; // Default high confidence for smoke test detections
                 }
-                
+
                 // Handle detected_cdn safely (can be null, string, or object)
                 if (result.detected_cdn && result.detected_cdn !== null && result.detected_cdn !== 'Unknown') {
                     cdnDetected = true;
@@ -840,7 +863,7 @@
                     }
                     if (!cdnConfidence) cdnConfidence = 95; // Default high confidence
                 }
-            } 
+            }
             // For regular detection results or combined results
             else {
                 // Safely check if detected_waf exists and is not null
@@ -855,7 +878,7 @@
                         wafConfidence = 95; // Default confidence for string detection
                     }
                 }
-                
+
                 // Safely check if detected_cdn exists and is not null
                 if (detectionData && detectionData.detected_cdn && detectionData.detected_cdn !== null) {
                     if (typeof detectionData.detected_cdn === 'object' && detectionData.detected_cdn.name) {
@@ -869,18 +892,18 @@
                     }
                 }
             }
-            
+
             return `
                 <div class="result-card">
                     <div class="result-header">
-                        <div class="result-url">${escapeHtml(isSmokeTest && result.url ? result.url : 
-                                               isCombined && result.url ? result.url : 
-                                               detectionData && detectionData.url ? detectionData.url : 
-                                               "Unknown URL")}</div>
-                        <div class="result-time">${isSmokeTest && result.total_time_ms ? result.total_time_ms : 
-                                                isCombined && result.total_time_ms ? result.total_time_ms : 
-                                                detectionData && detectionData.detection_time_ms ? detectionData.detection_time_ms : 
-                                                "0"}ms</div>
+                        <div class="result-url">${escapeHtml(isSmokeTest && result.url ? result.url :
+                isCombined && result.url ? result.url :
+                    detectionData && detectionData.url ? detectionData.url :
+                        "Unknown URL")}</div>
+                        <div class="result-time">${isSmokeTest && result.total_time_ms ? result.total_time_ms :
+                    isCombined && result.total_time_ms ? result.total_time_ms :
+                        detectionData && detectionData.detection_time_ms ? detectionData.detection_time_ms :
+                            "0"}ms</div>
                     </div>
                     ${isSmokeTest ? `
                         <div style="margin-bottom: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #0ea5e9;">
@@ -905,25 +928,25 @@
                                     </thead>
                                     <tbody>
                                         ${result.test_results && Array.isArray(result.test_results) ? result.test_results.map((test, index) => {
-                                            const statusColor = test.classification === 'Blocked' || test.classification === 'Challenge' ? '#22c55e' : 
-                                                  test.classification === 'Allowed' ? '#ef4444' : '#f59e0b';
-                                            const statusIcon = test.classification === 'Blocked' || test.classification === 'Challenge' ? '🛡️' : 
-                                                  test.classification === 'Allowed' ? '⚠️' : '❓';
-                                            const rowColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
-                                            console.log('Test row data:', test);
-                                            // Add special tooltip for scanner detection tests
-                                            const isScanner = test.category === 'ScannerDetection';
-                                            const tooltipAttr = isScanner ? 
-                                                `title="Testing if WAF blocks ${escapeHtml(test.payload)} scanner signature via User-Agent header"` : '';
-                                            
-                                            return `<tr style="background: ${rowColor};" ${tooltipAttr}>
+                                const statusColor = test.classification === 'Blocked' || test.classification === 'Challenge' ? '#22c55e' :
+                                    test.classification === 'Allowed' ? '#ef4444' : '#f59e0b';
+                                const statusIcon = test.classification === 'Blocked' || test.classification === 'Challenge' ? '🛡️' :
+                                    test.classification === 'Allowed' ? '⚠️' : '❓';
+                                const rowColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+                                console.log('Test row data:', test);
+                                // Add special tooltip for scanner detection tests
+                                const isScanner = test.category === 'ScannerDetection';
+                                const tooltipAttr = isScanner ?
+                                    `title="Testing if WAF blocks ${escapeHtml(test.payload)} scanner signature via User-Agent header"` : '';
+
+                                return `<tr style="background: ${rowColor};" ${tooltipAttr}>
                                                 <td>${escapeHtml(test.category)}${isScanner ? ' 🔍' : ''}</td>
                                                 <td style="font-family: monospace;">${escapeHtml((test.payload !== undefined && test.payload !== null && test.payload !== '') ? test.payload : '(empty)')}</td>
                                                 <td><span style="background: ${statusColor}; color: white; padding: 0.125rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block;">${statusIcon} ${escapeHtml(test.classification)}</span></td>
                                                 <td>${escapeHtml(displayStatusCode(parseInt(test.response_status) || 0))}</td>
                                                 <td>${escapeHtml(String(test.response_time_ms))}</td>
                                             </tr>`;
-                                        }).join('') : ''}
+                            }).join('') : ''}
                                     </tbody>
                                 </table>
                             </div>
@@ -978,37 +1001,37 @@
                             </button>
                             <div class="evidence-list">
                                 ${detectionData.evidence.map(ev => {
-                                    if (!ev) return '';
-                                    
-                                    const isTiming = ev.method_type === 'Timing';
-                                    const isDns = typeof ev.method_type === 'object' && ev.method_type && ev.method_type.DNS;
-                                    const isPayload = ev.method_type === 'Payload';
-                                    
-                                    const timingIcon = isTiming ? '⏱️' : '';
-                                    const dnsIcon = isDns ? '🌐' : '';
-                                    const payloadIcon = isPayload ? '🛡️' : '';
-                                    const icon = timingIcon || dnsIcon || payloadIcon;
-                                    
-                                    const timingClass = isTiming ? 'evidence-timing' : '';
-                                    const dnsClass = isDns ? 'evidence-dns' : '';
-                                    const payloadClass = isPayload ? 'evidence-payload' : '';
-                                    const cssClass = timingClass || dnsClass || payloadClass;
-                                    
-                                    return `
+                                if (!ev) return '';
+
+                                const isTiming = ev.method_type === 'Timing';
+                                const isDns = typeof ev.method_type === 'object' && ev.method_type && ev.method_type.DNS;
+                                const isPayload = ev.method_type === 'Payload';
+
+                                const timingIcon = isTiming ? '⏱️' : '';
+                                const dnsIcon = isDns ? '🌐' : '';
+                                const payloadIcon = isPayload ? '🛡️' : '';
+                                const icon = timingIcon || dnsIcon || payloadIcon;
+
+                                const timingClass = isTiming ? 'evidence-timing' : '';
+                                const dnsClass = isDns ? 'evidence-dns' : '';
+                                const payloadClass = isPayload ? 'evidence-payload' : '';
+                                const cssClass = timingClass || dnsClass || payloadClass;
+
+                                return `
                                         <div class="evidence-item ${cssClass}">
                                             <strong>${icon} ${escapeHtml(ev.description || 'Unknown evidence')}</strong> 
                                             <span class="confidence-badge confidence-${getConfidenceLevel(ev.confidence || 0)}">${((ev.confidence || 0) * 100).toFixed(1)}%</span>
                                             <br><em>Method:</em> ${isDns ? 'DNS (CNAME)' : isPayload ? 'Payload (WAF Blocking)' : escapeHtml(ev.method_type || 'Unknown')}
-                                            ${isTiming ? `<br><em>Timing Data:</em> ${escapeHtml(ev.raw_data || 'N/A')}` : 
-                                              isDns ? `<br><em>DNS Record:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
-                                              isPayload ? `<br><em>Blocked Payloads:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
-                                              `<br><em>Data:</em> ${escapeHtml(ev.raw_data || 'N/A')}`}
+                                            ${isTiming ? `<br><em>Timing Data:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
+                                        isDns ? `<br><em>DNS Record:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
+                                            isPayload ? `<br><em>Blocked Payloads:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
+                                                `<br><em>Data:</em> ${escapeHtml(ev.raw_data || 'N/A')}`}
                                             ${isTiming ? `<br><span class="timing-info">⚡ WAF processing delay detected</span>` : ''}
                                             ${isDns ? `<br><span class="dns-info">🔒 Infrastructure-level detection</span>` : ''}
                                             ${isPayload ? `<br><span class="payload-info">🚫 Malicious payload blocked by WAF</span>` : ''}
                                         </div>
                                     `;
-                                }).join('')}
+                            }).join('')}
                             </div>
                         </div>
                     ` : ''}
@@ -1034,7 +1057,7 @@
             const evidenceList = button.nextElementSibling;
             const isVisible = evidenceList.style.display === 'block';
             evidenceList.style.display = isVisible ? 'none' : 'block';
-            button.textContent = isVisible ? 
+            button.textContent = isVisible ?
                 button.textContent.replace('Hide Evidence', 'View Evidence') :
                 button.textContent.replace('View Evidence', 'Hide Evidence');
         }
@@ -1064,13 +1087,13 @@
         function showMessage(message, type) {
             const existing = document.querySelector('.error-message, .success-message');
             if (existing) existing.remove();
-            
+
             const div = document.createElement('div');
             div.className = `${type}-message`;
             div.textContent = message;
-            
+
             document.querySelector('.container').insertBefore(div, document.querySelector('.dashboard-grid'));
-            
+
             setTimeout(() => div.remove(), 5000);
         }
 
@@ -1079,17 +1102,17 @@
                 showErrorMessage('No results to export');
                 return;
             }
-            
+
             const dataStr = JSON.stringify(allResults, null, 2);
-            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-            
+            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+
             const exportFileDefaultName = `waf-detector-results-${new Date().toISOString().split('T')[0]}.json`;
-            
+
             const linkElement = document.createElement('a');
             linkElement.setAttribute('href', dataUri);
             linkElement.setAttribute('download', exportFileDefaultName);
             linkElement.click();
-            
+
             showSuccessMessage('Results exported successfully');
         }
 
@@ -1097,30 +1120,30 @@
         window.addEventListener('load', () => {
             // Page loaded - ready for user input
         });
-        
+
         // Fix for smoke test results display
         function fixSmokeTestDisplay() {
             // Override the runSmokeTest function
             if (typeof window.runSmokeTest === 'function') {
                 window.originalRunSmokeTest = window.runSmokeTest;
             }
-            
-            window.runSmokeTest = async function(url) {
+
+            window.runSmokeTest = async function (url) {
                 const btn = document.querySelector('#smokeTestForm button');
                 const icon = document.getElementById('smokeTestIcon');
                 const text = document.getElementById('smokeTestText');
-                
+
                 setButtonLoading(btn, icon, text, true, 'Testing...');
-                
+
                 try {
                     const response = await fetch('/api/smoke-test', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ url })
                     });
-                    
+
                     const data = await response.json();
-                    
+
                     if (data.success && data.result) {
                         // Process the smoke test result before adding to results
                         const processedResult = processRawSmokeTestResult(data.result);
@@ -1136,11 +1159,11 @@
                     setButtonLoading(btn, icon, text, false, 'Run Smoke Test');
                 }
             };
-            
+
             // Function to process raw smoke test results
             function processRawSmokeTestResult(rawResult) {
                 console.log("Processing smoke test result:", rawResult);
-                
+
                 // Ensure the result has the correct structure for smoke test display
                 let processedResult = {
                     url: rawResult.url,
@@ -1152,8 +1175,8 @@
                         total_tests: 0,
                         blocked_tests: 0
                     },
-                    effectiveness_percentage: rawResult.summary ? 
-                        rawResult.summary.effectiveness_percentage : 
+                    effectiveness_percentage: rawResult.summary ?
+                        rawResult.summary.effectiveness_percentage :
                         (rawResult.effectiveness_percentage || 0),
                     waf_mode: rawResult.waf_mode || "Unknown",
                     // Handle null values safely
@@ -1162,13 +1185,13 @@
                     total_time_ms: rawResult.total_time_ms || 0,
                     timestamp: rawResult.timestamp || new Date().toISOString()
                 };
-                
+
                 // Process test results with careful handling of response_status
                 if (Array.isArray(rawResult.test_results)) {
                     processedResult.test_results = rawResult.test_results.map(test => {
                         // Log each test result for debugging
                         console.log('Processing test result:', test);
-                        
+
                         return {
                             category: test.category || "Unknown",
                             payload: (test.payload !== undefined && test.payload !== null) ? test.payload : '',
@@ -1178,18 +1201,19 @@
                         };
                     });
                 }
-                
+
                 return processedResult;
             }
-            
+
             console.log("Smoke test display fix applied");
         }
-        
+
         // Apply the fix when the page loads
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             fixSmokeTestDisplay();
             console.log("Smoke test display fix applied on page load");
         });
     </script>
 </body>
+
 </html>
