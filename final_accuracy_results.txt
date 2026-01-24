@@ -1,0 +1,108 @@
+======================================================================
+WAF DETECTION ACCURACY AUDIT
+======================================================================
+Binary: ./target/release/waf-detect
+Test cases: 15
+Started: 2025-09-29 12:54:53
+
+🔍 Testing: https://cloudflare.com
+   Expected: WAF=CloudFlare, CDN=CloudFlare
+   Detected: WAF=CloudFlare, CDN=CloudFlare, Confidence=1.00
+   ⚠️  SLOW: 14.11s
+   ✅ PASS
+
+🔍 Testing: https://discord.com
+   Expected: WAF=CloudFlare, CDN=CloudFlare
+   Detected: WAF=CloudFlare, CDN=CloudFlare, Confidence=1.00
+   ✅ PASS
+
+🔍 Testing: https://www.cloudflare.com/cdn-cgi/trace
+   Expected: WAF=CloudFlare, CDN=CloudFlare
+   Detected: WAF=CloudFlare, CDN=CloudFlare, Confidence=1.00
+   ✅ PASS
+
+🔍 Testing: https://aws.amazon.com
+   Expected: WAF=AWS, CDN=AWS
+   Detected: WAF=AWS, CDN=AWS, Confidence=1.00
+   ✅ PASS
+
+🔍 Testing: https://d1.awsstatic.com/
+   Expected: WAF=AWS, CDN=AWS
+   Detected: WAF=AWS, CDN=AWS, Confidence=1.00
+   ✅ PASS
+
+🔍 Testing: https://www.fastly.com
+   Expected: WAF=Fastly, CDN=Fastly
+   Detected: WAF=Fastly, CDN=Fastly, Confidence=1.00
+   ✅ PASS
+
+🔍 Testing: https://github.com
+   Expected: WAF=Fastly, CDN=Fastly
+   Detected: WAF=AWS, CDN=AWS, Confidence=0.47
+   ❌ WRONG DETECTION: Detected AWS instead of Fastly
+   ❌ FAIL
+
+🔍 Testing: https://stackoverflow.com
+   Expected: WAF=Fastly, CDN=Fastly
+   Detected: WAF=CloudFlare, CDN=CloudFlare, Confidence=1.00
+   ❌ WRONG DETECTION: Detected CloudFlare instead of Fastly
+   ❌ FAIL
+
+🔍 Testing: https://www.akamai.com
+   Expected: WAF=Akamai, CDN=Akamai
+  ❌ Error: Error: error sending request for url (https://www.akamai.com/): connection closed before message completed
+
+Caused by:
+    connection closed before message completed
+
+
+🔍 Testing: https://www.apple.com
+   Expected: WAF=Akamai, CDN=Akamai
+   Detected: WAF=None, CDN=None, Confidence=0.00
+   ❌ FALSE NEGATIVE: Failed to detect Akamai WAF
+   ❌ FALSE NEGATIVE: Failed to detect Akamai CDN
+   ❌ FAIL
+
+🔍 Testing: https://vercel.com
+   Expected: WAF=Vercel, CDN=Vercel
+   Detected: WAF=AWS, CDN=Vercel, Confidence=0.47
+   ❌ WRONG DETECTION: Detected AWS instead of Vercel
+   ❌ FAIL
+
+🔍 Testing: https://azure.microsoft.com
+   Expected: WAF=Azure, CDN=Azure
+
+🔍 Testing: https://docs.microsoft.com
+   Expected: WAF=Azure, CDN=Azure
+   Detected: WAF=Azure, CDN=Azure, Confidence=0.64
+   ⚠️  LOW CONFIDENCE: 0.64 < 0.90
+   ✅ PASS
+
+🔍 Testing: https://example.com
+   Expected: WAF=None, CDN=None
+   Detected: WAF=None, CDN=None, Confidence=0.00
+   ✅ PASS
+
+🔍 Testing: https://httpbin.org
+   Expected: WAF=None, CDN=None
+
+======================================================================
+AUDIT SUMMARY
+======================================================================
+
+📊 Overall Results:
+   Total tests: 15
+   Passed: 8 (53.3%)
+   Failed: 4 (26.7%)
+Traceback (most recent call last):
+  File "/Users/ammar/waf-detector/accuracy_audit.py", line 351, in <module>
+    main()
+  File "/Users/ammar/waf-detector/accuracy_audit.py", line 348, in main
+    audit.run_audit()
+  File "/Users/ammar/waf-detector/accuracy_audit.py", line 239, in run_audit
+    self.print_summary()
+  File "/Users/ammar/waf-detector/accuracy_audit.py", line 258, in print_summary
+    waf_tp = len([r for r in self.results if r["expected_waf"] and r["detected_waf"] and r["waf_correct"]])
+  File "/Users/ammar/waf-detector/accuracy_audit.py", line 258, in <listcomp>
+    waf_tp = len([r for r in self.results if r["expected_waf"] and r["detected_waf"] and r["waf_correct"]])
+KeyError: 'detected_waf'

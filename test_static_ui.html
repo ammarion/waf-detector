@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Static Detection UI</title>
+</head>
+<body>
+    <h1>Static Detection UI Test</h1>
+    <button id="testBtn">Test Static Detection on GitHub Pages</button>
+    <pre id="output"></pre>
+
+    <script>
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            const output = document.getElementById('output');
+            output.textContent = 'Testing static detection...\n';
+            
+            try {
+                // Test the static analysis endpoint
+                const response = await fetch('http://localhost:8080/api/static-analysis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: 'https://pages.github.com' })
+                });
+                
+                const data = await response.json();
+                output.textContent += 'Static Analysis Response:\n' + JSON.stringify(data, null, 2);
+                
+                if (data.success && data.analysis && data.analysis.is_likely_static) {
+                    output.textContent += '\n\n✅ Static content correctly detected!';
+                    output.textContent += '\nConfidence: ' + (data.analysis.confidence * 100) + '%';
+                    output.textContent += '\nIndicators: ' + data.analysis.indicators.length;
+                    output.textContent += '\nSuggestions: ' + data.analysis.suggestions.length;
+                } else {
+                    output.textContent += '\n\n❌ Static content NOT detected';
+                }
+            } catch (error) {
+                output.textContent += '\n\nError: ' + error.message;
+            }
+        });
+    </script>
+</body>
+</html>

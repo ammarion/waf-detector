@@ -30,7 +30,8 @@ impl HttpClient {
             .timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(10)
             .tcp_keepalive(Duration::from_secs(60))
-            .user_agent("WAF-Detector/1.0")
+            // Use a realistic browser User-Agent to avoid immediate blocking
+            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             .danger_accept_invalid_certs(true) // For testing purposes
             .build()?;
 
@@ -85,7 +86,24 @@ impl HttpClient {
             }
         }
 
-        let body = response.text().await.unwrap_or_default();
+        // Safe body reading with size limit (max 10MB)
+        // This prevents memory exhaustion from malicious large responses
+        use futures::StreamExt;
+        const MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+
+        let mut body_bytes = Vec::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            if body_bytes.len() + chunk.len() > MAX_BODY_SIZE {
+                println!("⚠️  Response body too large, truncating at {MAX_BODY_SIZE} bytes");
+                break;
+            }
+            body_bytes.extend_from_slice(&chunk);
+        }
+
+        let body = String::from_utf8_lossy(&body_bytes).to_string();
 
         Ok(HttpResponse {
             status,
