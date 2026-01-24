@@ -26,7 +26,7 @@ A high-performance tool for detecting and testing Web Application Firewalls (WAF
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/waf-detector.git
+git clone https://github.com/ammarion/waf-detector.git
 
 # Navigate to the project directory
 cd waf-detector
