@@ -189,6 +189,7 @@ Virtual Adversary adds adaptive, consent-gated effectiveness testing with baseli
 - `--va-variants N`: Variants per payload template.
 - `--va-output report.json`: Save JSON report (also writes a `.summary.txt`).
 - `--va-replay`: Print the replay plan JSON to stdout (probes, headers, and URLs).
+- `--va-replay-csv`: Print the replay plan CSV to stdout.
 
 **Replay plan exports (web UI):**
 - VA history entries expose **Replay JSON** and **Replay CSV** downloads.
