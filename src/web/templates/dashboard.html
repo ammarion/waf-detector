@@ -1259,6 +1259,8 @@
             const copyBtn = document.getElementById('vaEvidenceCopy');
             if (!modal || !row) return;
 
+            modal.dataset.currentRow = JSON.stringify(row);
+
             if (title) {
                 title.textContent = `Probe Evidence • ${row.category || 'Unknown'}`;
             }
@@ -1289,24 +1291,7 @@
             }
 
             if (copyBtn) {
-                copyBtn.onclick = () => {
-                    const evidenceLines = Array.isArray(row.evidence)
-                        ? row.evidence.map(entry => `- ${entry.kind}: ${entry.detail}`).join('\n')
-                        : 'No evidence';
-                    const text = [
-                        `Probe: ${row.category || 'Unknown'}`,
-                        `Outcome: ${row.outcome || 'Unknown'}`,
-                        `Reason: ${row.reason || ''}`,
-                        `Payload: ${row.payload || ''}`,
-                        `Evidence:`,
-                        evidenceLines
-                    ].join('\n');
-                    navigator.clipboard.writeText(text).then(() => {
-                        showSuccessMessage('Evidence copied');
-                    }).catch(() => {
-                        showErrorMessage('Copy failed');
-                    });
-                };
+                copyBtn.onclick = () => copyCurrentEvidence();
             }
 
             modal.classList.add('modal-open');
@@ -1317,6 +1302,28 @@
             if (modal) {
                 modal.classList.remove('modal-open');
             }
+        }
+
+        function copyCurrentEvidence() {
+            const modal = document.getElementById('vaEvidenceModal');
+            if (!modal || !modal.dataset.currentRow) return;
+            const row = JSON.parse(modal.dataset.currentRow);
+            const evidenceLines = Array.isArray(row.evidence)
+                ? row.evidence.map(entry => `- ${entry.kind}: ${entry.detail}`).join('\n')
+                : 'No evidence';
+            const text = [
+                `Probe: ${row.category || 'Unknown'}`,
+                `Outcome: ${row.outcome || 'Unknown'}`,
+                `Reason: ${row.reason || ''}`,
+                `Payload: ${row.payload || ''}`,
+                `Evidence:`,
+                evidenceLines
+            ].join('\n');
+            navigator.clipboard.writeText(text).then(() => {
+                showSuccessMessage('Evidence copied');
+            }).catch(() => {
+                showErrorMessage('Copy failed');
+            });
         }
 
         function closeVaReportModal() {
@@ -1943,6 +1950,15 @@
             document.addEventListener('keydown', (event) => {
                 if (event.key === 'Escape') {
                     closeVaReportModal();
+                    closeVaEvidenceModal();
+                }
+            });
+            document.addEventListener('keydown', (event) => {
+                const modal = document.getElementById('vaEvidenceModal');
+                if (!modal || !modal.classList.contains('modal-open')) return;
+                if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
+                    event.preventDefault();
+                    copyCurrentEvidence();
                 }
             });
             const filter = document.getElementById('vaActivityFilter');
