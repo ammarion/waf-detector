@@ -71,7 +71,19 @@ impl SimpleCliApp {
 
         // Handle virtual adversary (VA) mode
         if let Some(url) = matches.get_one::<String>("va") {
-            let config = VirtualAdversaryConfig::default();
+            let config = VirtualAdversaryConfig {
+                tier: *matches.get_one::<u8>("va-tier").unwrap_or(&1),
+                request_budget: *matches.get_one::<u32>("va-budget").unwrap_or(&120),
+                request_timeout: std::time::Duration::from_secs(
+                    *matches.get_one::<u64>("va-timeout").unwrap_or(&15),
+                ),
+                request_delay: std::time::Duration::from_millis(
+                    *matches.get_one::<u64>("va-delay").unwrap_or(&750),
+                ),
+                max_variants_per_payload: *matches
+                    .get_one::<u8>("va-variants")
+                    .unwrap_or(&4),
+            };
             let mut runner = VirtualAdversaryRunner::new(config)?;
             let report = runner.run(url)?;
             println!(
@@ -743,6 +755,51 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Run Virtual Adversary effectiveness validation (requires consent)")
                 .value_name("URL")
                 .num_args(1),
+        )
+        .arg(
+            Arg::new("va-tier")
+                .long("va-tier")
+                .help("VA safety tier (1-3)")
+                .value_name("TIER")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("1")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-budget")
+                .long("va-budget")
+                .help("VA request budget (max total requests)")
+                .value_name("BUDGET")
+                .value_parser(clap::value_parser!(u32))
+                .default_value("120")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-timeout")
+                .long("va-timeout")
+                .help("VA per-request timeout (seconds)")
+                .value_name("SECONDS")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("15")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-delay")
+                .long("va-delay")
+                .help("VA delay between requests (milliseconds)")
+                .value_name("MS")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("750")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-variants")
+                .long("va-variants")
+                .help("VA max variants per payload")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("4")
+                .requires("va"),
         )
 }
 
