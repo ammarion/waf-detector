@@ -178,6 +178,13 @@ We aim for:
 4. Commit and push - CI will validate again
 5. Check PR comments for validation results
 
+### Virtual Adversary (VA) Validation Notes
+
+- VA effectiveness tests require **consent and authorized targets**.
+- Automated VA tests are limited to unit coverage; end-to-end VA runs should be validated manually.
+- Use `MANUAL_UI_TESTING.md` for VA replay plan, history, and export checks.
+- Keep `cargo test` green after any VA probe or replay-plan changes.
+
 ## Troubleshooting
 
 ### Python Dependencies
