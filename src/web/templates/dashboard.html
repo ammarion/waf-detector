@@ -623,6 +623,8 @@
         let vaPinnedRows = [];
         let vaPinnedIndexSet = new Set();
         let vaCurrentReportRows = [];
+        let vaCurrentReportId = null;
+        let vaCurrentReportTarget = null;
 
         function formatReason(reason) {
             if (!reason) return '';
@@ -1144,14 +1146,15 @@
         }
 
         function buildVaReportCsv(result) {
-            const header = 'index,category,payload,outcome,reason';
+            const header = 'index,category,payload,outcome,reason,pinned';
             const rows = (result.results || []).map((item, index) => {
                 return [
                     index + 1,
                     csvEscape(item.category || ''),
                     csvEscape(item.payload || ''),
                     csvEscape(item.outcome || ''),
-                    csvEscape(item.reason || '')
+                    csvEscape(item.reason || ''),
+                    (isCurrentReport(result) && vaPinnedIndexSet && vaPinnedIndexSet.has(index)) ? 'true' : 'false'
                 ].join(',');
             });
             return [header].concat(rows).join('\n');
@@ -1228,6 +1231,8 @@
             const effectiveness = total > 0 ? ((blocked + challenge) / total) * 100 : 0;
             vaPinnedRows = [];
             vaPinnedIndexSet = new Set();
+            vaCurrentReportId = stored.id || report.report_id || 'local-report';
+            vaCurrentReportTarget = report.target_url || '';
 
             if (title) {
                 title.textContent = `VA Report • ${report.target_url || 'Unknown'}`;
@@ -2089,7 +2094,7 @@
             }
 
             const timestamp = new Date().toISOString().split('T')[0];
-            const jsonData = JSON.stringify(result, null, 2);
+            const jsonData = JSON.stringify(attachPinnedSummary(result), null, 2);
             const jsonBlob = new Blob([jsonData], { type: 'application/json' });
             const jsonUrl = URL.createObjectURL(jsonBlob);
 
@@ -2100,6 +2105,34 @@
 
             URL.revokeObjectURL(jsonUrl);
             showSuccessMessage('VA report downloaded');
+        }
+
+        function attachPinnedSummary(report) {
+            if (!report) return report;
+            const reportId = report.report_id || vaCurrentReportId;
+            const isCurrent = isCurrentReport(report);
+            if (!isCurrent || vaPinnedRows.length === 0) {
+                return report;
+            }
+            return {
+                ...report,
+                pinned_summary: {
+                    total: vaPinnedRows.length,
+                    pins: vaPinnedRows
+                }
+            };
+        }
+
+        function isCurrentReport(report) {
+            if (!report) return false;
+            const reportId = report.report_id || report.id || null;
+            if (vaCurrentReportId && reportId) {
+                return vaCurrentReportId === reportId;
+            }
+            if (vaCurrentReportId === 'local-report') {
+                return (report.target_url || '') === (vaCurrentReportTarget || '');
+            }
+            return false;
         }
 
         // Page load handler
