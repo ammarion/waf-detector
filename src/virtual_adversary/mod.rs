@@ -4,6 +4,7 @@
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::effectiveness::consent::ConsentManager;
@@ -139,6 +140,37 @@ pub struct VirtualAdversaryRunner {
     consent_manager: ConsentManager,
     budget: RequestBudget,
     rate_limiter: RateLimiter,
+}
+
+const BASELINE_SAMPLE_LIMIT: usize = 1024;
+
+#[derive(Debug, Clone)]
+pub struct BaselineRecord {
+    pub status_code: u16,
+    pub headers: HashMap<String, String>,
+    pub body_length: usize,
+    pub body_sample: String,
+}
+
+impl BaselineRecord {
+    pub fn from_response(
+        status_code: u16,
+        headers: HashMap<String, String>,
+        body: &str,
+    ) -> Self {
+        let sample = if body.len() <= BASELINE_SAMPLE_LIMIT {
+            body.to_string()
+        } else {
+            body.chars().take(BASELINE_SAMPLE_LIMIT).collect()
+        };
+
+        Self {
+            status_code,
+            headers,
+            body_length: body.len(),
+            body_sample: sample,
+        }
+    }
 }
 
 impl VirtualAdversaryRunner {
@@ -304,5 +336,30 @@ mod tests {
         let mut runner = VirtualAdversaryRunner::new(config).unwrap();
         let result = runner.run("https://example.com");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_baseline_record_tracks_length() {
+        let body = "hello world";
+        let record = BaselineRecord::from_response(200, HashMap::new(), body);
+        assert_eq!(record.body_length, body.len());
+        assert_eq!(record.body_sample, body);
+    }
+
+    #[test]
+    fn test_baseline_record_truncates_sample() {
+        let body = "a".repeat(BASELINE_SAMPLE_LIMIT + 10);
+        let record = BaselineRecord::from_response(200, HashMap::new(), &body);
+        assert_eq!(record.body_length, body.len());
+        assert_eq!(record.body_sample.len(), BASELINE_SAMPLE_LIMIT);
+    }
+
+    #[test]
+    fn test_baseline_record_preserves_headers() {
+        let mut headers = HashMap::new();
+        headers.insert("content-type".to_string(), "text/html".to_string());
+        let record = BaselineRecord::from_response(200, headers.clone(), "ok");
+        assert_eq!(record.headers.get("content-type"), Some(&"text/html".to_string()));
+        assert_eq!(record.status_code, 200);
     }
 }
