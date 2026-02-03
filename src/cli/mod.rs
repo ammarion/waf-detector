@@ -8,7 +8,9 @@ use crate::providers::{
 };
 use crate::registry::ProviderRegistry;
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
-use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase};
+use crate::virtual_adversary2::{
+    build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner,
+};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use clap::{Arg, ArgMatches, Command};
@@ -108,7 +110,7 @@ impl SimpleCliApp {
             return Ok(());
         }
 
-        // Handle virtual adversary 2.0 (VA2) dry run
+        // Handle virtual adversary 2.0 (VA2)
         if let Some(url) = matches.get_one::<String>("va2") {
             let phases_raw = matches
                 .get_one::<String>("va2-phases")
@@ -120,6 +122,22 @@ impl SimpleCliApp {
                 budget: *matches.get_one::<u32>("va2-budget").unwrap_or(&60),
             };
             let plan = build_va2_campaign_plan(url, &phases, config)?;
+
+            if matches.get_flag("va2-run") {
+                let runner = Va2Runner::new()?;
+                let report = runner.run_plan(plan)?;
+                let errors = report
+                    .results
+                    .iter()
+                    .filter(|result| result.error.is_some())
+                    .count();
+                println!(
+                    "🧪 VA2 Run: {} steps | errors {}",
+                    report.results.len(),
+                    errors
+                );
+                return Ok(());
+            }
 
             if matches.get_flag("va2-json") {
                 let json = serde_json::to_string_pretty(&plan)?;
@@ -1061,6 +1079,13 @@ The tool automatically adds https:// if needed and supports both domain names an
             Arg::new("va2-dry-run")
                 .long("va2-dry-run")
                 .help("Print VA2 plan summary without execution")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-run")
+                .long("va2-run")
+                .help("Execute VA2 campaign plan (requires consent)")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va2"),
         )

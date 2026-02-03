@@ -141,6 +141,13 @@ fn test_va2_dry_run_requires_va2() {
 }
 
 #[test]
+fn test_va2_run_requires_va2() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va2-run"]);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_va2_json_requires_va2() {
     let cmd = build_simple_cli();
     let result = cmd.try_get_matches_from(["waf-detect", "--va2-json"]);

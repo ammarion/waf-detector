@@ -6,7 +6,11 @@ use anyhow::{anyhow, Result};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Instant;
 use url::Url;
+
+use crate::effectiveness::consent::ConsentManager;
+use crate::http::HttpClient;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +55,170 @@ pub struct Va2CampaignPlan {
     pub phases: Vec<Va2Phase>,
     pub budget: u32,
     pub steps: Vec<Va2CampaignStep>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Va2HttpRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Va2HttpResponse {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
+
+pub trait Va2HttpAdapter {
+    fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse>;
+}
+
+pub struct RealVa2HttpAdapter {
+    client: HttpClient,
+}
+
+impl RealVa2HttpAdapter {
+    pub fn new() -> anyhow::Result<Self> {
+        Ok(Self {
+            client: HttpClient::new()?,
+        })
+    }
+}
+
+impl Va2HttpAdapter for RealVa2HttpAdapter {
+    fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
+        let response = futures::executor::block_on(self.client.request(
+            &request.method,
+            &request.url,
+            &request.headers,
+            request.body.as_deref(),
+        ))?;
+        Ok(Va2HttpResponse {
+            status: response.status,
+            headers: response.headers,
+            body: response.body,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Va2RunResult {
+    pub step_id: u32,
+    pub phase: Va2Phase,
+    pub kind: Va2StepKind,
+    pub status: Option<u16>,
+    pub duration_ms: u128,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Va2RunReport {
+    pub target_url: String,
+    pub plan: Va2CampaignPlan,
+    pub results: Vec<Va2RunResult>,
+}
+
+pub struct Va2Runner {
+    consent_manager: ConsentManager,
+    http: Box<dyn Va2HttpAdapter + Send + Sync>,
+}
+
+impl Va2Runner {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            consent_manager: ConsentManager::new(),
+            http: Box::new(RealVa2HttpAdapter::new()?),
+        })
+    }
+
+    pub fn with_adapter(adapter: Box<dyn Va2HttpAdapter + Send + Sync>) -> Result<Self> {
+        Ok(Self {
+            consent_manager: ConsentManager::new(),
+            http: adapter,
+        })
+    }
+
+    pub fn run_plan(&self, plan: Va2CampaignPlan) -> Result<Va2RunReport> {
+        ensure_va2_consent_and_target(&self.consent_manager, &plan.target_url)?;
+
+        let mut results = Vec::with_capacity(plan.steps.len());
+        for step in &plan.steps {
+            if step.delay_ms > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(step.delay_ms));
+            }
+            let request = build_va2_request(&plan.target_url, step)?;
+            let started = Instant::now();
+            let response = self.http.send(&request);
+            let duration = started.elapsed().as_millis();
+            match response {
+                Ok(resp) => results.push(Va2RunResult {
+                    step_id: step.id,
+                    phase: step.phase,
+                    kind: step.kind,
+                    status: Some(resp.status),
+                    duration_ms: duration,
+                    error: None,
+                }),
+                Err(err) => results.push(Va2RunResult {
+                    step_id: step.id,
+                    phase: step.phase,
+                    kind: step.kind,
+                    status: None,
+                    duration_ms: duration,
+                    error: Some(err.to_string()),
+                }),
+            }
+        }
+
+        Ok(Va2RunReport {
+            target_url: plan.target_url.clone(),
+            plan,
+            results,
+        })
+    }
+}
+
+fn ensure_va2_consent_and_target(
+    consent_manager: &ConsentManager,
+    target_url: &str,
+) -> Result<()> {
+    if !consent_manager.has_valid_consent()? {
+        return Err(anyhow!(
+            "Consent is required before running Virtual Adversary 2.0 tests"
+        ));
+    }
+    if !consent_manager.is_target_allowed(target_url)? {
+        return Err(anyhow!(
+            "Target is not authorized for Virtual Adversary 2.0 testing"
+        ));
+    }
+    Ok(())
+}
+
+fn build_va2_request(target_url: &str, step: &Va2CampaignStep) -> Result<Va2HttpRequest> {
+    let mut url = Url::parse(target_url).map_err(|err| anyhow!("invalid target url: {err}"))?;
+    url.set_path(&step.path);
+    if let Some(query) = &step.query {
+        url.set_query(Some(query));
+    } else {
+        url.set_query(None);
+    }
+
+    let headers = step
+        .headers
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    Ok(Va2HttpRequest {
+        method: step.method.clone(),
+        url: url.to_string(),
+        headers,
+        body: step.body.clone(),
+    })
 }
 
 impl Va2CampaignPlan {
@@ -233,6 +401,50 @@ pub fn build_va2_campaign_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use tempfile::TempDir;
+
+    fn with_temp_home<F>(f: F)
+    where
+        F: FnOnce(&TempDir),
+    {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+        f(&temp_dir);
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
+    }
+
+    #[derive(Default)]
+    struct StubAdapter;
+
+    impl Va2HttpAdapter for StubAdapter {
+        fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
+            Ok(Va2HttpResponse {
+                status: if request.url.contains("error") { 500 } else { 200 },
+                headers: HashMap::new(),
+                body: String::new(),
+            })
+        }
+    }
+
+    fn write_consent(temp_dir: &TempDir, targets: &[&str]) {
+        let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+        let record = serde_json::json!({
+            "timestamp": Utc::now().to_rfc3339(),
+            "terms_version": "1.0.0",
+            "authorized_targets": targets,
+            "acknowledgment": "I AGREE"
+        });
+        std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+    }
 
     #[test]
     fn test_va2_plan_requires_phases() {
@@ -278,5 +490,42 @@ mod tests {
         .unwrap();
         let json = serde_json::to_string(&plan).unwrap();
         assert!(json.contains("va2-0.1"));
+    }
+
+    #[test]
+    fn test_va2_runner_requires_consent() {
+        with_temp_home(|_temp| {
+            let phases = vec![Va2Phase::Baseline];
+            let plan = build_va2_campaign_plan(
+                "https://example.com",
+                &phases,
+                Va2CampaignConfig::default(),
+            )
+            .unwrap();
+            let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
+            let err = runner.run_plan(plan).unwrap_err().to_string();
+            assert!(err.contains("Consent is required"));
+        });
+    }
+
+    #[test]
+    fn test_va2_runner_executes_plan() {
+        with_temp_home(|temp| {
+            write_consent(temp, &["example.com"]);
+            let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
+            let mut plan = build_va2_campaign_plan(
+                "https://example.com",
+                &phases,
+                Va2CampaignConfig { seed: 1, budget: 5 },
+            )
+            .unwrap();
+            for step in &mut plan.steps {
+                step.delay_ms = 0;
+            }
+            let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
+            let report = runner.run_plan(plan).unwrap();
+            assert!(!report.results.is_empty());
+            assert_eq!(report.results.len(), report.plan.steps.len());
+        });
     }
 }
