@@ -314,7 +314,7 @@ impl WebServer {
                 get(virtual_adversary_report),
             )
             .route(
-                "/api/virtual-adversary/reports/:id.csv",
+                "/api/virtual-adversary/reports/:id/csv",
                 get(virtual_adversary_report_csv),
             )
             .route(
@@ -342,7 +342,7 @@ impl WebServer {
             .layer(CorsLayer::permissive())
             .with_state(self);
 
-        let addr = format!("0.0.0.0:{port}");
+        let addr = format!("127.0.0.1:{port}");
         println!("🌐 WAF Detector Web Server starting on http://localhost:{port}");
         println!("📊 Dashboard: http://localhost:{port}/dashboard");
         println!("📖 API Docs: http://localhost:{port}/api-docs");

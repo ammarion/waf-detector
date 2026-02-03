@@ -384,7 +384,7 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,
         </div>
 
         <div class="endpoint">
-            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id.csv</h3>
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id/csv</h3>
             <p>Download a saved Virtual Adversary report as CSV.</p>
 
             <h4>Response</h4>

@@ -8,6 +8,7 @@
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -508,15 +509,25 @@ impl EffectivenessTest {
         sleep(self.config.request_delay).await;
 
         // Build client with timeout
-        let mut client_builder = reqwest::Client::builder().timeout(self.config.request_timeout);
         let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
-        if disable_proxy {
-            client_builder = client_builder.no_proxy();
-        }
-        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
-            client_builder = client_builder.danger_accept_invalid_certs(true);
-        }
-        let client = client_builder.build()?;
+        let make_builder = |force_no_proxy: bool| {
+            let mut client_builder = reqwest::Client::builder().timeout(self.config.request_timeout);
+            if disable_proxy || force_no_proxy {
+                client_builder = client_builder.no_proxy();
+            }
+            if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+                client_builder = client_builder.danger_accept_invalid_certs(true);
+            }
+            client_builder
+        };
+        let client = match catch_unwind(AssertUnwindSafe(|| make_builder(false).build())) {
+            Ok(Ok(client)) => client,
+            Ok(Err(err)) => return Err(err.into()),
+            Err(_) => {
+                eprintln!("⚠️  Effectiveness HTTP client init panicked; retrying without system proxy.");
+                make_builder(true).build()?
+            }
+        };
 
         let mut request_builder = match method {
             "POST" => client.post(url).body(body.to_string()),

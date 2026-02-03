@@ -893,7 +893,7 @@
 
         async function downloadVaHistoryReportCsv(reportId) {
             try {
-                const response = await fetch(`/api/virtual-adversary/reports/${reportId}.csv`);
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}/csv`);
                 if (!response.ok) {
                     throw new Error('Failed to download VA CSV');
                 }

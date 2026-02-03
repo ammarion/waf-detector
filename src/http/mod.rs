@@ -1,6 +1,7 @@
 use anyhow::Result;
 use reqwest::{Client, Response};
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -26,22 +27,32 @@ pub struct HttpResponse {
 
 impl HttpClient {
     pub fn new() -> Result<Self> {
-        let mut builder = Client::builder()
-            .timeout(Duration::from_secs(10))
-            .pool_max_idle_per_host(10)
-            .tcp_keepalive(Duration::from_secs(60))
-            // Use a realistic browser User-Agent to avoid immediate blocking
-            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-
         let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
-        if disable_proxy {
-            builder = builder.no_proxy();
-        }
-        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
-            builder = builder.danger_accept_invalid_certs(true);
-        }
+        let make_builder = |force_no_proxy: bool| {
+            let mut builder = Client::builder()
+                .timeout(Duration::from_secs(10))
+                .pool_max_idle_per_host(10)
+                .tcp_keepalive(Duration::from_secs(60))
+                // Use a realistic browser User-Agent to avoid immediate blocking
+                .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
-        let client = builder.build()?;
+            if disable_proxy || force_no_proxy {
+                builder = builder.no_proxy();
+            }
+            if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+                builder = builder.danger_accept_invalid_certs(true);
+            }
+            builder
+        };
+
+        let client = match catch_unwind(AssertUnwindSafe(|| make_builder(false).build())) {
+            Ok(Ok(client)) => client,
+            Ok(Err(err)) => return Err(err.into()),
+            Err(_) => {
+                eprintln!("⚠️  HTTP client initialization panicked; retrying without system proxy.");
+                make_builder(true).build()?
+            }
+        };
 
         Ok(Self { client })
     }

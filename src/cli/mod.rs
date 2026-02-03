@@ -38,6 +38,10 @@ impl SimpleCliApp {
 
     pub async fn run(&self) -> Result<()> {
         let matches = build_simple_cli().get_matches();
+        self.run_with_matches(matches).await
+    }
+
+    pub async fn run_with_matches(&self, matches: ArgMatches) -> Result<()> {
         let payload_analysis_enabled = matches.get_flag("payload-analysis");
         self.registry
             .set_payload_analysis_enabled(payload_analysis_enabled);

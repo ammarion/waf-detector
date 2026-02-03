@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use reqwest::Client;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Duration;
 use tracing::info;
 
@@ -83,15 +84,25 @@ pub async fn analyze_static_page(url: &str) -> Result<StaticPageAnalysis> {
     }
 
     // Perform HTTP analysis
-    let mut builder = Client::builder().timeout(Duration::from_secs(10));
     let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
-    if disable_proxy {
-        builder = builder.no_proxy();
-    }
-    if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
-        builder = builder.danger_accept_invalid_certs(true);
-    }
-    let client = builder.build()?;
+    let make_builder = |force_no_proxy: bool| {
+        let mut builder = Client::builder().timeout(Duration::from_secs(10));
+        if disable_proxy || force_no_proxy {
+            builder = builder.no_proxy();
+        }
+        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+        builder
+    };
+    let client = match catch_unwind(AssertUnwindSafe(|| make_builder(false).build())) {
+        Ok(Ok(client)) => client,
+        Ok(Err(err)) => return Err(err.into()),
+        Err(_) => {
+            eprintln!("⚠️  Static detection HTTP client init panicked; retrying without system proxy.");
+            make_builder(true).build()?
+        }
+    };
 
     // Make initial request
     let response1 = client.get(url).send().await?;
