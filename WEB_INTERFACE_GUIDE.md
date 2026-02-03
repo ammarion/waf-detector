@@ -271,6 +271,10 @@ cargo build --release --bin web-server
 ```bash
 export WAF_DETECTOR_PORT=8080
 export WAF_DETECTOR_HOST=0.0.0.0
+export WAF_DETECTOR_AI_ENABLED=true
+export WAF_DETECTOR_AI_ENDPOINT=http://127.0.0.1:11434
+export WAF_DETECTOR_AI_MODEL=llama3.2:3b
+export WAF_DETECTOR_AI_TIMEOUT_MS=4000
 ```
 
 ### **Docker Ready**
