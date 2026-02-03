@@ -923,7 +923,18 @@ impl WafSmokeTest {
 
 impl Default for WafSmokeTest {
     fn default() -> Self {
-        Self::new(SmokeTestConfig::default()).expect("Failed to create WafSmokeTest")
+        let config = SmokeTestConfig::default();
+        match Self::new(config.clone()) {
+            Ok(test) => test,
+            Err(err) => {
+                eprintln!("⚠️  Failed to create WafSmokeTest: {err}. Falling back to defaults.");
+                Self {
+                    http_client: HttpClient::default(),
+                    config,
+                    payloads: Self::initialize_advanced_payloads(),
+                }
+            }
+        }
     }
 }
 

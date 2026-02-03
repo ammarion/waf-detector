@@ -96,8 +96,12 @@ impl Default for PayloadConfig {
 
 impl PayloadAnalyzer {
     pub fn new() -> Self {
+        let http_client = HttpClient::new().unwrap_or_else(|err| {
+            eprintln!("⚠️  Failed to initialize HTTP client: {err}. Falling back to defaults.");
+            HttpClient::default()
+        });
         Self {
-            http_client: Arc::new(HttpClient::new().expect("Failed to create HTTP client")),
+            http_client: Arc::new(http_client),
             config: PayloadConfig::default(),
         }
     }

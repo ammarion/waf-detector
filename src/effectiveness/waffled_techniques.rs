@@ -551,10 +551,11 @@ pub fn generate_random_boundary() -> String {
 
     // Mix of different character types
     let charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~";
+    let bytes = charset.as_bytes();
     let boundary: String = (0..length)
         .map(|_| {
-            let idx = rng.gen_range(0..charset.len());
-            charset.chars().nth(idx).unwrap()
+            let idx = rng.gen_range(0..bytes.len());
+            bytes[idx] as char
         })
         .collect();
 

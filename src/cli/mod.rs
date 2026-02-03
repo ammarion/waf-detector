@@ -40,7 +40,7 @@ impl SimpleCliApp {
         let payload_analysis_enabled = matches.get_flag("payload-analysis");
         self.registry
             .set_payload_analysis_enabled(payload_analysis_enabled);
-        let engine = DetectionEngine::new(self.registry.clone()).with_waf_mode_detection();
+        let engine = DetectionEngine::new(self.registry.clone())?.with_waf_mode_detection();
 
         // Handle special commands first
         if matches.get_flag("web") {

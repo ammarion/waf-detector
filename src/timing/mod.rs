@@ -73,7 +73,10 @@ impl TimingAnalyzer {
         if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
             builder = builder.danger_accept_invalid_certs(true);
         }
-        let http_client = builder.build().unwrap();
+        let http_client = builder.build().unwrap_or_else(|err| {
+            eprintln!("⚠️  Failed to initialize timing HTTP client: {err}. Using defaults.");
+            reqwest::Client::new()
+        });
 
         Self {
             config,
