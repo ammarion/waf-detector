@@ -307,6 +307,19 @@
             return `${items.join(' | ')}${suffix}`;
         }
 
+        function renderEvidenceSummary(summary) {
+            if (!Array.isArray(summary) || summary.length === 0) {
+                return '<span class="va-evidence-empty">No evidence summary</span>';
+            }
+            const top = summary.slice(0, 6);
+            return top.map(item => `
+                <span class="va-evidence-chip">
+                    <span class="va-evidence-kind">${escapeHtml(item.kind || '')}</span>
+                    <span class="va-evidence-count">${item.count ?? 0}</span>
+                </span>
+            `).join('');
+        }
+
         // Helper function to display status codes safely
         function displayStatusCode(val) {
             if (val === undefined || val === null || isNaN(val)) return 'N/A';
@@ -1028,6 +1041,7 @@
             const errorCount = summary.error || 0;
             const enforcement = report.enforcement || 'Inconclusive';
             const evidenceScore = typeof report.evidence_score === 'number' ? report.evidence_score : null;
+            const evidenceSummary = report.evidence_summary || [];
             const risk = computeVaRisk(summary, total);
             const effectiveness = total > 0 ? ((blocked + challenge) / total) * 100 : 0;
 
@@ -1043,6 +1057,10 @@
                     <div><strong>Risk:</strong> ${risk}</div>
                     <div><strong>Enforcement:</strong> ${escapeHtml(enforcement)}</div>
                     <div><strong>Evidence Score:</strong> ${evidenceScore === null ? 'N/A' : evidenceScore.toFixed(2)}</div>
+                    <div class="va-evidence-summary">
+                        <strong>Evidence Summary:</strong>
+                        <div class="va-evidence-chips">${renderEvidenceSummary(evidenceSummary)}</div>
+                    </div>
                     <div><strong>Blocked:</strong> ${blocked}</div>
                     <div><strong>Challenge:</strong> ${challenge}</div>
                     <div><strong>Allowed:</strong> ${allowed}</div>

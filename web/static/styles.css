@@ -675,6 +675,47 @@ body {
     word-break: break-word;
     opacity: 0.85;
 }
+
+.va-evidence-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.va-evidence-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.va-evidence-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.12);
+    color: #7dd3fc;
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+}
+
+.va-evidence-kind {
+    font-weight: 600;
+}
+
+.va-evidence-count {
+    background: rgba(15, 23, 42, 0.55);
+    color: #e2e8f0;
+    border-radius: 999px;
+    padding: 0.05rem 0.35rem;
+    font-size: 0.68rem;
+}
+
+.va-evidence-empty {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
 /* Results Section */
 .results-section {
     background: var(--bg-card);

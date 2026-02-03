@@ -226,7 +226,7 @@ pub enum VaOutcome {
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VaEvidenceKind {
     StatusCode,
     ChallengeHeader,
@@ -249,6 +249,12 @@ pub struct VaProbeEvaluation {
     pub outcome: VaOutcome,
     pub reason: String,
     pub evidence: Vec<VaEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaEvidenceTally {
+    pub kind: VaEvidenceKind,
+    pub count: usize,
 }
 
 pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> VaProbeEvaluation {
@@ -393,6 +399,21 @@ fn compute_evidence_score(results: &[VaResultRecord]) -> f64 {
     (total / results.len() as f64).min(1.0)
 }
 
+fn summarize_evidence(results: &[VaResultRecord]) -> Vec<VaEvidenceTally> {
+    let mut counts: HashMap<VaEvidenceKind, usize> = HashMap::new();
+    for record in results {
+        for entry in &record.evidence {
+            *counts.entry(entry.kind).or_insert(0) += 1;
+        }
+    }
+    let mut tallies: Vec<VaEvidenceTally> = counts
+        .into_iter()
+        .map(|(kind, count)| VaEvidenceTally { kind, count })
+        .collect();
+    tallies.sort_by(|a, b| b.count.cmp(&a.count));
+    tallies
+}
+
 fn classify_enforcement(summary: &VaResultSummary, evidence_score: f64) -> VaEnforcement {
     if summary.total == 0 {
         return VaEnforcement::Inconclusive;
@@ -475,6 +496,7 @@ pub struct VaRunReport {
     pub summary: VaResultSummary,
     pub enforcement: VaEnforcement,
     pub evidence_score: f64,
+    pub evidence_summary: Vec<VaEvidenceTally>,
     pub config: VirtualAdversaryConfig,
     pub results: Vec<VaResultRecord>,
     #[serde(skip, default = "default_instant")]
@@ -495,6 +517,7 @@ impl VaRunReport {
             summary: VaResultSummary::new(),
             enforcement: VaEnforcement::Inconclusive,
             evidence_score: 0.0,
+            evidence_summary: Vec::new(),
             config,
             results: Vec::new(),
             started_at: std::time::Instant::now(),
@@ -546,12 +569,13 @@ pub struct VaPayloadEvent {
 pub fn va_report_schema() -> serde_json::Value {
     json!({
         "type": "object",
-        "required": ["target_url", "plan_size", "summary", "enforcement", "evidence_score", "config"],
+        "required": ["target_url", "plan_size", "summary", "enforcement", "evidence_score", "evidence_summary", "config"],
         "properties": {
             "target_url": { "type": "string" },
             "plan_size": { "type": "integer" },
             "enforcement": { "type": "string" },
             "evidence_score": { "type": "number" },
+            "evidence_summary": { "type": "array" },
             "summary": {
                 "type": "object",
                 "required": ["total", "blocked", "challenge", "allowed", "error"]
@@ -847,6 +871,7 @@ impl VirtualAdversaryRunner {
             on_progress(idx + 1, total);
         }
         report.evidence_score = compute_evidence_score(&report.results);
+        report.evidence_summary = summarize_evidence(&report.results);
         report.enforcement = classify_enforcement(&report.summary, report.evidence_score);
         report.finish();
         Ok(report)
@@ -1318,6 +1343,7 @@ mod tests {
         assert_eq!(report.plan_size, 5);
         assert_eq!(report.enforcement, VaEnforcement::Inconclusive);
         assert_eq!(report.evidence_score, 0.0);
+        assert!(report.evidence_summary.is_empty());
         assert!(report.finished_at.is_none());
         report.finish();
         assert!(report.finished_at.is_some());
@@ -1369,6 +1395,53 @@ mod tests {
         };
         let enforcement = classify_enforcement(&summary, 0.2);
         assert_eq!(enforcement, VaEnforcement::NoEnforcement);
+    }
+
+    #[test]
+    fn test_summarize_evidence_counts() {
+        let records = vec![
+            VaResultRecord {
+                payload: "probe1".to_string(),
+                category: VaPayloadCategory::AdversaryProbe,
+                outcome: VaOutcome::Blocked,
+                reason: "status=403".to_string(),
+                evidence: vec![
+                    VaEvidence {
+                        kind: VaEvidenceKind::StatusCode,
+                        detail: "status=403".to_string(),
+                    },
+                    VaEvidence {
+                        kind: VaEvidenceKind::HeaderDiff,
+                        detail: "header_diff=cf-ray".to_string(),
+                    },
+                ],
+            },
+            VaResultRecord {
+                payload: "probe2".to_string(),
+                category: VaPayloadCategory::AdversaryProbe,
+                outcome: VaOutcome::Challenge,
+                reason: "challenge-header".to_string(),
+                evidence: vec![VaEvidence {
+                    kind: VaEvidenceKind::StatusCode,
+                    detail: "status=403".to_string(),
+                }],
+            },
+        ];
+
+        let summary = summarize_evidence(&records);
+        let status_count = summary
+            .iter()
+            .find(|entry| entry.kind == VaEvidenceKind::StatusCode)
+            .map(|entry| entry.count)
+            .unwrap_or(0);
+        let header_count = summary
+            .iter()
+            .find(|entry| entry.kind == VaEvidenceKind::HeaderDiff)
+            .map(|entry| entry.count)
+            .unwrap_or(0);
+
+        assert_eq!(status_count, 2);
+        assert_eq!(header_count, 1);
     }
 
     #[test]
@@ -1536,6 +1609,7 @@ mod tests {
         assert!(required_keys.contains(&"summary"));
         assert!(required_keys.contains(&"enforcement"));
         assert!(required_keys.contains(&"evidence_score"));
+        assert!(required_keys.contains(&"evidence_summary"));
         assert!(required_keys.contains(&"config"));
     }
 }
