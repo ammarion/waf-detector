@@ -362,6 +362,18 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,
     "report": {
       "target_url": "https://example.com",
       "plan_size": 24,
+      "replay_plan": [
+        {
+          "index": 1,
+          "class": "SemanticDrift",
+          "channel": "Query",
+          "description": "Duplicate key ordering drift",
+          "method": "GET",
+          "url": "https://example.com/?a=1&a=2",
+          "headers": [],
+          "body": null
+        }
+      ],
       "summary": {
         "total": 24,
         "blocked": 10,
@@ -388,8 +400,40 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,
             <p>Download a saved Virtual Adversary report as CSV.</p>
 
             <h4>Response</h4>
-            <pre><code>report_id,target_url,created_at,index,category,payload,outcome,reason
-va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,SqlInjection,' OR '1'='1,Blocked,status=403</code></pre>
+            <pre><code>report_id,target_url,created_at,index,category,payload,outcome,reason,evidence,probe_class,probe_channel,probe_description,method,url
+va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,SqlInjection,' OR '1'='1,Blocked,status=403,,SemanticDrift,Query,Duplicate key ordering drift,GET,https://example.com/?a=1&a=2</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id/replay.json</h3>
+            <p>Download the replay plan JSON for a saved Virtual Adversary report.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "replay_plan": [
+    {
+      "index": 1,
+      "class": "SemanticDrift",
+      "channel": "Query",
+      "description": "Duplicate key ordering drift",
+      "method": "GET",
+      "url": "https://example.com/?a=1&a=2",
+      "headers": [],
+      "body": null
+    }
+  ],
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id/replay.csv</h3>
+            <p>Download the replay plan CSV for a saved Virtual Adversary report.</p>
+
+            <h4>Response</h4>
+            <pre><code>index,probe_class,probe_channel,probe_description,method,url,headers,body
+1,SemanticDrift,Query,Duplicate key ordering drift,GET,https://example.com/?a=1&a=2,[],</code></pre>
         </div>
 
 
