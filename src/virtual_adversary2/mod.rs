@@ -3,6 +3,7 @@
 //! Behavioral WAF profiling with deterministic, replayable campaigns.
 
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -72,8 +73,9 @@ pub struct Va2HttpResponse {
     pub body: String,
 }
 
-pub trait Va2HttpAdapter {
-    fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse>;
+#[async_trait]
+pub trait Va2HttpAdapter: Send + Sync {
+    async fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse>;
 }
 
 pub struct RealVa2HttpAdapter {
@@ -88,14 +90,18 @@ impl RealVa2HttpAdapter {
     }
 }
 
+#[async_trait]
 impl Va2HttpAdapter for RealVa2HttpAdapter {
-    fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
-        let response = futures::executor::block_on(self.client.request(
-            &request.method,
-            &request.url,
-            &request.headers,
-            request.body.as_deref(),
-        ))?;
+    async fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
+        let response = self
+            .client
+            .request(
+                &request.method,
+                &request.url,
+                &request.headers,
+                request.body.as_deref(),
+            )
+            .await?;
         Ok(Va2HttpResponse {
             status: response.status,
             headers: response.headers,
@@ -221,7 +227,7 @@ impl Va2Runner {
         })
     }
 
-    pub fn run_plan(&self, plan: Va2CampaignPlan) -> Result<Va2RunReport> {
+    pub async fn run_plan(&self, plan: Va2CampaignPlan) -> Result<Va2RunReport> {
         ensure_va2_consent_and_target(&self.consent_manager, &plan.target_url)?;
 
         let mut results = Vec::with_capacity(plan.steps.len());
@@ -233,11 +239,11 @@ impl Va2Runner {
         let mut throttle_step = 0u32;
         for step in &plan.steps {
             if step.delay_ms > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(step.delay_ms));
+                tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms)).await;
             }
             let request = build_va2_request(&plan.target_url, step)?;
             let started = Instant::now();
-            let response = self.http.send(&request);
+            let response = self.http.send(&request).await;
             let duration = started.elapsed().as_millis();
             match response {
                 Ok(resp) => {
@@ -694,9 +700,10 @@ mod tests {
     use chrono::Utc;
     use tempfile::TempDir;
 
-    fn with_temp_home<F>(f: F)
+    async fn with_temp_home<F, Fut>(f: F)
     where
-        F: FnOnce(&TempDir),
+        F: FnOnce(&TempDir) -> Fut,
+        Fut: std::future::Future<Output = ()>,
     {
         let _guard = crate::test_utils::env_lock()
             .lock()
@@ -704,7 +711,7 @@ mod tests {
         let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
         let temp_dir = TempDir::new().unwrap();
         std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
-        f(&temp_dir);
+        f(&temp_dir).await;
         if let Some(value) = original_home {
             std::env::set_var("WAF_DETECTOR_HOME", value);
         } else {
@@ -715,8 +722,9 @@ mod tests {
     #[derive(Default)]
     struct StubAdapter;
 
+    #[async_trait]
     impl Va2HttpAdapter for StubAdapter {
-        fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
+        async fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
             let (status, body) = if request.url.contains("protocol") {
                 (418, "teapot".to_string())
             } else if request.url.contains("state") {
@@ -797,9 +805,9 @@ mod tests {
         assert!(json.contains("va2-0.1"));
     }
 
-    #[test]
-    fn test_va2_runner_requires_consent() {
-        with_temp_home(|_temp| {
+    #[tokio::test]
+    async fn test_va2_runner_requires_consent() {
+        with_temp_home(|_temp| async move {
             let phases = vec![Va2Phase::Baseline];
             let plan = build_va2_campaign_plan(
                 "https://example.com",
@@ -808,14 +816,15 @@ mod tests {
             )
             .unwrap();
             let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
-            let err = runner.run_plan(plan).unwrap_err().to_string();
+            let err = runner.run_plan(plan).await.unwrap_err().to_string();
             assert!(err.contains("Consent is required"));
-        });
+        })
+        .await;
     }
 
-    #[test]
-    fn test_va2_runner_executes_plan() {
-        with_temp_home(|temp| {
+    #[tokio::test]
+    async fn test_va2_runner_executes_plan() {
+        with_temp_home(|temp| async move {
             write_consent(temp, &["example.com"]);
             let phases = vec![
                 Va2Phase::Baseline,
@@ -846,7 +855,7 @@ mod tests {
                 }
             }
             let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
-            let report = runner.run_plan(plan).unwrap();
+            let report = runner.run_plan(plan).await.unwrap();
             assert!(!report.results.is_empty());
             assert_eq!(report.results.len(), report.plan.steps.len());
             assert_eq!(report.baseline.status, Some(200));
@@ -856,7 +865,8 @@ mod tests {
             assert!(report.throttle.is_some());
             assert!(report.pmi.score >= 0.0);
             assert!(!report.pmi.label.is_empty());
-        });
+        })
+        .await;
     }
 
     #[test]

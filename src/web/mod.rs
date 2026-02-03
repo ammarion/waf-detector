@@ -1410,12 +1410,19 @@ async fn virtual_adversary2_run(Json(payload): Json<Va2Request>) -> impl IntoRes
         }
     };
 
-    match Va2Runner::new().and_then(|runner| runner.run_plan(plan)) {
-        Ok(report) => Json(Va2RunResponse {
-            success: true,
-            report: Some(report),
-            error: None,
-        }),
+    match Va2Runner::new() {
+        Ok(runner) => match runner.run_plan(plan).await {
+            Ok(report) => Json(Va2RunResponse {
+                success: true,
+                report: Some(report),
+                error: None,
+            }),
+            Err(err) => Json(Va2RunResponse {
+                success: false,
+                report: None,
+                error: Some(err.to_string()),
+            }),
+        },
         Err(err) => Json(Va2RunResponse {
             success: false,
             report: None,

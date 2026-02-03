@@ -652,31 +652,13 @@ mod tests {
     use super::dashboard_html;
 
     #[test]
-    fn dashboard_html_contains_va_placeholder() {
+    fn dashboard_html_contains_smoke_test_controls() {
         let html = dashboard_html();
-        assert!(html.contains("Virtual Adversary"));
-        assert!(html.contains("vaTestForm"));
-        assert!(html.contains("Download VA Report"));
-        assert!(html.contains("consentTargetInput"));
-        assert!(html.contains("vaHistoryList"));
-        assert!(html.contains("vaActivityLog"));
-        assert!(html.contains("reports.csv"));
-        assert!(html.contains("vaRetentionInput"));
-        assert!(html.contains("vaActivityFilter"));
-        assert!(html.contains("downloadVaReportCsv"));
-        assert!(html.contains("vaHistorySearch"));
-        assert!(html.contains("vaAutoScroll"));
-        assert!(html.contains("vaHistoryDate"));
-        assert!(html.contains("vaReportModal"));
-        assert!(html.contains("vaHistorySort"));
-        assert!(html.contains("vaActivitySearch"));
-        assert!(html.contains("deleteVaHistoryRange"));
-        assert!(html.contains("Replay Plan"));
-        assert!(html.contains("vaReplayPlanPanel"));
-        assert!(html.contains("vaReplaySearch"));
-        assert!(html.contains("vaReplayClassFilter"));
-        assert!(html.contains("vaReplayChannelFilter"));
-        assert!(html.contains("vaReplayMethodFilter"));
-        assert!(html.contains("vaReplayOutcomeFilter"));
+        assert!(html.contains("WAF Smoke Test"));
+        assert!(html.contains("smokeTestForm"));
+        assert!(html.contains("smokeTestUrl"));
+        assert!(html.contains("smokeTestText"));
+        assert!(html.contains("singleScanForm"));
+        assert!(html.contains("batchScanForm"));
     }
 }

@@ -132,7 +132,7 @@ impl SimpleCliApp {
 
             if matches.get_flag("va2-run") {
                 let runner = Va2Runner::new()?;
-                let report = runner.run_plan(plan)?;
+                let report = runner.run_plan(plan).await?;
                 let errors = report
                     .results
                     .iter()
