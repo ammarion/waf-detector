@@ -16,6 +16,14 @@ use std::fs;
 use std::time::Instant;
 use url::Url;
 
+fn csv_escape(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
 pub struct SimpleCliApp {
     registry: ProviderRegistry,
 }
@@ -116,6 +124,26 @@ impl SimpleCliApp {
             if matches.get_flag("va-replay") {
                 let json = serde_json::to_string_pretty(&report.replay_plan)?;
                 println!("{json}");
+                return Ok(());
+            }
+            if matches.get_flag("va-replay-csv") {
+                let mut lines = Vec::new();
+                lines.push("index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string());
+                for item in &report.replay_plan {
+                    let row = vec![
+                        item.index.to_string(),
+                        csv_escape(&item.class),
+                        csv_escape(&item.channel),
+                        csv_escape(&item.description),
+                        csv_escape(&item.method),
+                        csv_escape(&item.url),
+                        csv_escape(&serde_json::to_string(&item.headers).unwrap_or_default()),
+                        csv_escape(&item.body.clone().unwrap_or_default()),
+                    ]
+                    .join(",");
+                    lines.push(row);
+                }
+                println!("{}", lines.join("\n"));
                 return Ok(());
             }
             if let Some(output) = matches.get_one::<String>("va-output") {
@@ -924,6 +952,13 @@ The tool automatically adds https:// if needed and supports both domain names an
             Arg::new("va-replay")
                 .long("va-replay")
                 .help("Print VA replay plan JSON to stdout")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-replay-csv")
+                .long("va-replay-csv")
+                .help("Print VA replay plan CSV to stdout")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va"),
         )
