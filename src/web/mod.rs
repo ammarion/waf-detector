@@ -10,7 +10,7 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{Html, IntoResponse},
     routing::{get, post},
     Json, Router,
@@ -297,6 +297,10 @@ impl WebServer {
                 "/api/virtual-adversary/reports/:id",
                 get(virtual_adversary_report),
             )
+            .route(
+                "/api/virtual-adversary/reports.csv",
+                get(virtual_adversary_reports_csv),
+            )
             .route("/api/consent-status", get(consent_status))
             .route("/api/consent/add-target", post(consent_add_target))
             .route("/api/consent/remove-target", post(consent_remove_target))
@@ -441,6 +445,35 @@ fn load_va_report(id: &str) -> Result<VaStoredReport> {
     let content = fs::read_to_string(path)?;
     let stored = serde_json::from_str::<VaStoredReport>(&content)?;
     Ok(stored)
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn build_va_reports_csv(reports: &[VaReportSummary]) -> String {
+    let mut lines = Vec::new();
+    lines.push("id,target_url,created_at,plan_size,blocked,challenge,allowed,error,risk_label".to_string());
+    for report in reports {
+        let row = vec![
+            csv_escape(&report.id),
+            csv_escape(&report.target_url),
+            csv_escape(&report.created_at.to_rfc3339()),
+            report.plan_size.to_string(),
+            report.blocked.to_string(),
+            report.challenge.to_string(),
+            report.allowed.to_string(),
+            report.error.to_string(),
+            csv_escape(&report.risk_label),
+        ]
+        .join(",");
+        lines.push(row);
+    }
+    lines.join("\n")
 }
 
 // Handler for batch URL scan
@@ -956,9 +989,31 @@ async fn virtual_adversary_report(Path(report_id): Path<String>) -> impl IntoRes
     }
 }
 
+// Handler to export Virtual Adversary reports as CSV
+async fn virtual_adversary_reports_csv() -> impl IntoResponse {
+    match list_va_reports() {
+        Ok(reports) => {
+            let body = build_va_reports_csv(&reports);
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/csv")],
+                body,
+            )
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("Failed to export reports: {e}"),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{report_filename, sanitize_report_component, VaJobState, VaRequest};
+    use super::{
+        build_va_reports_csv, csv_escape, report_filename, sanitize_report_component, VaJobState,
+        VaReportSummary, VaRequest,
+    };
     use crate::virtual_adversary::VirtualAdversaryConfig;
     use std::time::Duration;
     use serde_json::json;
@@ -1039,6 +1094,33 @@ mod tests {
         }
         assert_eq!(job.events.len(), super::VA_JOB_EVENT_LIMIT);
         assert_eq!(job.events.first().unwrap().index, 6);
+    }
+
+    #[test]
+    fn csv_escape_wraps_commas_and_quotes() {
+        assert_eq!(csv_escape("simple"), "simple");
+        assert_eq!(csv_escape("needs,comma"), "\"needs,comma\"");
+        assert_eq!(csv_escape("quote\"here"), "\"quote\"\"here\"");
+    }
+
+    #[test]
+    fn build_va_reports_csv_includes_header_and_rows() {
+        let reports = vec![VaReportSummary {
+            id: "va-1.json".to_string(),
+            target_url: "https://example.com".to_string(),
+            created_at: chrono::Utc::now(),
+            plan_size: 10,
+            blocked: 5,
+            challenge: 2,
+            allowed: 3,
+            error: 0,
+            risk_label: "MEDIUM".to_string(),
+        }];
+        let csv = build_va_reports_csv(&reports);
+        let lines: Vec<&str> = csv.split('\n').collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("target_url"));
+        assert!(lines[1].contains("https://example.com"));
     }
 
     #[test]

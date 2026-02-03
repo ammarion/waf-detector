@@ -371,6 +371,7 @@ body {
 .va-history-header {
     display: flex;
     justify-content: flex-end;
+    gap: 0.5rem;
 }
 
 .va-history-empty {

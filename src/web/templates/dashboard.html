@@ -176,6 +176,9 @@
                         <button type="button" class="btn btn-secondary" onclick="loadVaHistory()">
                             🔄 Refresh
                         </button>
+                        <button type="button" class="btn btn-secondary" onclick="downloadVaHistoryCsv()">
+                            📄 CSV
+                        </button>
                     </div>
                     <div id="vaHistoryEmpty" class="va-history-empty">No saved reports yet.</div>
                     <ul id="vaHistoryList" class="va-history-list"></ul>
@@ -647,6 +650,25 @@
                 URL.revokeObjectURL(jsonUrl);
             } catch (error) {
                 showErrorMessage(error.message || 'Failed to download VA report');
+            }
+        }
+
+        async function downloadVaHistoryCsv() {
+            try {
+                const response = await fetch('/api/virtual-adversary/reports.csv');
+                if (!response.ok) {
+                    throw new Error('Failed to download CSV');
+                }
+                const csvData = await response.text();
+                const blob = new Blob([csvData], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `va-reports-${new Date().toISOString().split('T')[0]}.csv`;
+                link.click();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to download CSV');
             }
         }
 

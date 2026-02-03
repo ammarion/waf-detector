@@ -305,6 +305,15 @@ pub const API_DOCS_HTML: &str = r#"
         </div>
 
         <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports.csv</h3>
+            <p>Download saved Virtual Adversary reports as CSV.</p>
+
+            <h4>Response</h4>
+            <pre><code>id,target_url,created_at,plan_size,blocked,challenge,allowed,error,risk_label
+va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,10,4,8,2,MEDIUM</code></pre>
+        </div>
+
+        <div class="endpoint">
             <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id</h3>
             <p>Fetch a saved Virtual Adversary report by id.</p>
 
@@ -462,5 +471,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("consentTargetInput"));
         assert!(DASHBOARD_HTML.contains("vaHistoryList"));
         assert!(DASHBOARD_HTML.contains("vaActivityLog"));
+        assert!(DASHBOARD_HTML.contains("reports.csv"));
     }
 }
