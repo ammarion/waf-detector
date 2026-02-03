@@ -173,6 +173,45 @@ impl BaselineRecord {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ResponseDiff {
+    pub status_changed: bool,
+    pub length_delta: usize,
+    pub significant_length_change: bool,
+    pub header_differences: Vec<String>,
+}
+
+impl ResponseDiff {
+    pub fn compare(
+        baseline: &BaselineRecord,
+        status_code: u16,
+        headers: &HashMap<String, String>,
+        body: &str,
+    ) -> Self {
+        let status_changed = status_code != baseline.status_code;
+        let length_delta = baseline.body_length.abs_diff(body.len());
+        let significant_length_change = length_delta >= (baseline.body_length / 2).max(200);
+
+        let mut header_differences = Vec::new();
+        for (name, value) in headers {
+            if let Some(base_value) = baseline.headers.get(name) {
+                if base_value != value {
+                    header_differences.push(name.clone());
+                }
+            } else {
+                header_differences.push(name.clone());
+            }
+        }
+
+        Self {
+            status_changed,
+            length_delta,
+            significant_length_change,
+            header_differences,
+        }
+    }
+}
+
 impl VirtualAdversaryRunner {
     pub fn new(config: VirtualAdversaryConfig) -> Result<Self> {
         config
@@ -361,5 +400,35 @@ mod tests {
         let record = BaselineRecord::from_response(200, headers.clone(), "ok");
         assert_eq!(record.headers.get("content-type"), Some(&"text/html".to_string()));
         assert_eq!(record.status_code, 200);
+    }
+
+    #[test]
+    fn test_response_diff_detects_status_change() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
+        let diff = ResponseDiff::compare(&baseline, 403, &HashMap::new(), "blocked");
+        assert!(diff.status_changed);
+    }
+
+    #[test]
+    fn test_response_diff_detects_length_change() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), &"a".repeat(1000));
+        let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), &"b".repeat(50));
+        assert!(diff.significant_length_change);
+        assert!(diff.length_delta > 0);
+    }
+
+    #[test]
+    fn test_response_diff_tracks_header_changes() {
+        let mut base_headers = HashMap::new();
+        base_headers.insert("server".to_string(), "nginx".to_string());
+        let baseline = BaselineRecord::from_response(200, base_headers, "ok");
+
+        let mut headers = HashMap::new();
+        headers.insert("server".to_string(), "cloudflare".to_string());
+        headers.insert("cf-ray".to_string(), "123".to_string());
+
+        let diff = ResponseDiff::compare(&baseline, 200, &headers, "ok");
+        assert!(diff.header_differences.contains(&"server".to_string()));
+        assert!(diff.header_differences.contains(&"cf-ray".to_string()));
     }
 }
