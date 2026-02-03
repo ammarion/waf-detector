@@ -702,7 +702,7 @@ mod tests {
 
     async fn with_temp_home<F, Fut>(f: F)
     where
-        F: FnOnce(&TempDir) -> Fut,
+        F: FnOnce(TempDir) -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
         let _guard = crate::test_utils::env_lock()
@@ -711,7 +711,7 @@ mod tests {
         let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
         let temp_dir = TempDir::new().unwrap();
         std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
-        f(&temp_dir).await;
+        f(temp_dir).await;
         if let Some(value) = original_home {
             std::env::set_var("WAF_DETECTOR_HOME", value);
         } else {
@@ -825,7 +825,7 @@ mod tests {
     #[tokio::test]
     async fn test_va2_runner_executes_plan() {
         with_temp_home(|temp| async move {
-            write_consent(temp, &["example.com"]);
+            write_consent(&temp, &["example.com"]);
             let phases = vec![
                 Va2Phase::Baseline,
                 Va2Phase::ProtocolVariance,

@@ -1231,6 +1231,78 @@ body {
     font-size: 0.9rem;
 }
 
+/* AI Summary */
+.ai-summary-actions {
+    margin: 0.5rem 0 1rem;
+}
+
+.ai-summary-panel {
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    border-left: 4px solid #22c55e;
+    color: #0f172a;
+}
+
+.ai-summary-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.ai-verdict {
+    font-weight: 600;
+}
+
+.ai-verdict-badge {
+    display: inline-block;
+    background: #22c55e;
+    color: white;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    margin-left: 0.35rem;
+}
+
+.ai-one-liner {
+    color: #334155;
+}
+
+.ai-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.ai-summary-title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.ai-summary-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: #334155;
+}
+
+.ai-summary-empty {
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.ai-summary-loading {
+    color: #0f172a;
+    font-style: italic;
+}
+
+.ai-summary-error {
+    color: #b91c1c;
+    font-weight: 500;
+}
+
 /* Virtual Adversary Card */
 .va-card {
     margin-bottom: 1rem;

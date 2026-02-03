@@ -6,6 +6,7 @@ pub mod cli;
 pub mod confidence;
 pub mod engine;
 pub mod http;
+pub mod ai;
 pub mod providers;
 pub mod registry;
 pub mod script_executor;

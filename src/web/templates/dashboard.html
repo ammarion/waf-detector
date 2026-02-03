@@ -172,6 +172,7 @@
                 const data = await response.json();
 
                 if (data.success && data.result) {
+                    data.result._ai_context = 'single';
                     allResults.unshift(data.result);
                     displayResults();
                     showSuccessMessage(`Successfully scanned ${url}`);
@@ -202,7 +203,11 @@
                 const data = await response.json();
 
                 if (data.success && data.results) {
-                    allResults.unshift(...data.results.reverse());
+                    const results = data.results.map(result => ({
+                        ...result,
+                        _ai_context: 'batch'
+                    }));
+                    allResults.unshift(...results.reverse());
                     displayResults();
                     showSuccessMessage(`Successfully scanned ${urls.length} URLs`);
                 } else {
@@ -234,6 +239,7 @@
                 if (data.success && data.result) {
                     // Mark this as a smoke test result explicitly
                     data.result.is_smoke_test = true;
+                    data.result._ai_context = 'smoke';
                     allResults.unshift(data.result);
                     displayResults();
                     showSuccessMessage(`Smoke test completed for ${url} - ${data.result.test_results ? data.result.test_results.length : 0} payloads tested`);
@@ -264,6 +270,123 @@
                 } else {
                     icon.innerHTML = '🚀';
                     text.textContent = 'Scan URL';
+                }
+            }
+        }
+
+        function buildAiResultPayload(result, isSmokeTest, detectionData) {
+            if (isSmokeTest) {
+                const summary = result.summary || {};
+                return {
+                    url: result.url || '',
+                    detected_waf: result.detected_waf || null,
+                    detected_cdn: result.detected_cdn || null,
+                    summary: {
+                        blocked_count: summary.blocked_count ?? 0,
+                        allowed_count: summary.allowed_count ?? 0,
+                        error_count: summary.error_count ?? 0,
+                        effectiveness_percentage: summary.effectiveness_percentage ?? 0
+                    },
+                    detection_time_ms: result.total_time_ms || 0,
+                    evidence: []
+                };
+            }
+
+            const evidence = Array.isArray(detectionData && detectionData.evidence)
+                ? detectionData.evidence.map(item => ({
+                    description: item && item.description ? item.description : '',
+                    confidence: item && typeof item.confidence === 'number' ? item.confidence : null
+                }))
+                : [];
+
+            return {
+                url: detectionData && detectionData.url ? detectionData.url : '',
+                detected_waf: detectionData ? detectionData.detected_waf : null,
+                detected_cdn: detectionData ? detectionData.detected_cdn : null,
+                detection_time_ms: detectionData ? detectionData.detection_time_ms : 0,
+                evidence
+            };
+        }
+
+        function renderAiSummary(summary) {
+            if (!summary) return '';
+            const verdict = escapeHtml(summary.verdict || 'Unknown');
+            const oneLiner = escapeHtml(summary.one_liner || '');
+            const keyPoints = Array.isArray(summary.key_points) ? summary.key_points : [];
+            const nextSteps = Array.isArray(summary.next_steps) ? summary.next_steps : [];
+            const caveats = Array.isArray(summary.caveats) ? summary.caveats : [];
+
+            const renderList = (items) => items.length
+                ? `<ul class="ai-summary-list">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+                : '<div class="ai-summary-empty">No items</div>';
+
+            return `
+                <div class="ai-summary-header">
+                    <div class="ai-verdict">Verdict: <span class="ai-verdict-badge">${verdict}</span></div>
+                    <div class="ai-one-liner">${oneLiner}</div>
+                </div>
+                <div class="ai-summary-grid">
+                    <div>
+                        <div class="ai-summary-title">Key Points</div>
+                        ${renderList(keyPoints)}
+                    </div>
+                    <div>
+                        <div class="ai-summary-title">Next Steps</div>
+                        ${renderList(nextSteps)}
+                    </div>
+                </div>
+                <div class="ai-summary-title">Caveats</div>
+                ${renderList(caveats)}
+            `;
+        }
+
+        async function requestAiSummary(index) {
+            const result = allResults[index];
+            if (!result) return;
+
+            if (result.ai_summary) {
+                const panel = document.getElementById(`aiSummary-${index}`);
+                if (panel) {
+                    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+                }
+                return;
+            }
+
+            const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) ||
+                result.is_smoke_test === true ||
+                (result.summary && result.summary.effectiveness_percentage !== undefined);
+            const detectionData = result.detection_result ? result.detection_result : result;
+            const payload = {
+                result: buildAiResultPayload(result, isSmokeTest, detectionData),
+                context: { mode: result._ai_context || (isSmokeTest ? 'smoke' : 'single') }
+            };
+
+            const panel = document.getElementById(`aiSummary-${index}`);
+            if (panel) {
+                panel.style.display = 'block';
+                panel.innerHTML = '<div class="ai-summary-loading">Generating AI summary...</div>';
+            }
+
+            try {
+                const response = await fetch('/api/ai/summary', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (data.success && data.summary) {
+                    result.ai_summary = data.summary;
+                    if (panel) {
+                        panel.innerHTML = renderAiSummary(data.summary);
+                    }
+                } else {
+                    if (panel) {
+                        panel.innerHTML = `<div class="ai-summary-error">${escapeHtml(data.error || 'AI summaries are unavailable.')}</div>`;
+                    }
+                }
+            } catch (error) {
+                if (panel) {
+                    panel.innerHTML = `<div class="ai-summary-error">AI summaries are unavailable.</div>`;
                 }
             }
         }
@@ -377,6 +500,11 @@
                             detectionData && detectionData.detection_time_ms ? `${detectionData.detection_time_ms}ms` :
                                 "0ms"}</div>
                     </div>
+                    <div class="ai-summary-actions">
+                        <button class="btn btn-secondary" onclick="requestAiSummary(${index})">✨ AI Summary</button>
+                    </div>
+                    <div class="ai-summary-panel" id="aiSummary-${index}" style="display:none;"></div>
+
                     ${isSmokeTest ? `
                         <div class="smoke-test-card">
                             <h4 class="smoke-test-title">🛡️ WAF Smoke Test Results</h4>
