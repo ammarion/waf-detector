@@ -69,6 +69,13 @@ impl SimpleCliApp {
             return self.run_smoke_test(&matches).await;
         }
 
+        // Handle virtual adversary (VA) schema output
+        if matches.get_flag("va-schema") {
+            let schema = crate::virtual_adversary::va_report_schema();
+            println!("{}", serde_json::to_string_pretty(&schema)?);
+            return Ok(());
+        }
+
         // Handle virtual adversary (VA) mode
         if let Some(url) = matches.get_one::<String>("va") {
             let config = VirtualAdversaryConfig {
@@ -769,6 +776,12 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Run Virtual Adversary effectiveness validation (requires consent)")
                 .value_name("URL")
                 .num_args(1),
+        )
+        .arg(
+            Arg::new("va-schema")
+                .long("va-schema")
+                .help("Print VA report JSON schema")
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("va-output")

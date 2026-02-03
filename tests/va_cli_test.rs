@@ -41,3 +41,10 @@ fn test_va_cli_output_requires_va() {
     ]);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_va_schema_flag_parses() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va-schema"]);
+    assert!(result.is_ok());
+}
