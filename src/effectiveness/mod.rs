@@ -75,6 +75,39 @@ pub(crate) struct BaselineSignature {
     headers: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BlockTemplate {
+    vendor: &'static str,
+    markers: &'static [&'static str],
+}
+
+const BLOCK_TEMPLATES: &[BlockTemplate] = &[
+    BlockTemplate {
+        vendor: "CloudFlare",
+        markers: &["cloudflare", "attention required", "ray id"],
+    },
+    BlockTemplate {
+        vendor: "Akamai",
+        markers: &["akamai", "reference", "incident id"],
+    },
+    BlockTemplate {
+        vendor: "AWS WAF",
+        markers: &["request blocked", "aws waf"],
+    },
+    BlockTemplate {
+        vendor: "F5 BIG-IP",
+        markers: &["the requested url was rejected", "support id"],
+    },
+    BlockTemplate {
+        vendor: "Sucuri",
+        markers: &["access denied", "sucuri"],
+    },
+    BlockTemplate {
+        vendor: "Imperva",
+        markers: &["incapsula", "incident id"],
+    },
+];
+
 impl EffectivenessTest {
     /// Check if a response indicates blocking
     pub(crate) fn is_blocked(
@@ -120,6 +153,10 @@ impl EffectivenessTest {
                     reasons.push(format!("Blocking keyword detected: {indicator}"));
                 }
             }
+        }
+
+        if let Some(vendor) = Self::match_block_template(&body_lower, baseline) {
+            reasons.push(format!("Block page template match: {vendor}"));
         }
 
         // Baseline-aware body delta: large reduction or low similarity can indicate blocking
@@ -472,6 +509,7 @@ impl EffectivenessTest {
         let client = reqwest::Client::builder()
             .timeout(self.config.request_timeout)
             .danger_accept_invalid_certs(true) // Allow testing sites with invalid certs (common in testing)
+            .no_proxy()
             .build()?;
 
         let mut request_builder = match method {
@@ -648,6 +686,23 @@ impl EffectivenessTest {
                 body_length: r.response_body_length,
                 headers: r.response_headers.clone(),
             })
+    }
+
+    fn match_block_template(body_lower: &str, baseline: Option<&BaselineSignature>) -> Option<&'static str> {
+        let baseline_body = baseline.map(|b| b.body_sample.to_lowercase()).unwrap_or_default();
+
+        for template in BLOCK_TEMPLATES {
+            let is_match = template
+                .markers
+                .iter()
+                .all(|marker| body_lower.contains(marker));
+
+            if is_match && !baseline_body.contains(template.markers[0]) {
+                return Some(template.vendor);
+            }
+        }
+
+        None
     }
 }
 

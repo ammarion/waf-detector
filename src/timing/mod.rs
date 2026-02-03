@@ -67,6 +67,7 @@ impl TimingAnalyzer {
     pub fn new(config: TimingConfig) -> Self {
         let http_client = reqwest::Client::builder()
             .timeout(config.request_timeout)
+            .no_proxy()
             .build()
             .unwrap();
 

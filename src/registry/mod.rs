@@ -270,6 +270,8 @@ impl ProviderRegistry {
                     continue;
                 }
 
+                let has_tier1 = Self::has_tier1_evidence(&provider_name, evidence);
+                let passes_correlation = Self::passes_correlation(evidence);
                 let confidence_result = self
                     .advanced_scoring
                     .calculate_confidence(&provider_name, evidence, &response_headers);
@@ -280,7 +282,7 @@ impl ProviderRegistry {
                 if let Some(metadata) = self.provider_metadata.get(&provider_name) {
                     match metadata.provider_type.as_str() {
                         "WAF Only" => {
-                            if final_confidence > best_waf_confidence {
+                            if has_tier1 && passes_correlation && final_confidence > best_waf_confidence {
                                 best_waf_confidence = final_confidence;
                                 best_waf = Some(ProviderDetection {
                                     name: provider_name.clone(),
@@ -289,7 +291,7 @@ impl ProviderRegistry {
                             }
                         }
                         "CDN Only" => {
-                            if final_confidence > best_cdn_confidence {
+                            if has_tier1 && passes_correlation && final_confidence > best_cdn_confidence {
                                 best_cdn_confidence = final_confidence;
                                 best_cdn = Some(ProviderDetection {
                                     name: provider_name.clone(),
@@ -298,14 +300,14 @@ impl ProviderRegistry {
                             }
                         }
                         "Both" => {
-                            if final_confidence > best_waf_confidence {
+                            if has_tier1 && passes_correlation && final_confidence > best_waf_confidence {
                                 best_waf_confidence = final_confidence;
                                 best_waf = Some(ProviderDetection {
                                     name: provider_name.clone(),
                                     confidence: final_confidence,
                                 });
                             }
-                            if final_confidence > best_cdn_confidence {
+                            if has_tier1 && passes_correlation && final_confidence > best_cdn_confidence {
                                 best_cdn_confidence = final_confidence;
                                 best_cdn = Some(ProviderDetection {
                                     name: provider_name.clone(),
@@ -438,6 +440,65 @@ impl ProviderRegistry {
 
         Some(normalized.to_string())
     }
+
+    fn has_tier1_evidence(_provider_name: &str, evidence: &[crate::Evidence]) -> bool {
+        let strong_signatures = [
+            // Cloudflare
+            "cf-ray-header",
+            "cf-cache-status-header",
+            "cloudflare-server-header",
+            // AWS/CloudFront
+            "x-amz-cf-id-header",
+            "x-amz-cf-pop-header",
+            "cloudfront-via-header",
+            "cloudfront-server-header",
+            // Akamai
+            "akamai-server-pattern",
+            "x-akamai-header",
+            // Fastly
+            "fastly-header",
+            "x-served-by-fastly",
+            // Vercel
+            "vercel-server-header",
+            "x-vercel-id-header",
+            // Azure
+            "x-azure-fdid-header",
+            "x-azure-ref-header",
+            "x-ms-edge-server-header",
+            // F5
+            "f5-asm-pattern",
+            "f5-asm-block-behavior",
+            "f5-block-pattern",
+            "f5-support-id-pattern",
+        ];
+
+        evidence.iter().any(|ev| match ev.method_type {
+            crate::MethodType::DNS(_) | crate::MethodType::Certificate => true,
+            crate::MethodType::Header(_) => {
+                strong_signatures.contains(&ev.signature_matched.as_str())
+            }
+            _ => false,
+        })
+    }
+
+    fn passes_correlation(evidence: &[crate::Evidence]) -> bool {
+        if evidence
+            .iter()
+            .any(|ev| matches!(ev.method_type, crate::MethodType::DNS(_) | crate::MethodType::Certificate))
+        {
+            return true;
+        }
+
+        let mut signatures = std::collections::HashSet::new();
+        let mut method_types = std::collections::HashSet::new();
+
+        for ev in evidence {
+            signatures.insert(ev.signature_matched.as_str());
+            method_types.insert(std::mem::discriminant(&ev.method_type));
+        }
+
+        signatures.len() >= 2 || method_types.len() >= 2
+    }
 }
 
 impl Default for ProviderRegistry {
@@ -516,5 +577,50 @@ mod tests {
         assert_eq!(evidence_map.get("CloudFlare").unwrap().len(), 1);
         assert_eq!(evidence_map.get("AWS").unwrap().len(), 1);
         assert_eq!(evidence_map.get("GenericWAF").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_tier1_evidence_detection() {
+        let evidence = vec![Evidence {
+            method_type: MethodType::Header("cf-ray".to_string()),
+            confidence: 0.95,
+            description: "CF-Ray header detected".to_string(),
+            raw_data: "abcd1234-SEA".to_string(),
+            signature_matched: "cf-ray-header".to_string(),
+        }];
+
+        assert!(ProviderRegistry::has_tier1_evidence("CloudFlare", &evidence));
+    }
+
+    #[test]
+    fn test_correlation_requires_multiple_signals_without_dns_tls() {
+        let single = vec![Evidence {
+            method_type: MethodType::Header("cf-ray".to_string()),
+            confidence: 0.95,
+            description: "CF-Ray header detected".to_string(),
+            raw_data: "abcd1234-SEA".to_string(),
+            signature_matched: "cf-ray-header".to_string(),
+        }];
+
+        assert!(!ProviderRegistry::passes_correlation(&single));
+
+        let multi = vec![
+            Evidence {
+                method_type: MethodType::Header("cf-ray".to_string()),
+                confidence: 0.95,
+                description: "CF-Ray header detected".to_string(),
+                raw_data: "abcd1234-SEA".to_string(),
+                signature_matched: "cf-ray-header".to_string(),
+            },
+            Evidence {
+                method_type: MethodType::Header("cf-cache-status".to_string()),
+                confidence: 0.90,
+                description: "CF cache status".to_string(),
+                raw_data: "HIT".to_string(),
+                signature_matched: "cf-cache-status-header".to_string(),
+            },
+        ];
+
+        assert!(ProviderRegistry::passes_correlation(&multi));
     }
 }
