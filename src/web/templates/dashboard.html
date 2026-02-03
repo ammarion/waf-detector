@@ -278,6 +278,7 @@
                 <button class="modal-close" onclick="closeVaReportModal()">✕</button>
             </div>
             <div id="vaReportMeta" class="modal-meta"></div>
+            <div id="vaPinnedSummary" class="va-pinned-summary"></div>
             <div id="vaReportSummary" class="modal-summary"></div>
             <div id="vaReportExplainability" class="va-explainability" aria-live="polite"></div>
             <div class="payload-table-wrapper">
@@ -1377,11 +1378,37 @@
             renderVaPinnedList();
         }
 
+        function updatePinnedSummary() {
+            const container = document.getElementById('vaPinnedSummary');
+            if (!container) return;
+            const count = vaPinnedRows.length;
+            const label = count === 1 ? '1 pinned probe' : `${count} pinned probes`;
+            container.innerHTML = `
+                <div class="va-pinned-summary-count">${label}</div>
+                <div class="va-pinned-summary-actions">
+                    <button class="va-evidence-button" id="vaPinnedSummaryJson">Export Pinned JSON</button>
+                    <button class="va-evidence-button" id="vaPinnedSummaryCsv">Export Pinned CSV</button>
+                </div>
+            `;
+            const jsonBtn = document.getElementById('vaPinnedSummaryJson');
+            const csvBtn = document.getElementById('vaPinnedSummaryCsv');
+            const disabled = count === 0;
+            if (jsonBtn) {
+                jsonBtn.disabled = disabled;
+                jsonBtn.onclick = () => exportPinnedJson();
+            }
+            if (csvBtn) {
+                csvBtn.disabled = disabled;
+                csvBtn.onclick = () => exportPinnedCsv();
+            }
+        }
+
         function renderVaPinnedList() {
             const container = document.getElementById('vaPinnedList');
             if (!container) return;
             if (!vaPinnedRows.length) {
                 container.textContent = 'No pins yet.';
+                updatePinnedSummary();
                 return;
             }
             container.innerHTML = vaPinnedRows.map(item => `
@@ -1400,6 +1427,7 @@
                     toggleVaPin({ category: '', outcome: '', reason: '' }, index);
                 });
             });
+            updatePinnedSummary();
         }
 
         function pinByOutcome(outcome) {

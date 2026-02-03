@@ -868,6 +868,37 @@ body {
     color: #e2e8f0;
 }
 
+.va-pinned-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.6rem 0.75rem;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+    color: #e2e8f0;
+}
+
+.va-pinned-summary-count {
+    font-weight: 600;
+    color: #f8fafc;
+}
+
+.va-pinned-summary-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.va-pinned-summary-actions .va-evidence-button[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .va-pinned-actions {
     display: flex;
     gap: 0.4rem;
