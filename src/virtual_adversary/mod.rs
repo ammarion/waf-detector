@@ -145,7 +145,7 @@ pub struct VirtualAdversaryRunner {
 
 const BASELINE_SAMPLE_LIMIT: usize = 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaselineRecord {
     pub status_code: u16,
     pub headers: HashMap<String, String>,
@@ -174,7 +174,7 @@ impl BaselineRecord {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseDiff {
     pub status_changed: bool,
     pub length_delta: usize,
@@ -213,7 +213,7 @@ impl ResponseDiff {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VaOutcome {
     Blocked,
     Challenge,
@@ -246,7 +246,7 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff) -> VaOutcome {
     VaOutcome::Allowed
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaResultSummary {
     pub total: usize,
     pub blocked: usize,
@@ -277,13 +277,15 @@ impl VaResultSummary {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct VaRunReport {
     pub target_url: String,
     pub plan_size: usize,
     pub summary: VaResultSummary,
     pub config: VirtualAdversaryConfig,
+    #[serde(skip, default)]
     pub started_at: std::time::Instant,
+    #[serde(skip, default)]
     pub finished_at: Option<std::time::Instant>,
 }
 
@@ -304,7 +306,7 @@ impl VaRunReport {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaHttpResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
@@ -348,21 +350,21 @@ impl VaHttpAdapter for RealVaHttpAdapter {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VaPayloadCategory {
     SqlInjection,
     Xss,
     PathTraversal,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaPayloadTemplate {
     pub category: VaPayloadCategory,
     pub name: &'static str,
     pub payload: &'static str,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaPayloadVariant {
     pub category: VaPayloadCategory,
     pub template_name: &'static str,
@@ -927,5 +929,17 @@ mod tests {
         let report = runner.run("https://example.com").unwrap();
         assert_eq!(report.summary.total, report.plan_size);
         assert_eq!(report.summary.blocked, report.plan_size);
+    }
+
+    #[test]
+    fn test_va_report_serializes_to_json() {
+        let report = VaRunReport::new(
+            "https://example.com",
+            2,
+            VirtualAdversaryConfig::default(),
+        );
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("example.com"));
+        assert!(json.contains("plan_size"));
     }
 }
