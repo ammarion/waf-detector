@@ -184,10 +184,15 @@ Virtual Adversary adds adaptive, consent-gated effectiveness testing with baseli
 **Common options:**
 - `--va-tier 1|2|3`: Safety tier for payload sophistication.
 - `--va-budget N`: Max requests allowed per run.
-- `--va-timeout MS`: Per-request timeout in milliseconds.
+- `--va-timeout SECONDS`: Per-request timeout in seconds.
 - `--va-delay MS`: Delay between requests in milliseconds.
 - `--va-variants N`: Variants per payload template.
 - `--va-output report.json`: Save JSON report (also writes a `.summary.txt`).
+- `--va-replay`: Print the replay plan JSON to stdout (probes, headers, and URLs).
+
+**Replay plan exports (web UI):**
+- VA history entries expose **Replay JSON** and **Replay CSV** downloads.
+- Reports also include replay plan metadata in VA CSV exports.
 
 > ⚠️ **Ethical Use Required:** Virtual Adversary simulates evasive attackers. Only use on systems you own or have explicit permission to test.
 
