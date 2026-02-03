@@ -359,6 +359,16 @@ pub struct VaResultRecord {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaPayloadEvent {
+    pub index: usize,
+    pub total: usize,
+    pub category: VaPayloadCategory,
+    pub payload: String,
+    pub outcome: VaOutcome,
+    pub reason: String,
+}
+
 pub fn va_report_schema() -> serde_json::Value {
     json!({
         "type": "object",
@@ -576,9 +586,15 @@ impl VirtualAdversaryRunner {
         Ok((outcome, reason))
     }
 
-    pub fn run_with_progress<F>(&mut self, target_url: &str, mut on_progress: F) -> Result<VaRunReport>
+    pub fn run_with_events<F, G>(
+        &mut self,
+        target_url: &str,
+        mut on_progress: F,
+        mut on_event: G,
+    ) -> Result<VaRunReport>
     where
         F: FnMut(usize, usize),
+        G: FnMut(VaPayloadEvent),
     {
         ensure_consent_and_target(&self.consent_manager, target_url)?;
 
@@ -594,11 +610,21 @@ impl VirtualAdversaryRunner {
         on_progress(0, total);
         let mut report = VaRunReport::new(target_url, plan.len(), self.config.clone());
         for (idx, item) in plan.into_iter().enumerate() {
+            let payload_value = item.payload.clone();
+            let category = item.category;
             let (outcome, reason) = self.evaluate_payload(target_url, &baseline, &item)?;
             report.summary.record(outcome);
             report.results.push(VaResultRecord {
-                payload: item.payload,
-                category: item.category,
+                payload: payload_value.clone(),
+                category,
+                outcome,
+                reason: reason.clone(),
+            });
+            on_event(VaPayloadEvent {
+                index: idx + 1,
+                total,
+                category,
+                payload: payload_value,
                 outcome,
                 reason,
             });
@@ -608,8 +634,15 @@ impl VirtualAdversaryRunner {
         Ok(report)
     }
 
+    pub fn run_with_progress<F>(&mut self, target_url: &str, on_progress: F) -> Result<VaRunReport>
+    where
+        F: FnMut(usize, usize),
+    {
+        self.run_with_events(target_url, on_progress, |_| {})
+    }
+
     pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
-        self.run_with_progress(target_url, |_, _| {})
+        self.run_with_events(target_url, |_, _| {}, |_| {})
     }
 }
 
@@ -790,6 +823,33 @@ mod tests {
         assert_eq!(first_total, report.plan_size);
         assert_eq!(last_done, report.plan_size);
         assert_eq!(last_total, report.plan_size);
+    }
+
+    #[test]
+    fn test_runner_emits_events() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+
+        let config = VirtualAdversaryConfig {
+            request_budget: 6,
+            max_variants_per_payload: 1,
+            ..VirtualAdversaryConfig::default()
+        };
+        let mut runner = VirtualAdversaryRunner::new(config)
+            .unwrap()
+            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+
+        let mut events = Vec::new();
+        let report = runner
+            .run_with_events("https://example.com", |_, _| {}, |event| {
+                events.push(event);
+            })
+            .unwrap();
+
+        assert_eq!(events.len(), report.plan_size);
+        assert_eq!(events.first().unwrap().index, 1);
+        assert_eq!(events.last().unwrap().index, report.plan_size);
     }
 
     #[test]

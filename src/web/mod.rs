@@ -2,7 +2,9 @@ use crate::effectiveness::consent::{ConsentManager, ConsentStatus};
 use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, SmokeTestResult, WafSmokeTest};
 use crate::script_executor::{CombinedResult, ScriptExecutor};
-use crate::virtual_adversary::{VaRunReport, VirtualAdversaryConfig, VirtualAdversaryRunner};
+use crate::virtual_adversary::{
+    VaOutcome, VaPayloadCategory, VaRunReport, VirtualAdversaryConfig, VirtualAdversaryRunner,
+};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
@@ -151,6 +153,7 @@ pub struct VaJobStatus {
     pub result: Option<VaRunReport>,
     pub error: Option<String>,
     pub report_id: Option<String>,
+    pub events: Vec<VaJobEvent>,
 }
 
 #[derive(Debug)]
@@ -162,7 +165,21 @@ struct VaJob {
     result: Option<VaRunReport>,
     error: Option<String>,
     report_id: Option<String>,
+    events: Vec<VaJobEvent>,
 }
+
+#[derive(Debug, Serialize, Clone)]
+pub struct VaJobEvent {
+    pub index: usize,
+    pub total: usize,
+    pub category: VaPayloadCategory,
+    pub payload: String,
+    pub outcome: VaOutcome,
+    pub reason: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+const VA_JOB_EVENT_LIMIT: usize = 200;
 
 impl VaJob {
     fn new(id: String) -> Self {
@@ -174,6 +191,7 @@ impl VaJob {
             result: None,
             error: None,
             report_id: None,
+            events: Vec::new(),
         }
     }
 
@@ -186,7 +204,15 @@ impl VaJob {
             result: self.result.clone(),
             error: self.error.clone(),
             report_id: self.report_id.clone(),
+            events: self.events.clone(),
         }
+    }
+
+    fn push_event(&mut self, event: VaJobEvent) {
+        if self.events.len() >= VA_JOB_EVENT_LIMIT {
+            self.events.remove(0);
+        }
+        self.events.push(event);
     }
 }
 
@@ -803,13 +829,30 @@ async fn virtual_adversary_start(
         }
 
         let mut runner = VirtualAdversaryRunner::new(config)?;
-        let result = runner.run_with_progress(&url, |done, total| {
-            let mut jobs = jobs.lock().unwrap();
-            if let Some(job) = jobs.get_mut(&job_id_for_task) {
-                job.total = total;
-                job.completed = done;
-            }
-        });
+        let result = runner.run_with_events(
+            &url,
+            |done, total| {
+                let mut jobs = jobs.lock().unwrap();
+                if let Some(job) = jobs.get_mut(&job_id_for_task) {
+                    job.total = total;
+                    job.completed = done;
+                }
+            },
+            |event| {
+                let mut jobs = jobs.lock().unwrap();
+                if let Some(job) = jobs.get_mut(&job_id_for_task) {
+                    job.push_event(VaJobEvent {
+                        index: event.index,
+                        total: event.total,
+                        category: event.category,
+                        payload: event.payload,
+                        outcome: event.outcome,
+                        reason: event.reason,
+                        timestamp: Utc::now(),
+                    });
+                }
+            },
+        );
 
         let mut jobs = jobs.lock().unwrap();
         if let Some(job) = jobs.get_mut(&job_id_for_task) {
@@ -978,6 +1021,24 @@ mod tests {
         let filename = report_filename("https://example.com/test", now);
         assert!(filename.contains("example.com"));
         assert!(filename.ends_with(".json"));
+    }
+
+    #[test]
+    fn va_job_event_limit_retains_latest() {
+        let mut job = super::VaJob::new("va-1".to_string());
+        for idx in 0..(super::VA_JOB_EVENT_LIMIT + 5) {
+            job.push_event(super::VaJobEvent {
+                index: idx + 1,
+                total: 10,
+                category: crate::virtual_adversary::VaPayloadCategory::SqlInjection,
+                payload: format!("payload-{idx}"),
+                outcome: crate::virtual_adversary::VaOutcome::Blocked,
+                reason: "status=403".to_string(),
+                timestamp: chrono::Utc::now(),
+            });
+        }
+        assert_eq!(job.events.len(), super::VA_JOB_EVENT_LIMIT);
+        assert_eq!(job.events.first().unwrap().index, 6);
     }
 
     #[test]

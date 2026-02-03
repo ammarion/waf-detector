@@ -263,7 +263,18 @@ pub const API_DOCS_HTML: &str = r#"
     "total": 24,
     "completed": 6,
     "result": null,
-    "error": null
+    "error": null,
+    "events": [
+      {
+        "index": 6,
+        "total": 24,
+        "category": "SqlInjection",
+        "payload": "' OR '1'='1",
+        "outcome": "Blocked",
+        "reason": "status=403",
+        "timestamp": "2026-02-03T12:00:00Z"
+      }
+    ]
   },
   "error": null
 }</code></pre>
@@ -450,5 +461,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("Download VA Report"));
         assert!(DASHBOARD_HTML.contains("consentTargetInput"));
         assert!(DASHBOARD_HTML.contains("vaHistoryList"));
+        assert!(DASHBOARD_HTML.contains("vaActivityLog"));
     }
 }

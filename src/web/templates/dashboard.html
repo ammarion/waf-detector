@@ -123,6 +123,11 @@
                         <span id="vaTestText">Run Virtual Adversary</span>
                     </button>
                 </form>
+                <div class="va-activity">
+                    <div class="va-activity-title">Live Activity</div>
+                    <div id="vaActivityEmpty" class="va-activity-empty">No activity yet.</div>
+                    <ul id="vaActivityLog" class="va-activity-log"></ul>
+                </div>
             </div>
 
             <div class="card">
@@ -336,6 +341,47 @@
             }
         }
 
+        let vaEventCursor = {};
+        let currentVaJobId = null;
+
+        function resetVaActivity() {
+            const log = document.getElementById('vaActivityLog');
+            const empty = document.getElementById('vaActivityEmpty');
+            if (log) log.innerHTML = '';
+            if (empty) empty.style.display = 'block';
+        }
+
+        function appendVaEvents(jobId, events) {
+            const log = document.getElementById('vaActivityLog');
+            const empty = document.getElementById('vaActivityEmpty');
+            if (!log || !events) return;
+
+            const lastIndex = vaEventCursor[jobId] || 0;
+            const sorted = events.slice().sort((a, b) => a.index - b.index);
+            const newEvents = sorted.filter(event => event.index > lastIndex);
+            if (newEvents.length === 0) {
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+
+            newEvents.forEach(event => {
+                const li = document.createElement('li');
+                li.className = 'va-activity-item';
+                const outcomeClass = event.outcome === 'Blocked' ? 'va-outcome-blocked' :
+                    event.outcome === 'Challenge' ? 'va-outcome-challenge' :
+                        event.outcome === 'Allowed' ? 'va-outcome-allowed' : 'va-outcome-error';
+                li.innerHTML = `
+                    <span class="va-activity-index">#${event.index}/${event.total}</span>
+                    <span class="va-activity-category">${escapeHtml(event.category)}</span>
+                    <span class="va-activity-outcome ${outcomeClass}">${escapeHtml(event.outcome)}</span>
+                    <span class="va-activity-reason">${escapeHtml(event.reason)}</span>
+                `;
+                log.appendChild(li);
+            });
+
+            vaEventCursor[jobId] = newEvents[newEvents.length - 1].index;
+        }
+
         async function runVirtualAdversary() {
             const btn = document.querySelector('#vaTestForm button');
             const icon = document.getElementById('vaTestIcon');
@@ -368,6 +414,9 @@
 
                 if (data.success && data.job_id) {
                     showSuccessMessage(`Virtual Adversary started for ${url}`);
+                    currentVaJobId = data.job_id;
+                    vaEventCursor[currentVaJobId] = 0;
+                    resetVaActivity();
                     pollVirtualAdversary(data.job_id, url, btn, icon, text);
                 } else {
                     showErrorMessage(data.error || 'Virtual Adversary failed');
@@ -392,6 +441,10 @@
                     }
 
                     const status = data.status;
+                    if (status.events && Array.isArray(status.events) && status.events.length > 0) {
+                        appendVaEvents(jobId, status.events);
+                    }
+
                     if (status.state === 'pending' || status.state === 'running') {
                         const label = status.total > 0
                             ? `Running ${status.completed}/${status.total}`
