@@ -321,7 +321,7 @@
             const icon = document.getElementById('vaTestIcon');
             const text = document.getElementById('vaTestText');
 
-            setButtonLoading(btn, icon, text, true, 'Running...');
+            setButtonLoading(btn, icon, text, true, 'Starting...');
 
             const url = document.getElementById('vaUrl').value;
             const tier = parseInt(document.getElementById('vaTier').value, 10);
@@ -338,7 +338,7 @@
             if (!isNaN(variants)) body.variants = variants;
 
             try {
-                const response = await fetch('/api/virtual-adversary', {
+                const response = await fetch('/api/virtual-adversary/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
@@ -346,19 +346,60 @@
 
                 const data = await response.json();
 
-                if (data.success && data.result) {
-                    data.result.is_virtual_adversary = true;
-                    allResults.unshift(data.result);
-                    displayResults();
-                    showSuccessMessage(`Virtual Adversary completed for ${url}`);
+                if (data.success && data.job_id) {
+                    showSuccessMessage(`Virtual Adversary started for ${url}`);
+                    pollVirtualAdversary(data.job_id, url, btn, icon, text);
                 } else {
                     showErrorMessage(data.error || 'Virtual Adversary failed');
+                    setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
                 }
             } catch (error) {
                 showErrorMessage(`Error: ${error.message}`);
-            } finally {
                 setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
             }
+        }
+
+        function pollVirtualAdversary(jobId, url, btn, icon, text) {
+            const pollIntervalMs = 1500;
+
+            const poll = async () => {
+                try {
+                    const response = await fetch(`/api/virtual-adversary/status/${jobId}`);
+                    const data = await response.json();
+
+                    if (!data.success || !data.status) {
+                        throw new Error(data.error || 'Virtual Adversary status unavailable');
+                    }
+
+                    const status = data.status;
+                    if (status.state === 'pending' || status.state === 'running') {
+                        const label = status.total > 0
+                            ? `Running ${status.completed}/${status.total}`
+                            : 'Running...';
+                        setButtonLoading(btn, icon, text, true, label);
+                        return;
+                    }
+
+                    if (status.state === 'completed' && status.result) {
+                        status.result.is_virtual_adversary = true;
+                        allResults.unshift(status.result);
+                        displayResults();
+                        showSuccessMessage(`Virtual Adversary completed for ${url}`);
+                    } else if (status.state === 'failed') {
+                        showErrorMessage(status.error || 'Virtual Adversary failed');
+                    }
+
+                    setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
+                    clearInterval(timer);
+                } catch (error) {
+                    showErrorMessage(`Error: ${error.message}`);
+                    setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
+                    clearInterval(timer);
+                }
+            };
+
+            const timer = setInterval(poll, pollIntervalMs);
+            poll();
         }
 
         async function loadConsentStatus() {

@@ -572,7 +572,10 @@ impl VirtualAdversaryRunner {
         Ok((outcome, reason))
     }
 
-    pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
+    pub fn run_with_progress<F>(&mut self, target_url: &str, mut on_progress: F) -> Result<VaRunReport>
+    where
+        F: FnMut(usize, usize),
+    {
         ensure_consent_and_target(&self.consent_manager, target_url)?;
 
         let _tier = self.config.tier;
@@ -583,8 +586,10 @@ impl VirtualAdversaryRunner {
 
         let baseline = self.collect_baseline(target_url)?;
         let plan = self.plan();
+        let total = plan.len();
+        on_progress(0, total);
         let mut report = VaRunReport::new(target_url, plan.len(), self.config.clone());
-        for item in plan {
+        for (idx, item) in plan.into_iter().enumerate() {
             let (outcome, reason) = self.evaluate_payload(target_url, &baseline, &item)?;
             report.summary.record(outcome);
             report.results.push(VaResultRecord {
@@ -593,9 +598,14 @@ impl VirtualAdversaryRunner {
                 outcome,
                 reason,
             });
+            on_progress(idx + 1, total);
         }
         report.finish();
         Ok(report)
+    }
+
+    pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
+        self.run_with_progress(target_url, |_, _| {})
     }
 }
 
@@ -745,6 +755,37 @@ mod tests {
             .with_http_adapter(Box::new(StubHttpAdapter::default()));
         let result = runner.run("https://example.com");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_runner_reports_progress() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+
+        let config = VirtualAdversaryConfig {
+            request_budget: 6,
+            max_variants_per_payload: 1,
+            ..VirtualAdversaryConfig::default()
+        };
+        let mut runner = VirtualAdversaryRunner::new(config)
+            .unwrap()
+            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+
+        let mut updates = Vec::new();
+        let report = runner
+            .run_with_progress("https://example.com", |done, total| {
+                updates.push((done, total));
+            })
+            .unwrap();
+
+        assert!(!updates.is_empty());
+        let (first_done, first_total) = updates.first().copied().unwrap();
+        let (last_done, last_total) = updates.last().copied().unwrap();
+        assert_eq!(first_done, 0);
+        assert_eq!(first_total, report.plan_size);
+        assert_eq!(last_done, report.plan_size);
+        assert_eq!(last_total, report.plan_size);
     }
 
     #[test]

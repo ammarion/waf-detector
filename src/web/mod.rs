@@ -6,14 +6,18 @@ use crate::virtual_adversary::{VaRunReport, VirtualAdversaryConfig, VirtualAdver
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
 pub mod templates;
@@ -22,6 +26,8 @@ pub mod templates;
 pub struct WebServer {
     engine: Arc<DetectionEngine>,
     script_executor: Arc<ScriptExecutor>,
+    va_jobs: Arc<Mutex<HashMap<String, VaJob>>>,
+    va_job_counter: Arc<AtomicU64>,
 }
 
 #[derive(Deserialize)]
@@ -111,6 +117,73 @@ pub struct VaResponse {
 }
 
 #[derive(Serialize)]
+pub struct VaJobStartResponse {
+    success: bool,
+    job_id: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VaJobState {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct VaJobStatus {
+    pub id: String,
+    pub state: VaJobState,
+    pub total: usize,
+    pub completed: usize,
+    pub result: Option<VaRunReport>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug)]
+struct VaJob {
+    id: String,
+    state: VaJobState,
+    total: usize,
+    completed: usize,
+    result: Option<VaRunReport>,
+    error: Option<String>,
+}
+
+impl VaJob {
+    fn new(id: String) -> Self {
+        Self {
+            id,
+            state: VaJobState::Pending,
+            total: 0,
+            completed: 0,
+            result: None,
+            error: None,
+        }
+    }
+
+    fn status(&self) -> VaJobStatus {
+        VaJobStatus {
+            id: self.id.clone(),
+            state: self.state,
+            total: self.total,
+            completed: self.completed,
+            result: self.result.clone(),
+            error: self.error.clone(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct VaJobStatusResponse {
+    success: bool,
+    status: Option<VaJobStatus>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct ConsentStatusResponse {
     success: bool,
     status: Option<ConsentStatus>,
@@ -122,6 +195,8 @@ impl WebServer {
         Self {
             engine: Arc::new(engine),
             script_executor: Arc::new(ScriptExecutor::default()),
+            va_jobs: Arc::new(Mutex::new(HashMap::new())),
+            va_job_counter: Arc::new(AtomicU64::new(1)),
         }
     }
 
@@ -135,6 +210,11 @@ impl WebServer {
             .route("/api/smoke-test", post(smoke_test))
             .route("/api/batch-scan", post(batch_scan))
             .route("/api/virtual-adversary", post(virtual_adversary))
+            .route("/api/virtual-adversary/start", post(virtual_adversary_start))
+            .route(
+                "/api/virtual-adversary/status/:id",
+                get(virtual_adversary_status),
+            )
             .route("/api/consent-status", get(consent_status))
             .route("/api/providers", get(list_providers))
             .route("/api/status", get(server_status))
@@ -441,11 +521,110 @@ async fn virtual_adversary(
     }
 }
 
+// Handler to start Virtual Adversary testing asynchronously
+async fn virtual_adversary_start(
+    State(server): State<WebServer>,
+    Json(payload): Json<VaRequest>,
+) -> impl IntoResponse {
+    let config = match payload.to_config() {
+        Ok(config) => config,
+        Err(e) => {
+            let response = VaJobStartResponse {
+                success: false,
+                job_id: None,
+                error: Some(e.to_string()),
+            };
+            return (StatusCode::BAD_REQUEST, Json(response));
+        }
+    };
+
+    let job_id = format!(
+        "va-{}",
+        server.va_job_counter.fetch_add(1, Ordering::Relaxed)
+    );
+    let job_id_for_task = job_id.clone();
+
+    {
+        let mut jobs = server.va_jobs.lock().unwrap();
+        jobs.insert(job_id.clone(), VaJob::new(job_id.clone()));
+    }
+
+    let url = payload.url.clone();
+    let jobs = server.va_jobs.clone();
+
+    tokio::task::spawn_blocking(move || {
+        {
+            let mut jobs = jobs.lock().unwrap();
+            if let Some(job) = jobs.get_mut(&job_id_for_task) {
+                job.state = VaJobState::Running;
+            }
+        }
+
+        let mut runner = VirtualAdversaryRunner::new(config)?;
+        let result = runner.run_with_progress(&url, |done, total| {
+            let mut jobs = jobs.lock().unwrap();
+            if let Some(job) = jobs.get_mut(&job_id_for_task) {
+                job.total = total;
+                job.completed = done;
+            }
+        });
+
+        let mut jobs = jobs.lock().unwrap();
+        if let Some(job) = jobs.get_mut(&job_id_for_task) {
+            match result {
+                Ok(report) => {
+                    job.state = VaJobState::Completed;
+                    job.total = report.plan_size;
+                    job.completed = report.plan_size;
+                    job.result = Some(report);
+                }
+                Err(err) => {
+                    job.state = VaJobState::Failed;
+                    job.error = Some(err.to_string());
+                }
+            }
+        }
+
+        Ok::<(), anyhow::Error>(())
+    });
+
+    let response = VaJobStartResponse {
+        success: true,
+        job_id: Some(job_id),
+        error: None,
+    };
+    (StatusCode::OK, Json(response))
+}
+
+// Handler to get Virtual Adversary job status
+async fn virtual_adversary_status(
+    State(server): State<WebServer>,
+    Path(job_id): Path<String>,
+) -> impl IntoResponse {
+    let jobs = server.va_jobs.lock().unwrap();
+    if let Some(job) = jobs.get(&job_id) {
+        let response = VaJobStatusResponse {
+            success: true,
+            status: Some(job.status()),
+            error: None,
+        };
+        return (StatusCode::OK, Json(response));
+    }
+
+    let response = VaJobStatusResponse {
+        success: false,
+        status: None,
+        error: Some("Job not found".to_string()),
+    };
+    (StatusCode::NOT_FOUND, Json(response))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::VaRequest;
+    use super::{VaJobState, VaRequest};
     use crate::virtual_adversary::VirtualAdversaryConfig;
     use std::time::Duration;
+    use serde_json::json;
 
     #[test]
     fn va_request_defaults_to_config() {
@@ -485,6 +664,12 @@ mod tests {
         assert_eq!(config.request_timeout, Duration::from_millis(12_000));
         assert_eq!(config.request_delay, Duration::from_millis(500));
         assert_eq!(config.max_variants_per_payload, 2);
+    }
+
+    #[test]
+    fn va_job_state_serializes_snake_case() {
+        let value = serde_json::to_value(VaJobState::Running).unwrap();
+        assert_eq!(value, json!("running"));
     }
 
     #[test]

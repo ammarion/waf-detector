@@ -229,6 +229,47 @@ pub const API_DOCS_HTML: &str = r#"
         </div>
 
         <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary/start</h3>
+            <p>Start a Virtual Adversary run asynchronously and return a job id.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "url": "https://example.com",
+  "tier": 2,
+  "budget": 120,
+  "timeout_ms": 15000,
+  "delay_ms": 750,
+  "variants": 4
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "job_id": "va-42",
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/status/:id</h3>
+            <p>Check progress for a running Virtual Adversary job.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "status": {
+    "id": "va-42",
+    "state": "running",
+    "total": 24,
+    "completed": 6,
+    "result": null,
+    "error": null
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
             <h3><span class="method get">GET</span> /api/consent-status</h3>
             <p>Return consent status and authorized targets for the local user.</p>
 
