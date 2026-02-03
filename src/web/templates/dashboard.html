@@ -262,6 +262,7 @@
             </div>
             <div id="vaReportMeta" class="modal-meta"></div>
             <div id="vaReportSummary" class="modal-summary"></div>
+            <div id="vaReportExplainability" class="va-explainability" aria-live="polite"></div>
             <div class="payload-table-wrapper">
                 <table class="payload-table">
                     <thead>
@@ -318,6 +319,53 @@
                     <span class="va-evidence-count">${item.count ?? 0}</span>
                 </span>
             `).join('');
+        }
+
+        function describeEnforcement(enforcement) {
+            const key = String(enforcement || '').toLowerCase();
+            if (key === 'hardblock') return 'Consistent hard blocks observed across probes.';
+            if (key === 'challengegate') return 'Challenges surfaced for multiple probes.';
+            if (key === 'silentfilter') return 'Responses deviated without explicit blocks.';
+            if (key === 'noenforcement') return 'Probes mostly allowed with low anomaly.';
+            return 'Evidence was insufficient to classify enforcement.';
+        }
+
+        function renderExplainabilityPanel(report, total, blocked, challenge, allowed, errorCount) {
+            const panel = document.getElementById('vaReportExplainability');
+            if (!panel) return;
+            const enforcement = report.enforcement || 'Inconclusive';
+            const evidenceScore = typeof report.evidence_score === 'number' ? report.evidence_score : null;
+            const evidenceSummary = report.evidence_summary || [];
+            const rationale = describeEnforcement(enforcement);
+            const topEvidence = evidenceSummary.slice(0, 4).map(item => `
+                <li>
+                    <span class="va-explainability-kind">${escapeHtml(item.kind || '')}</span>
+                    <span class="va-explainability-count">${item.count ?? 0}</span>
+                </li>
+            `).join('');
+
+            panel.innerHTML = `
+                <div class="va-explainability-card">
+                    <div class="va-explainability-title">Enforcement Rationale</div>
+                    <div class="va-explainability-value">${escapeHtml(enforcement)}</div>
+                    <div class="va-explainability-text">${escapeHtml(rationale)}</div>
+                </div>
+                <div class="va-explainability-card">
+                    <div class="va-explainability-title">Evidence Drivers</div>
+                    <ul class="va-explainability-list">${topEvidence || '<li>No evidence drivers yet.</li>'}</ul>
+                </div>
+                <div class="va-explainability-card">
+                    <div class="va-explainability-title">Run Snapshot</div>
+                    <div class="va-explainability-grid">
+                        <div><strong>Total</strong><span>${total}</span></div>
+                        <div><strong>Blocked</strong><span>${blocked}</span></div>
+                        <div><strong>Challenge</strong><span>${challenge}</span></div>
+                        <div><strong>Allowed</strong><span>${allowed}</span></div>
+                        <div><strong>Error</strong><span>${errorCount}</span></div>
+                        <div><strong>Evidence Score</strong><span>${evidenceScore === null ? 'N/A' : evidenceScore.toFixed(2)}</span></div>
+                    </div>
+                </div>
+            `;
         }
 
         // Helper function to display status codes safely
@@ -1067,6 +1115,8 @@
                     <div><strong>Errors:</strong> ${errorCount}</div>
                 `;
             }
+
+            renderExplainabilityPanel(report, total, blocked, challenge, allowed, errorCount);
 
             if (tableBody) {
                 const rows = Array.isArray(report.results) ? report.results : [];
