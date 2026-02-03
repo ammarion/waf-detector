@@ -161,6 +161,17 @@ body {
     margin-bottom: 1.5rem;
 }
 
+.va-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.va-grid .input-group {
+    margin-bottom: 0.75rem;
+}
+
 .input-group label {
     display: block;
     margin-bottom: 0.5rem;
@@ -322,6 +333,27 @@ body {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 1rem;
     font-size: 0.9rem;
+}
+
+/* Virtual Adversary Card */
+.va-card {
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    border-left: 4px solid #6366f1;
+    color: #0f172a;
+}
+
+.va-title {
+    margin: 0 0 0.5rem 0;
+    color: #4338ca;
+}
+
+.va-note {
+    font-size: 0.85rem;
+    color: #475569;
+    margin-bottom: 0.5rem;
 }
 
 .payload-table-wrapper {

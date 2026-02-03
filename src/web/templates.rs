@@ -283,5 +283,6 @@ mod tests {
     #[test]
     fn dashboard_html_contains_va_placeholder() {
         assert!(DASHBOARD_HTML.contains("Virtual Adversary"));
+        assert!(DASHBOARD_HTML.contains("vaTestForm"));
     }
 }

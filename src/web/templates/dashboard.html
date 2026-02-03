@@ -84,13 +84,45 @@
                 <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
                     Adaptive effectiveness testing with consent gates, budgets, and baseline-aware response analysis.
                 </p>
-                <p style="margin-bottom: 1rem; color: #94a3b8; font-size: 0.9rem;">
-                    CLI ready: <code>./waf-detect --va --url https://example.com</code>
-                </p>
-                <button class="btn" disabled>
-                    <span>🚧</span>
-                    <span>UI Coming Soon</span>
-                </button>
+                <form id="vaTestForm">
+                    <div class="input-group">
+                        <label for="vaUrl">Enter URL to test:</label>
+                        <input type="url" id="vaUrl" class="input-field" placeholder="https://example.com" required>
+                    </div>
+                    <div class="va-grid">
+                        <div class="input-group">
+                            <label for="vaTier">Tier</label>
+                            <select id="vaTier" class="input-field">
+                                <option value="1">Tier 1 (Safe)</option>
+                                <option value="2">Tier 2</option>
+                                <option value="3">Tier 3 (Advanced)</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label for="vaBudget">Budget</label>
+                            <input type="number" id="vaBudget" class="input-field" min="10" value="120">
+                        </div>
+                        <div class="input-group">
+                            <label for="vaTimeout">Timeout (ms)</label>
+                            <input type="number" id="vaTimeout" class="input-field" min="1000" value="15000">
+                        </div>
+                        <div class="input-group">
+                            <label for="vaDelay">Delay (ms)</label>
+                            <input type="number" id="vaDelay" class="input-field" min="250" value="750">
+                        </div>
+                        <div class="input-group">
+                            <label for="vaVariants">Variants</label>
+                            <input type="number" id="vaVariants" class="input-field" min="1" max="6" value="4">
+                        </div>
+                    </div>
+                    <p style="margin-bottom: 1rem; color: #94a3b8; font-size: 0.85rem;">
+                        Consent is required. Use <code>./waf-detect --consent request</code> before running tests.
+                    </p>
+                    <button type="submit" class="btn">
+                        <span id="vaTestIcon">🧠</span>
+                        <span id="vaTestText">Run Virtual Adversary</span>
+                    </button>
+                </form>
             </div>
 
             <div class="card">
@@ -167,6 +199,12 @@
             e.preventDefault();
             const url = document.getElementById('smokeTestUrl').value;
             await runSmokeTest(url);
+        });
+
+        // Virtual Adversary Testing
+        document.getElementById('vaTestForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await runVirtualAdversary();
         });
 
         async function scanSingleUrl(url) {
@@ -261,6 +299,51 @@
             }
         }
 
+        async function runVirtualAdversary() {
+            const btn = document.querySelector('#vaTestForm button');
+            const icon = document.getElementById('vaTestIcon');
+            const text = document.getElementById('vaTestText');
+
+            setButtonLoading(btn, icon, text, true, 'Running...');
+
+            const url = document.getElementById('vaUrl').value;
+            const tier = parseInt(document.getElementById('vaTier').value, 10);
+            const budget = parseInt(document.getElementById('vaBudget').value, 10);
+            const timeoutMs = parseInt(document.getElementById('vaTimeout').value, 10);
+            const delayMs = parseInt(document.getElementById('vaDelay').value, 10);
+            const variants = parseInt(document.getElementById('vaVariants').value, 10);
+
+            const body = { url };
+            if (!isNaN(tier)) body.tier = tier;
+            if (!isNaN(budget)) body.budget = budget;
+            if (!isNaN(timeoutMs)) body.timeout_ms = timeoutMs;
+            if (!isNaN(delayMs)) body.delay_ms = delayMs;
+            if (!isNaN(variants)) body.variants = variants;
+
+            try {
+                const response = await fetch('/api/virtual-adversary', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await response.json();
+
+                if (data.success && data.result) {
+                    data.result.is_virtual_adversary = true;
+                    allResults.unshift(data.result);
+                    displayResults();
+                    showSuccessMessage(`Virtual Adversary completed for ${url}`);
+                } else {
+                    showErrorMessage(data.error || 'Virtual Adversary failed');
+                }
+            } catch (error) {
+                showErrorMessage(`Error: ${error.message}`);
+            } finally {
+                setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
+            }
+        }
+
         function setButtonLoading(btn, icon, text, loading, customText = null) {
             if (loading) {
                 btn.disabled = true;
@@ -275,6 +358,9 @@
                 } else if (buttonId === 'smokeTestForm') {
                     icon.innerHTML = '🛡️';
                     text.textContent = customText || 'Run Smoke Test';
+                } else if (buttonId === 'vaTestForm') {
+                    icon.innerHTML = '🧠';
+                    text.textContent = customText || 'Run Virtual Adversary';
                 } else {
                     icon.innerHTML = '🚀';
                     text.textContent = 'Scan URL';
@@ -304,6 +390,8 @@
             const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) ||
                 result.is_smoke_test === true ||
                 (result.summary && result.summary.effectiveness_percentage !== undefined);
+            const isVirtualAdversary = result.is_virtual_adversary === true ||
+                (result && result.target_url && result.summary && typeof result.summary.total === 'number' && Array.isArray(result.results));
 
             console.log("Creating result card for:", result);
             console.log("isSmokeTest:", isSmokeTest, "is_smoke_test flag:", result.is_smoke_test, "detected_waf:", result.detected_waf, "detected_cdn:", result.detected_cdn);
@@ -382,16 +470,71 @@
             return `
                 <div class="result-card">
                     <div class="result-header">
-                        <div class="result-url">${escapeHtml(isSmokeTest && result.url ? result.url :
+                        <div class="result-url">${escapeHtml(isVirtualAdversary && result.target_url ? result.target_url :
+                isSmokeTest && result.url ? result.url :
                 isCombined && result.url ? result.url :
                     detectionData && detectionData.url ? detectionData.url :
                         "Unknown URL")}</div>
-                        <div class="result-time">${isSmokeTest && result.total_time_ms ? result.total_time_ms :
-                    isCombined && result.total_time_ms ? result.total_time_ms :
-                        detectionData && detectionData.detection_time_ms ? detectionData.detection_time_ms :
-                            "0"}ms</div>
+                        <div class="result-time">${isVirtualAdversary ? `${result.plan_size || 0} payloads` :
+                    isSmokeTest && result.total_time_ms ? `${result.total_time_ms}ms` :
+                        isCombined && result.total_time_ms ? `${result.total_time_ms}ms` :
+                            detectionData && detectionData.detection_time_ms ? `${detectionData.detection_time_ms}ms` :
+                                "0ms"}</div>
                     </div>
-                    ${isSmokeTest ? `
+                    ${isVirtualAdversary ? (() => {
+                                const summary = result.summary || {};
+                                const total = summary.total || 0;
+                                const blocked = summary.blocked || 0;
+                                const challenge = summary.challenge || 0;
+                                const allowed = summary.allowed || 0;
+                                const errorCount = summary.error || 0;
+                                const effective = blocked + challenge;
+                                const effectiveness = total > 0 ? (effective / total) * 100 : 0;
+                                const risk = effectiveness >= 80 ? 'LOW' : effectiveness >= 50 ? 'MEDIUM' : 'HIGH';
+                                const rows = Array.isArray(result.results) ? result.results.slice(0, 12) : [];
+
+                                return `
+                        <div class="va-card">
+                            <h4 class="va-title">🧠 Virtual Adversary Results</h4>
+                            <p class="va-note">Consent-gated adaptive testing with baseline-aware response analysis.</p>
+                            <div class="va-grid">
+                                <div><strong>Effectiveness:</strong> ${effectiveness.toFixed(1)}%</div>
+                                <div><strong>Risk:</strong> ${risk}</div>
+                                <div><strong>Blocked:</strong> ${blocked}</div>
+                                <div><strong>Challenge:</strong> ${challenge}</div>
+                                <div><strong>Allowed:</strong> ${allowed}</div>
+                                <div><strong>Errors:</strong> ${errorCount}</div>
+                            </div>
+                            <div class="payload-table-wrapper">
+                                <table class="payload-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Category</th>
+                                            <th>Payload</th>
+                                            <th>Outcome</th>
+                                            <th>Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${rows.map((entry, index) => {
+                                            const rowColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+                                            const outcome = entry.outcome || 'Unknown';
+                                            const outcomeColor = outcome === 'Blocked' ? '#22c55e' :
+                                                outcome === 'Challenge' ? '#f59e0b' :
+                                                    outcome === 'Allowed' ? '#ef4444' : '#94a3b8';
+                                            return `<tr style="background: ${rowColor};">
+                                                <td>${escapeHtml(entry.category || 'Unknown')}</td>
+                                                <td style="font-family: monospace;">${escapeHtml(entry.payload || '')}</td>
+                                                <td><span style="background: ${outcomeColor}; color: white; padding: 0.125rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block;">${escapeHtml(outcome)}</span></td>
+                                                <td>${escapeHtml(entry.reason || '')}</td>
+                                            </tr>`;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        `;
+                            })() : isSmokeTest ? `
                         <div class="smoke-test-card">
                             <h4 class="smoke-test-title">🛡️ WAF Smoke Test Results</h4>
                             <p class="smoke-test-note">Note: Scanner Detection tests use realistic User-Agent headers instead of query parameters to test if the WAF blocks security scanning tools.</p>
@@ -448,7 +591,7 @@
                         </div>
                     ` : ''}
                     
-                    ${!isSmokeTest && !result.is_smoke_test ? `
+                    ${!isSmokeTest && !result.is_smoke_test && !isVirtualAdversary ? `
                     <div class="detection-info">
                         <div class="detection-item ${wafDetected ? 'detected' : 'not-detected'}">
                             <div class="detection-label">
@@ -480,7 +623,7 @@
                     </div>
                     ` : ''}
                     
-                    ${!isSmokeTest && !result.is_smoke_test && detectionData && detectionData.evidence && Array.isArray(detectionData.evidence) && detectionData.evidence.length > 0 ? `
+                    ${!isSmokeTest && !result.is_smoke_test && !isVirtualAdversary && detectionData && detectionData.evidence && Array.isArray(detectionData.evidence) && detectionData.evidence.length > 0 ? `
                         <div class="evidence-section">
                             <button class="evidence-toggle" onclick="toggleEvidence(this)">
                                 View Evidence (${detectionData.evidence.length} items)
