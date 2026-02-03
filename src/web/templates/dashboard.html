@@ -80,6 +80,76 @@
             </div>
 
             <div class="card">
+                <h2>🧠 Virtual Adversary (Beta)</h2>
+                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
+                    Adaptive effectiveness testing with consent gates, budgets, and baseline-aware response analysis.
+                </p>
+                <form id="vaTestForm">
+                    <div class="input-group">
+                        <label for="vaUrl">Enter URL to test:</label>
+                        <input type="url" id="vaUrl" class="input-field" placeholder="https://example.com" required>
+                    </div>
+                    <div class="va-grid">
+                        <div class="input-group">
+                            <label for="vaTier">Tier</label>
+                            <select id="vaTier" class="input-field">
+                                <option value="1">Tier 1 (Safe)</option>
+                                <option value="2">Tier 2</option>
+                                <option value="3">Tier 3 (Advanced)</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label for="vaBudget">Budget</label>
+                            <input type="number" id="vaBudget" class="input-field" min="10" value="120">
+                        </div>
+                        <div class="input-group">
+                            <label for="vaTimeout">Timeout (ms)</label>
+                            <input type="number" id="vaTimeout" class="input-field" min="1000" value="15000">
+                        </div>
+                        <div class="input-group">
+                            <label for="vaDelay">Delay (ms)</label>
+                            <input type="number" id="vaDelay" class="input-field" min="250" value="750">
+                        </div>
+                        <div class="input-group">
+                            <label for="vaVariants">Variants</label>
+                            <input type="number" id="vaVariants" class="input-field" min="1" max="6" value="4">
+                        </div>
+                    </div>
+                    <p style="margin-bottom: 1rem; color: #94a3b8; font-size: 0.85rem;">
+                        Consent is required. Use <code>./waf-detect --consent request</code> before running tests.
+                    </p>
+                    <button type="submit" class="btn">
+                        <span id="vaTestIcon">🧠</span>
+                        <span id="vaTestText">Run Virtual Adversary</span>
+                    </button>
+                </form>
+                <div class="va-activity">
+                    <div class="va-activity-header">
+                        <div class="va-activity-title">Live Activity</div>
+                        <div class="va-activity-controls">
+                            <label for="vaActivityFilter">Filter</label>
+                            <select id="vaActivityFilter" class="input-field va-activity-select">
+                                <option value="all">All</option>
+                                <option value="blocked_challenge">Blocked + Challenge</option>
+                                <option value="blocked">Blocked</option>
+                                <option value="challenge">Challenge</option>
+                                <option value="allowed">Allowed</option>
+                                <option value="error">Error</option>
+                            </select>
+                            <input id="vaActivitySearch" class="input-field va-activity-input" type="text"
+                                placeholder="Search payloads">
+                            <label class="va-activity-toggle">
+                                <input type="checkbox" id="vaAutoScroll" checked>
+                                Auto-scroll
+                            </label>
+                        </div>
+                    </div>
+                    <div id="vaActivityEmpty" class="va-activity-empty">No activity yet.</div>
+                    <ul id="vaActivityLog" class="va-activity-log"></ul>
+                </div>
+            </div>
+
+            <div class="card">
                 <h2>📊 Quick Actions</h2>
                 <div style="display: flex; flex-direction: column; gap: 1rem;">
                     <button onclick="clearResults()" class="btn btn-secondary">
@@ -93,6 +163,83 @@
                     </button>
                 </div>
             </div>
+
+            <div class="card">
+                <h2>🔐 Consent Status</h2>
+                <div class="consent-status">
+                    <div id="consentStatusBadge" class="consent-badge consent-badge-pending">Checking...</div>
+                    <div class="consent-meta">
+                        <div>Terms: <span id="consentTerms">-</span></div>
+                        <div>Expires in: <span id="consentExpires">-</span> days</div>
+                    </div>
+                    <div class="consent-targets">
+                        <div class="consent-targets-title">Authorized Targets</div>
+                        <div class="consent-actions">
+                            <input id="consentTargetInput" class="input-field consent-input" type="text"
+                                placeholder="example.com">
+                            <button type="button" class="btn btn-secondary consent-add" onclick="addAuthorizedTarget()">
+                                ➕ Add
+                            </button>
+                        </div>
+                        <ul id="consentTargetsList" class="consent-targets-list"></ul>
+                        <div id="consentTargetsEmpty" class="consent-targets-empty">No authorized targets.</div>
+                    </div>
+                    <p class="consent-note">Run <code>./waf-detect --consent</code> to update.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>📂 Virtual Adversary History</h2>
+                <div class="va-history">
+                    <div class="va-history-header">
+                        <button type="button" class="btn btn-secondary" onclick="loadVaHistory()">
+                            🔄 Refresh
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="downloadVaHistoryCsv()">
+                            📄 CSV
+                        </button>
+                    </div>
+                    <div class="va-history-filters">
+                        <label for="vaHistoryDate">Date</label>
+                        <select id="vaHistoryDate" class="input-field va-history-select">
+                            <option value="all">All</option>
+                            <option value="7">Last 7 days</option>
+                            <option value="30">Last 30 days</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        <label for="vaHistorySort">Sort</label>
+                        <select id="vaHistorySort" class="input-field va-history-select">
+                            <option value="newest">Newest</option>
+                            <option value="oldest">Oldest</option>
+                            <option value="risk">Risk (High → Low)</option>
+                            <option value="blocked">Blocked Rate</option>
+                        </select>
+                        <input id="vaHistoryStart" class="input-field va-history-date" type="date" disabled>
+                        <input id="vaHistoryEnd" class="input-field va-history-date" type="date" disabled>
+                        <button type="button" class="btn btn-secondary" onclick="applyVaHistoryFilter()">
+                            Apply
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="deleteVaHistoryRange()">
+                            🗑️ Delete range
+                        </button>
+                    </div>
+                    <div class="va-history-search">
+                        <label for="vaHistorySearch">Search</label>
+                        <input id="vaHistorySearch" class="input-field va-history-input" type="text"
+                            placeholder="Filter by target URL">
+                    </div>
+                    <div class="va-history-retention">
+                        <label for="vaRetentionInput">Keep last</label>
+                        <input id="vaRetentionInput" class="input-field va-retention-input" type="number" min="5"
+                            value="50">
+                        <button type="button" class="btn btn-secondary" onclick="cleanupVaHistory()">
+                            🧹 Cleanup
+                        </button>
+                    </div>
+                    <div id="vaHistoryEmpty" class="va-history-empty">No saved reports yet.</div>
+                    <ul id="vaHistoryList" class="va-history-list"></ul>
+                </div>
+            </div>
         </div>
 
         <!-- Results Section -->
@@ -103,6 +250,31 @@
             </div>
             <div id="resultsContainer">
                 <!-- Results will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <div id="vaReportModal" class="modal-overlay" onclick="closeVaReportModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="vaReportTitle">VA Report</h3>
+                <button class="modal-close" onclick="closeVaReportModal()">✕</button>
+            </div>
+            <div id="vaReportMeta" class="modal-meta"></div>
+            <div id="vaReportSummary" class="modal-summary"></div>
+            <div class="payload-table-wrapper">
+                <table class="payload-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Category</th>
+                            <th>Payload</th>
+                            <th>Outcome</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vaReportTableBody"></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -153,6 +325,12 @@
             e.preventDefault();
             const url = document.getElementById('smokeTestUrl').value;
             await runSmokeTest(url);
+        });
+
+        // Virtual Adversary Testing
+        document.getElementById('vaTestForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await runVirtualAdversary();
         });
 
         async function scanSingleUrl(url) {
@@ -247,6 +425,697 @@
             }
         }
 
+        let vaEventCursor = {};
+        let vaEventCache = {};
+        let vaActivityFilter = 'all';
+        let vaActivitySearchTerm = '';
+        let vaAutoScroll = true;
+        let currentVaJobId = null;
+
+        function resetVaActivity() {
+            const log = document.getElementById('vaActivityLog');
+            const empty = document.getElementById('vaActivityEmpty');
+            if (log) log.innerHTML = '';
+            if (empty) empty.style.display = 'block';
+            if (currentVaJobId) {
+                vaEventCache[currentVaJobId] = [];
+                vaEventCursor[currentVaJobId] = 0;
+            }
+        }
+
+        function shouldShowVaEvent(event) {
+            if (vaActivitySearchTerm) {
+                const haystack = `${event.category || ''} ${event.payload || ''} ${event.reason || ''} ${event.outcome || ''}`.toLowerCase();
+                if (!haystack.includes(vaActivitySearchTerm)) {
+                    return false;
+                }
+            }
+            if (vaActivityFilter === 'all') return true;
+            if (vaActivityFilter === 'blocked_challenge') {
+                return event.outcome === 'Blocked' || event.outcome === 'Challenge';
+            }
+            return event.outcome && event.outcome.toLowerCase() === vaActivityFilter;
+        }
+
+        function renderVaActivity(jobId) {
+            const log = document.getElementById('vaActivityLog');
+            const empty = document.getElementById('vaActivityEmpty');
+            if (!log) return;
+
+            const events = vaEventCache[jobId] || [];
+            const filtered = events.filter(shouldShowVaEvent);
+            log.innerHTML = '';
+            if (filtered.length === 0) {
+                if (empty) empty.style.display = 'block';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+
+            filtered.forEach(event => {
+                const li = document.createElement('li');
+                li.className = 'va-activity-item';
+                const outcomeClass = event.outcome === 'Blocked' ? 'va-outcome-blocked' :
+                    event.outcome === 'Challenge' ? 'va-outcome-challenge' :
+                        event.outcome === 'Allowed' ? 'va-outcome-allowed' : 'va-outcome-error';
+                li.innerHTML = `
+                    <span class="va-activity-index">#${event.index}/${event.total}</span>
+                    <span class="va-activity-category">${escapeHtml(event.category)}</span>
+                    <span class="va-activity-outcome ${outcomeClass}">${escapeHtml(event.outcome)}</span>
+                    <span class="va-activity-reason">${escapeHtml(event.reason)}</span>
+                `;
+                log.appendChild(li);
+            });
+
+            if (vaAutoScroll) {
+                log.scrollTop = log.scrollHeight;
+            }
+        }
+
+        function appendVaEvents(jobId, events) {
+            if (!events) return;
+
+            const lastIndex = vaEventCursor[jobId] || 0;
+            const sorted = events.slice().sort((a, b) => a.index - b.index);
+            const newEvents = sorted.filter(event => event.index > lastIndex);
+            if (newEvents.length === 0) {
+                return;
+            }
+
+            const cache = vaEventCache[jobId] || [];
+            newEvents.forEach(event => cache.push(event));
+            if (cache.length > 200) {
+                cache.splice(0, cache.length - 200);
+            }
+            vaEventCache[jobId] = cache;
+            vaEventCursor[jobId] = newEvents[newEvents.length - 1].index;
+            renderVaActivity(jobId);
+        }
+
+        async function runVirtualAdversary() {
+            const btn = document.querySelector('#vaTestForm button');
+            const icon = document.getElementById('vaTestIcon');
+            const text = document.getElementById('vaTestText');
+
+            setButtonLoading(btn, icon, text, true, 'Starting...');
+
+            const url = document.getElementById('vaUrl').value;
+            const tier = parseInt(document.getElementById('vaTier').value, 10);
+            const budget = parseInt(document.getElementById('vaBudget').value, 10);
+            const timeoutMs = parseInt(document.getElementById('vaTimeout').value, 10);
+            const delayMs = parseInt(document.getElementById('vaDelay').value, 10);
+            const variants = parseInt(document.getElementById('vaVariants').value, 10);
+
+            const body = { url };
+            if (!isNaN(tier)) body.tier = tier;
+            if (!isNaN(budget)) body.budget = budget;
+            if (!isNaN(timeoutMs)) body.timeout_ms = timeoutMs;
+            if (!isNaN(delayMs)) body.delay_ms = delayMs;
+            if (!isNaN(variants)) body.variants = variants;
+
+            try {
+                const response = await fetch('/api/virtual-adversary/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await response.json();
+
+                if (data.success && data.job_id) {
+                    showSuccessMessage(`Virtual Adversary started for ${url}`);
+                    currentVaJobId = data.job_id;
+                    vaEventCursor[currentVaJobId] = 0;
+                    vaEventCache[currentVaJobId] = [];
+                    resetVaActivity();
+                    pollVirtualAdversary(data.job_id, url, btn, icon, text);
+                } else {
+                    showErrorMessage(data.error || 'Virtual Adversary failed');
+                    setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
+                }
+            } catch (error) {
+                showErrorMessage(`Error: ${error.message}`);
+                setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
+            }
+        }
+
+        function pollVirtualAdversary(jobId, url, btn, icon, text) {
+            const pollIntervalMs = 1500;
+
+            const poll = async () => {
+                try {
+                    const response = await fetch(`/api/virtual-adversary/status/${jobId}`);
+                    const data = await response.json();
+
+                    if (!data.success || !data.status) {
+                        throw new Error(data.error || 'Virtual Adversary status unavailable');
+                    }
+
+                    const status = data.status;
+                    if (status.events && Array.isArray(status.events) && status.events.length > 0) {
+                        appendVaEvents(jobId, status.events);
+                    }
+
+                    if (status.state === 'pending' || status.state === 'running') {
+                        const label = status.total > 0
+                            ? `Running ${status.completed}/${status.total}`
+                            : 'Running...';
+                        setButtonLoading(btn, icon, text, true, label);
+                        return;
+                    }
+
+                    if (status.state === 'completed' && status.result) {
+                        status.result.is_virtual_adversary = true;
+                        if (status.report_id) {
+                            status.result.report_id = status.report_id;
+                        }
+                        allResults.unshift(status.result);
+                        displayResults();
+                        loadVaHistory();
+                        showSuccessMessage(`Virtual Adversary completed for ${url}`);
+                    } else if (status.state === 'failed') {
+                        showErrorMessage(status.error || 'Virtual Adversary failed');
+                    }
+
+                    setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
+                    clearInterval(timer);
+                } catch (error) {
+                    showErrorMessage(`Error: ${error.message}`);
+                    setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
+                    clearInterval(timer);
+                }
+            };
+
+            const timer = setInterval(poll, pollIntervalMs);
+            poll();
+        }
+
+        function applyConsentStatus(status) {
+            const badge = document.getElementById('consentStatusBadge');
+            const terms = document.getElementById('consentTerms');
+            const expires = document.getElementById('consentExpires');
+            const targetsList = document.getElementById('consentTargetsList');
+            const targetsEmpty = document.getElementById('consentTargetsEmpty');
+
+            if (!badge || !terms || !expires || !targetsList || !targetsEmpty) {
+                return;
+            }
+
+            const hasConsent = status && status.has_consent === true;
+            badge.textContent = hasConsent ? 'Valid' : 'Not Granted';
+            badge.classList.remove('consent-badge-pending');
+            badge.classList.toggle('consent-badge-valid', hasConsent);
+            badge.classList.toggle('consent-badge-invalid', !hasConsent);
+
+            terms.textContent = status && status.terms_version ? status.terms_version : '-';
+            expires.textContent = status && status.expires_in_days !== null && status.expires_in_days !== undefined
+                ? status.expires_in_days
+                : '-';
+
+            const targets = status && Array.isArray(status.authorized_targets) ? status.authorized_targets : [];
+            targetsList.innerHTML = '';
+            if (targets.length === 0) {
+                targetsEmpty.style.display = 'block';
+            } else {
+                targetsEmpty.style.display = 'none';
+                targets.forEach(target => {
+                    const li = document.createElement('li');
+                    li.className = 'consent-target-item';
+                    const span = document.createElement('span');
+                    span.textContent = target;
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'consent-remove';
+                    btn.textContent = 'Remove';
+                    btn.onclick = () => removeAuthorizedTarget(target);
+                    li.appendChild(span);
+                    li.appendChild(btn);
+                    targetsList.appendChild(li);
+                });
+            }
+        }
+
+        async function loadConsentStatus() {
+            try {
+                const response = await fetch('/api/consent-status');
+                const data = await response.json();
+
+                if (!data.success || !data.status) {
+                    throw new Error(data.error || 'Consent status unavailable');
+                }
+
+                applyConsentStatus(data.status);
+            } catch (error) {
+                applyConsentStatus(null);
+            }
+        }
+
+        async function addAuthorizedTarget() {
+            const input = document.getElementById('consentTargetInput');
+            if (!input) return;
+            const target = input.value.trim();
+            if (!target) {
+                showErrorMessage('Enter a target to add');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/consent/add-target', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await response.json();
+                if (!data.success || !data.status) {
+                    throw new Error(data.error || 'Failed to add target');
+                }
+                input.value = '';
+                applyConsentStatus(data.status);
+                showSuccessMessage(`Authorized ${target}`);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to add target');
+            }
+        }
+
+        async function removeAuthorizedTarget(target) {
+            try {
+                const response = await fetch('/api/consent/remove-target', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await response.json();
+                if (!data.success || !data.status) {
+                    throw new Error(data.error || 'Failed to remove target');
+                }
+                applyConsentStatus(data.status);
+                showSuccessMessage(`Removed ${target}`);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to remove target');
+            }
+        }
+
+        let vaHistoryCache = [];
+
+        function renderVaHistoryList(reports) {
+            const list = document.getElementById('vaHistoryList');
+            const empty = document.getElementById('vaHistoryEmpty');
+            if (!list || !empty) return;
+
+            list.innerHTML = '';
+            if (!reports || reports.length === 0) {
+                empty.style.display = 'block';
+                return;
+            }
+            empty.style.display = 'none';
+            reports.slice(0, 10).forEach(report => {
+                const li = document.createElement('li');
+                li.className = 'va-history-item';
+
+                const meta = document.createElement('div');
+                meta.className = 'va-history-meta';
+                const title = document.createElement('div');
+                title.className = 'va-history-title';
+                title.textContent = report.target_url || report.id;
+                const sub = document.createElement('div');
+                sub.className = 'va-history-sub';
+                sub.textContent = `${report.created_at} • ${report.risk_label} • ${report.plan_size} payloads`;
+                meta.appendChild(title);
+                meta.appendChild(sub);
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-secondary va-history-download';
+                btn.textContent = 'Download';
+                btn.onclick = () => downloadVaHistoryReport(report.id);
+
+                const csvBtn = document.createElement('button');
+                csvBtn.type = 'button';
+                csvBtn.className = 'btn btn-secondary va-history-download';
+                csvBtn.textContent = 'CSV';
+                csvBtn.onclick = () => downloadVaHistoryReportCsv(report.id);
+
+                const viewBtn = document.createElement('button');
+                viewBtn.type = 'button';
+                viewBtn.className = 'btn btn-secondary va-history-download';
+                viewBtn.textContent = 'View';
+                viewBtn.onclick = () => openVaReportModalFromHistory(report.id);
+
+                const actionGroup = document.createElement('div');
+                actionGroup.className = 'va-history-actions';
+                actionGroup.appendChild(btn);
+                actionGroup.appendChild(csvBtn);
+                actionGroup.appendChild(viewBtn);
+
+                li.appendChild(meta);
+                li.appendChild(actionGroup);
+                list.appendChild(li);
+            });
+        }
+
+        function parseHistoryDate(value) {
+            if (!value) return null;
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? null : date;
+        }
+
+        function historyRiskScore(report) {
+            const total = report.plan_size || 0;
+            const effective = (report.blocked || 0) + (report.challenge || 0);
+            if (total === 0) return 0;
+            return effective / total;
+        }
+
+        function applyVaHistoryFilter() {
+            const input = document.getElementById('vaHistorySearch');
+            const term = input ? input.value.trim().toLowerCase() : '';
+            const dateSelect = document.getElementById('vaHistoryDate');
+            const sortSelect = document.getElementById('vaHistorySort');
+            const startInput = document.getElementById('vaHistoryStart');
+            const endInput = document.getElementById('vaHistoryEnd');
+
+            const dateFilter = dateSelect ? dateSelect.value : 'all';
+            const sortMode = sortSelect ? sortSelect.value : 'newest';
+            let startDate = null;
+            let endDate = null;
+
+            if (dateFilter === '7' || dateFilter === '30') {
+                const days = parseInt(dateFilter, 10);
+                const now = new Date();
+                startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+            } else if (dateFilter === 'custom') {
+                startDate = parseHistoryDate(startInput ? startInput.value : '');
+                endDate = parseHistoryDate(endInput ? endInput.value : '');
+                if (endDate) {
+                    endDate.setHours(23, 59, 59, 999);
+                }
+            }
+
+            const filtered = vaHistoryCache.filter(report => {
+                const target = (report.target_url || '').toLowerCase();
+                if (term && !target.includes(term)) {
+                    return false;
+                }
+                if (startDate || endDate) {
+                    const reportDate = new Date(report.created_at);
+                    if (Number.isNaN(reportDate.getTime())) {
+                        return false;
+                    }
+                    if (startDate && reportDate < startDate) {
+                        return false;
+                    }
+                    if (endDate && reportDate > endDate) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+            const sorted = filtered.slice();
+            if (sortMode === 'oldest') {
+                sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            } else if (sortMode === 'risk') {
+                sorted.sort((a, b) => historyRiskScore(a) - historyRiskScore(b));
+            } else if (sortMode === 'blocked') {
+                sorted.sort((a, b) => historyRiskScore(b) - historyRiskScore(a));
+            } else {
+                sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            }
+            renderVaHistoryList(sorted);
+        }
+
+        async function loadVaHistory() {
+            try {
+                const response = await fetch('/api/virtual-adversary/reports');
+                const data = await response.json();
+                if (!data.success || !Array.isArray(data.reports)) {
+                    throw new Error(data.error || 'Failed to load VA history');
+                }
+                vaHistoryCache = data.reports;
+                applyVaHistoryFilter();
+            } catch (error) {
+                vaHistoryCache = [];
+                renderVaHistoryList([]);
+            }
+        }
+
+        async function downloadVaHistoryReport(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
+                const data = await response.json();
+                if (!data.success || !data.report) {
+                    throw new Error(data.error || 'Failed to load VA report');
+                }
+
+                const jsonData = JSON.stringify(data.report, null, 2);
+                const jsonBlob = new Blob([jsonData], { type: 'application/json' });
+                const jsonUrl = URL.createObjectURL(jsonBlob);
+                const link = document.createElement('a');
+                link.href = jsonUrl;
+                link.download = reportId;
+                link.click();
+                URL.revokeObjectURL(jsonUrl);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to download VA report');
+            }
+        }
+
+        async function openVaReportModalFromHistory(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
+                const data = await response.json();
+                if (!data.success || !data.report) {
+                    throw new Error(data.error || 'Failed to load VA report');
+                }
+                openVaReportModal(data.report);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to open VA report');
+            }
+        }
+
+        async function downloadVaHistoryReportCsv(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}.csv`);
+                if (!response.ok) {
+                    throw new Error('Failed to download VA CSV');
+                }
+                const csvData = await response.text();
+                const blob = new Blob([csvData], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = reportId.replace('.json', '.csv');
+                link.click();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to download VA CSV');
+            }
+        }
+
+
+        async function downloadVaHistoryCsv() {
+            try {
+                const response = await fetch('/api/virtual-adversary/reports.csv');
+                if (!response.ok) {
+                    throw new Error('Failed to download CSV');
+                }
+                const csvData = await response.text();
+                const blob = new Blob([csvData], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `va-reports-${new Date().toISOString().split('T')[0]}.csv`;
+                link.click();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to download CSV');
+            }
+        }
+
+        function csvEscape(value) {
+            const str = String(value ?? '');
+            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+        }
+
+        function buildVaReportCsv(result) {
+            const header = 'index,category,payload,outcome,reason';
+            const rows = (result.results || []).map((item, index) => {
+                return [
+                    index + 1,
+                    csvEscape(item.category || ''),
+                    csvEscape(item.payload || ''),
+                    csvEscape(item.outcome || ''),
+                    csvEscape(item.reason || '')
+                ].join(',');
+            });
+            return [header].concat(rows).join('\n');
+        }
+
+        async function downloadVaReportCsv(index) {
+            const result = allResults[index];
+            if (!result) {
+                showErrorMessage('No Virtual Adversary report available');
+                return;
+            }
+            if (result.report_id) {
+                return downloadVaHistoryReportCsv(result.report_id);
+            }
+
+            const csvData = buildVaReportCsv(result);
+            const blob = new Blob([csvData], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `va-report-${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+
+
+        function openVaReportModalFromResult(index) {
+            const result = allResults[index];
+            if (!result) {
+                showErrorMessage('No Virtual Adversary report available');
+                return;
+            }
+            const stored = {
+                id: result.report_id || 'local-report',
+                created_at: result.timestamp || new Date().toISOString(),
+                report: result
+            };
+            openVaReportModal(stored);
+        }
+
+        function computeVaRisk(summary, planSize) {
+            const total = summary.total || planSize || 0;
+            const effective = (summary.blocked || 0) + (summary.challenge || 0);
+            if (total === 0) return 'HIGH';
+            const score = effective / total;
+            if (score >= 0.8) return 'LOW';
+            if (score >= 0.5) return 'MEDIUM';
+            return 'HIGH';
+        }
+
+        function openVaReportModal(stored) {
+            const modal = document.getElementById('vaReportModal');
+            const title = document.getElementById('vaReportTitle');
+            const meta = document.getElementById('vaReportMeta');
+            const summaryEl = document.getElementById('vaReportSummary');
+            const tableBody = document.getElementById('vaReportTableBody');
+
+            if (!modal || !stored || !stored.report) {
+                showErrorMessage('VA report unavailable');
+                return;
+            }
+
+            const report = stored.report;
+            const summary = report.summary || {};
+            const total = summary.total || report.plan_size || (report.results ? report.results.length : 0);
+            const blocked = summary.blocked || 0;
+            const challenge = summary.challenge || 0;
+            const allowed = summary.allowed || 0;
+            const errorCount = summary.error || 0;
+            const risk = computeVaRisk(summary, total);
+            const effectiveness = total > 0 ? ((blocked + challenge) / total) * 100 : 0;
+
+            if (title) {
+                title.textContent = `VA Report • ${report.target_url || 'Unknown'}`;
+            }
+            if (meta) {
+                meta.textContent = `${stored.created_at || ''} • ${stored.id || ''}`;
+            }
+            if (summaryEl) {
+                summaryEl.innerHTML = `
+                    <div><strong>Effectiveness:</strong> ${effectiveness.toFixed(1)}%</div>
+                    <div><strong>Risk:</strong> ${risk}</div>
+                    <div><strong>Blocked:</strong> ${blocked}</div>
+                    <div><strong>Challenge:</strong> ${challenge}</div>
+                    <div><strong>Allowed:</strong> ${allowed}</div>
+                    <div><strong>Errors:</strong> ${errorCount}</div>
+                `;
+            }
+
+            if (tableBody) {
+                const rows = Array.isArray(report.results) ? report.results : [];
+                tableBody.innerHTML = rows.map((row, idx) => `
+                    <tr>
+                        <td>${idx + 1}</td>
+                        <td>${escapeHtml(row.category || '')}</td>
+                        <td>${escapeHtml(row.payload || '')}</td>
+                        <td>${escapeHtml(row.outcome || '')}</td>
+                        <td>${escapeHtml(row.reason || '')}</td>
+                    </tr>
+                `).join('');
+            }
+
+            modal.classList.add('modal-open');
+        }
+
+        function closeVaReportModal() {
+            const modal = document.getElementById('vaReportModal');
+            if (modal) {
+                modal.classList.remove('modal-open');
+            }
+        }
+
+        async function cleanupVaHistory() {
+            const input = document.getElementById('vaRetentionInput');
+            const value = input ? parseInt(input.value, 10) : 0;
+            const maxReports = Number.isFinite(value) && value > 0 ? value : 50;
+
+            try {
+                const response = await fetch('/api/virtual-adversary/reports/cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ max_reports: maxReports })
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.error || 'Failed to cleanup reports');
+                }
+                showSuccessMessage(`Kept ${data.kept}, deleted ${data.deleted}`);
+                loadVaHistory();
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to cleanup reports');
+            }
+        }
+
+        async function deleteVaHistoryRange() {
+            const startInput = document.getElementById('vaHistoryStart');
+            const endInput = document.getElementById('vaHistoryEnd');
+            const startDate = startInput ? startInput.value : '';
+            const endDate = endInput ? endInput.value : '';
+
+            if (!startDate || !endDate) {
+                showErrorMessage('Select a start and end date to delete');
+                return;
+            }
+            if (startDate > endDate) {
+                showErrorMessage('Start date must be before end date');
+                return;
+            }
+            if (!confirm(`Delete VA reports from ${startDate} to ${endDate}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/virtual-adversary/reports/delete-range', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ start_date: startDate, end_date: endDate })
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.error || 'Failed to delete reports');
+                }
+                showSuccessMessage(`Deleted ${data.deleted} report${data.deleted === 1 ? '' : 's'}`);
+                loadVaHistory();
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to delete reports');
+            }
+        }
+
         function setButtonLoading(btn, icon, text, loading, customText = null) {
             if (loading) {
                 btn.disabled = true;
@@ -261,6 +1130,9 @@
                 } else if (buttonId === 'smokeTestForm') {
                     icon.innerHTML = '🛡️';
                     text.textContent = customText || 'Run Smoke Test';
+                } else if (buttonId === 'vaTestForm') {
+                    icon.innerHTML = '🧠';
+                    text.textContent = customText || 'Run Virtual Adversary';
                 } else {
                     icon.innerHTML = '🚀';
                     text.textContent = 'Scan URL';
@@ -276,10 +1148,10 @@
             section.style.display = 'block';
             count.textContent = `${allResults.length} result${allResults.length !== 1 ? 's' : ''}`;
 
-            container.innerHTML = allResults.map(result => createResultCard(result)).join('');
+            container.innerHTML = allResults.map((result, index) => createResultCard(result, index)).join('');
         }
 
-        function createResultCard(result) {
+        function createResultCard(result, index) {
             // Ensure result is defined
             if (!result) {
                 console.error("Result is undefined");
@@ -290,6 +1162,8 @@
             const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) ||
                 result.is_smoke_test === true ||
                 (result.summary && result.summary.effectiveness_percentage !== undefined);
+            const isVirtualAdversary = result.is_virtual_adversary === true ||
+                (result && result.target_url && result.summary && typeof result.summary.total === 'number' && Array.isArray(result.results));
 
             console.log("Creating result card for:", result);
             console.log("isSmokeTest:", isSmokeTest, "is_smoke_test flag:", result.is_smoke_test, "detected_waf:", result.detected_waf, "detected_cdn:", result.detected_cdn);
@@ -368,16 +1242,82 @@
             return `
                 <div class="result-card">
                     <div class="result-header">
-                        <div class="result-url">${escapeHtml(isSmokeTest && result.url ? result.url :
+                        <div class="result-url">${escapeHtml(isVirtualAdversary && result.target_url ? result.target_url :
+                isSmokeTest && result.url ? result.url :
                 isCombined && result.url ? result.url :
                     detectionData && detectionData.url ? detectionData.url :
                         "Unknown URL")}</div>
-                        <div class="result-time">${isSmokeTest && result.total_time_ms ? result.total_time_ms :
-                    isCombined && result.total_time_ms ? result.total_time_ms :
-                        detectionData && detectionData.detection_time_ms ? detectionData.detection_time_ms :
-                            "0"}ms</div>
+                        <div class="result-time">${isVirtualAdversary ? `${result.plan_size || 0} payloads` :
+                    isSmokeTest && result.total_time_ms ? `${result.total_time_ms}ms` :
+                        isCombined && result.total_time_ms ? `${result.total_time_ms}ms` :
+                            detectionData && detectionData.detection_time_ms ? `${detectionData.detection_time_ms}ms` :
+                                "0ms"}</div>
                     </div>
-                    ${isSmokeTest ? `
+                    ${isVirtualAdversary ? (() => {
+                                const summary = result.summary || {};
+                                const total = summary.total || 0;
+                                const blocked = summary.blocked || 0;
+                                const challenge = summary.challenge || 0;
+                                const allowed = summary.allowed || 0;
+                                const errorCount = summary.error || 0;
+                                const effective = blocked + challenge;
+                                const effectiveness = total > 0 ? (effective / total) * 100 : 0;
+                                const risk = effectiveness >= 80 ? 'LOW' : effectiveness >= 50 ? 'MEDIUM' : 'HIGH';
+                                const rows = Array.isArray(result.results) ? result.results.slice(0, 12) : [];
+
+                                return `
+                        <div class="va-card">
+                            <h4 class="va-title">🧠 Virtual Adversary Results</h4>
+                            <p class="va-note">Consent-gated adaptive testing with baseline-aware response analysis.</p>
+                            <div class="va-grid">
+                                <div><strong>Effectiveness:</strong> ${effectiveness.toFixed(1)}%</div>
+                                <div><strong>Risk:</strong> ${risk}</div>
+                                <div><strong>Blocked:</strong> ${blocked}</div>
+                                <div><strong>Challenge:</strong> ${challenge}</div>
+                                <div><strong>Allowed:</strong> ${allowed}</div>
+                                <div><strong>Errors:</strong> ${errorCount}</div>
+                            </div>
+                            <div class="va-actions">
+                                <button class="btn btn-secondary" onclick="downloadVaReport(${index})">
+                                    💾 Download VA Report
+                                </button>
+                                <button class="btn btn-secondary" onclick="downloadVaReportCsv(${index})">
+                                    📄 CSV
+                                </button>
+                                <button class="btn btn-secondary" onclick="openVaReportModalFromResult(${index})">
+                                    🔎 View
+                                </button>
+                            </div>
+                            <div class="payload-table-wrapper">
+                                <table class="payload-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Category</th>
+                                            <th>Payload</th>
+                                            <th>Outcome</th>
+                                            <th>Reason</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${rows.map((entry, index) => {
+                                            const rowColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+                                            const outcome = entry.outcome || 'Unknown';
+                                            const outcomeColor = outcome === 'Blocked' ? '#22c55e' :
+                                                outcome === 'Challenge' ? '#f59e0b' :
+                                                    outcome === 'Allowed' ? '#ef4444' : '#94a3b8';
+                                            return `<tr style="background: ${rowColor};">
+                                                <td>${escapeHtml(entry.category || 'Unknown')}</td>
+                                                <td style="font-family: monospace;">${escapeHtml(entry.payload || '')}</td>
+                                                <td><span style="background: ${outcomeColor}; color: white; padding: 0.125rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block;">${escapeHtml(outcome)}</span></td>
+                                                <td>${escapeHtml(entry.reason || '')}</td>
+                                            </tr>`;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        `;
+                            })() : isSmokeTest ? `
                         <div class="smoke-test-card">
                             <h4 class="smoke-test-title">🛡️ WAF Smoke Test Results</h4>
                             <p class="smoke-test-note">Note: Scanner Detection tests use realistic User-Agent headers instead of query parameters to test if the WAF blocks security scanning tools.</p>
@@ -434,7 +1374,7 @@
                         </div>
                     ` : ''}
                     
-                    ${!isSmokeTest && !result.is_smoke_test ? `
+                    ${!isSmokeTest && !result.is_smoke_test && !isVirtualAdversary ? `
                     <div class="detection-info">
                         <div class="detection-item ${wafDetected ? 'detected' : 'not-detected'}">
                             <div class="detection-label">
@@ -466,7 +1406,7 @@
                     </div>
                     ` : ''}
                     
-                    ${!isSmokeTest && !result.is_smoke_test && detectionData && detectionData.evidence && Array.isArray(detectionData.evidence) && detectionData.evidence.length > 0 ? `
+                    ${!isSmokeTest && !result.is_smoke_test && !isVirtualAdversary && detectionData && detectionData.evidence && Array.isArray(detectionData.evidence) && detectionData.evidence.length > 0 ? `
                         <div class="evidence-section">
                             <button class="evidence-toggle" onclick="toggleEvidence(this)">
                                 View Evidence (${detectionData.evidence.length} items)
@@ -588,6 +1528,29 @@
             showSuccessMessage('Results exported successfully');
         }
 
+        function downloadVaReport(index) {
+            const result = allResults[index];
+            const isVirtualAdversary = result && (result.is_virtual_adversary === true ||
+                (result.target_url && result.summary && Array.isArray(result.results)));
+            if (!isVirtualAdversary) {
+                showErrorMessage('No Virtual Adversary report available');
+                return;
+            }
+
+            const timestamp = new Date().toISOString().split('T')[0];
+            const jsonData = JSON.stringify(result, null, 2);
+            const jsonBlob = new Blob([jsonData], { type: 'application/json' });
+            const jsonUrl = URL.createObjectURL(jsonBlob);
+
+            const link = document.createElement('a');
+            link.href = jsonUrl;
+            link.download = `va-report-${timestamp}.json`;
+            link.click();
+
+            URL.revokeObjectURL(jsonUrl);
+            showSuccessMessage('VA report downloaded');
+        }
+
         // Page load handler
         window.addEventListener('load', () => {
             // Page loaded - ready for user input
@@ -683,6 +1646,65 @@
         // Apply the fix when the page loads
         document.addEventListener('DOMContentLoaded', function () {
             fixSmokeTestDisplay();
+            loadConsentStatus();
+            loadVaHistory();
+            const historySearch = document.getElementById('vaHistorySearch');
+            if (historySearch) {
+                historySearch.addEventListener('input', () => applyVaHistoryFilter());
+            }
+            const historyDate = document.getElementById('vaHistoryDate');
+            const historyStart = document.getElementById('vaHistoryStart');
+            const historyEnd = document.getElementById('vaHistoryEnd');
+            const historySort = document.getElementById('vaHistorySort');
+            if (historyDate) {
+                historyDate.addEventListener('change', (event) => {
+                    const isCustom = event.target.value === 'custom';
+                    if (historyStart) historyStart.disabled = !isCustom;
+                    if (historyEnd) historyEnd.disabled = !isCustom;
+                    applyVaHistoryFilter();
+                });
+            }
+            if (historyStart) {
+                historyStart.addEventListener('change', () => applyVaHistoryFilter());
+            }
+            if (historyEnd) {
+                historyEnd.addEventListener('change', () => applyVaHistoryFilter());
+            }
+            if (historySort) {
+                historySort.addEventListener('change', () => applyVaHistoryFilter());
+            }
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeVaReportModal();
+                }
+            });
+            const filter = document.getElementById('vaActivityFilter');
+            if (filter) {
+                filter.addEventListener('change', (event) => {
+                    vaActivityFilter = event.target.value;
+                    if (currentVaJobId) {
+                        renderVaActivity(currentVaJobId);
+                    }
+                });
+            }
+            const autoScrollToggle = document.getElementById('vaAutoScroll');
+            if (autoScrollToggle) {
+                autoScrollToggle.addEventListener('change', (event) => {
+                    vaAutoScroll = event.target.checked;
+                    if (currentVaJobId) {
+                        renderVaActivity(currentVaJobId);
+                    }
+                });
+            }
+            const activitySearch = document.getElementById('vaActivitySearch');
+            if (activitySearch) {
+                activitySearch.addEventListener('input', (event) => {
+                    vaActivitySearchTerm = event.target.value.trim().toLowerCase();
+                    if (currentVaJobId) {
+                        renderVaActivity(currentVaJobId);
+                    }
+                });
+            }
             console.log("Smoke test display fix applied on page load");
         });
     </script>

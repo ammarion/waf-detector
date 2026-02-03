@@ -16,3 +16,6 @@ node_modules/
 # Local keys or binaries
 waf-detect
 waf-detect.pub
+
+# Local docs
+PRD_*.md

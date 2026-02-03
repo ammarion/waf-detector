@@ -4,6 +4,23 @@
 mod effectiveness_tests {
     use super::super::*;
     use tempfile::TempDir;
+    fn with_temp_home<F>(f: F)
+    where
+        F: FnOnce(&TempDir),
+    {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+        f(&temp_dir);
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
+    }
 
     #[test]
     fn test_effectiveness_config_default() {
@@ -138,12 +155,89 @@ mod effectiveness_tests {
 
     #[test]
     fn test_consent_without_file() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
+        with_temp_home(|_temp_dir| {
+            let consent_manager = consent::ConsentManager::new();
+            let has_consent = consent_manager.has_valid_consent().unwrap();
+            assert!(!has_consent);
+        });
+    }
 
-        let consent_manager = consent::ConsentManager::new();
-        let has_consent = consent_manager.has_valid_consent().unwrap();
-        assert!(!has_consent);
+    #[test]
+    fn test_consent_status_without_file() {
+        with_temp_home(|_temp_dir| {
+            let consent_manager = consent::ConsentManager::new();
+            let status = consent_manager.status().unwrap();
+            assert!(!status.has_consent);
+            assert!(status.authorized_targets.is_empty());
+            assert!(status.expires_in_days.is_none());
+        });
+    }
+
+    #[test]
+    fn test_consent_status_with_file() {
+        with_temp_home(|temp_dir| {
+            let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+            let record = serde_json::json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "terms_version": "1.0.0",
+                "authorized_targets": ["example.com", "api.example.com"],
+                "acknowledgment": "I AGREE"
+            });
+            std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+
+            let consent_manager = consent::ConsentManager::new();
+            let status = consent_manager.status().unwrap();
+            assert!(status.has_consent);
+            assert_eq!(status.authorized_targets.len(), 2);
+            assert_eq!(status.terms_version, "1.0.0");
+            assert!(status.expires_in_days.unwrap_or(0) > 0);
+        });
+    }
+
+    #[test]
+    fn test_remove_authorized_target() {
+        with_temp_home(|temp_dir| {
+            let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+            let record = serde_json::json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "terms_version": "1.0.0",
+                "authorized_targets": ["example.com", "api.example.com"],
+                "acknowledgment": "I AGREE"
+            });
+            std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+
+            let consent_manager = consent::ConsentManager::new();
+            let removed = consent_manager
+                .remove_authorized_target("api.example.com")
+                .unwrap();
+            assert!(removed);
+
+            let status = consent_manager.status().unwrap();
+            assert_eq!(status.authorized_targets, vec!["example.com".to_string()]);
+        });
+    }
+
+    #[test]
+    fn test_remove_missing_authorized_target() {
+        with_temp_home(|temp_dir| {
+            let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+            let record = serde_json::json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "terms_version": "1.0.0",
+                "authorized_targets": ["example.com"],
+                "acknowledgment": "I AGREE"
+            });
+            std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+
+            let consent_manager = consent::ConsentManager::new();
+            let removed = consent_manager
+                .remove_authorized_target("missing.example.com")
+                .unwrap();
+            assert!(!removed);
+
+            let status = consent_manager.status().unwrap();
+            assert_eq!(status.authorized_targets, vec!["example.com".to_string()]);
+        });
     }
 
     #[test]

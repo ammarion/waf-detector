@@ -12,6 +12,9 @@ pub mod script_executor;
 pub mod utils;
 pub mod web;
 
+#[cfg(test)]
+mod test_utils;
+
 // NEW: Advanced confidence and validation modules
 pub mod dns;
 pub mod payload;
@@ -21,6 +24,7 @@ pub mod tls;
 
 // NEW: WAF Effectiveness Testing module
 pub mod effectiveness;
+pub mod virtual_adversary;
 
 #[derive(Debug, Clone)]
 pub struct DetectionContext {

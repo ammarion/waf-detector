@@ -19,6 +19,16 @@ pub struct ConsentManager {
     consent_file_path: PathBuf,
 }
 
+/// Public consent status for UI/API usage
+#[derive(Debug, Serialize)]
+pub struct ConsentStatus {
+    pub has_consent: bool,
+    pub terms_version: String,
+    pub expires_in_days: Option<i64>,
+    pub authorized_targets: Vec<String>,
+    pub consent_timestamp: Option<DateTime<Utc>>,
+}
+
 /// Stored consent information
 #[derive(Debug, Serialize, Deserialize)]
 struct ConsentRecord {
@@ -35,7 +45,10 @@ struct ConsentRecord {
 impl ConsentManager {
     /// Create a new consent manager
     pub fn new() -> Self {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home_dir = match std::env::var("WAF_DETECTOR_HOME") {
+            Ok(path) => PathBuf::from(path),
+            Err(_) => dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+        };
         let consent_file_path = home_dir.join(CONSENT_FILE);
 
         Self { consent_file_path }
@@ -69,6 +82,36 @@ impl ConsentManager {
         }
 
         Ok(true)
+    }
+
+    /// Fetch consent status for UI/API reporting
+    pub fn status(&self) -> Result<ConsentStatus> {
+        if !self.consent_file_path.exists() {
+            return Ok(ConsentStatus {
+                has_consent: false,
+                terms_version: Self::current_terms_version(),
+                expires_in_days: None,
+                authorized_targets: Vec::new(),
+                consent_timestamp: None,
+            });
+        }
+
+        let consent = self.load_consent()?;
+        let age = Utc::now() - consent.timestamp;
+        let valid_terms = consent.terms_version == Self::current_terms_version();
+        let valid_age = age <= Duration::days(CONSENT_VALIDITY_DAYS);
+        let mut remaining = CONSENT_VALIDITY_DAYS - age.num_days();
+        if remaining < 0 {
+            remaining = 0;
+        }
+
+        Ok(ConsentStatus {
+            has_consent: valid_terms && valid_age,
+            terms_version: consent.terms_version,
+            expires_in_days: Some(remaining),
+            authorized_targets: consent.authorized_targets,
+            consent_timestamp: Some(consent.timestamp),
+        })
     }
 
     /// Request user consent
@@ -150,6 +193,20 @@ impl ConsentManager {
         }
 
         Ok(())
+    }
+
+    /// Remove an authorized target
+    pub fn remove_authorized_target(&self, target: &str) -> Result<bool> {
+        let mut consent = self.load_consent()?;
+        let before = consent.authorized_targets.len();
+        consent
+            .authorized_targets
+            .retain(|entry| entry != target);
+        let removed = consent.authorized_targets.len() != before;
+        if removed {
+            self.save_consent(&consent)?;
+        }
+        Ok(removed)
     }
 
     /// Load consent from file

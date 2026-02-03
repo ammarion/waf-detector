@@ -180,6 +180,282 @@ pub const API_DOCS_HTML: &str = r#"
   }
 }</code></pre>
         </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary</h3>
+            <p>Run Virtual Adversary effectiveness testing (consent required).</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "url": "https://example.com",
+  "tier": 2,
+  "budget": 120,
+  "timeout_ms": 15000,
+  "delay_ms": 750,
+  "variants": 4
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "result": {
+    "target_url": "https://example.com",
+    "plan_size": 24,
+    "summary": {
+      "total": 24,
+      "blocked": 14,
+      "challenge": 4,
+      "allowed": 6,
+      "error": 0
+    },
+    "config": {
+      "tier": 2,
+      "request_budget": 120,
+      "request_timeout": { "secs": 15, "nanos": 0 },
+      "request_delay": { "secs": 0, "nanos": 750000000 },
+      "max_variants_per_payload": 4
+    },
+    "results": [
+      {
+        "payload": "' OR '1'='1",
+        "category": "SqlInjection",
+        "outcome": "Blocked",
+        "reason": "status=403"
+      }
+    ]
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary/start</h3>
+            <p>Start a Virtual Adversary run asynchronously and return a job id.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "url": "https://example.com",
+  "tier": 2,
+  "budget": 120,
+  "timeout_ms": 15000,
+  "delay_ms": 750,
+  "variants": 4
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "job_id": "va-42",
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/status/:id</h3>
+            <p>Check progress for a running Virtual Adversary job.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "status": {
+    "id": "va-42",
+    "state": "running",
+    "total": 24,
+    "completed": 6,
+    "result": null,
+    "error": null,
+    "events": [
+      {
+        "index": 6,
+        "total": 24,
+        "category": "SqlInjection",
+        "payload": "' OR '1'='1",
+        "outcome": "Blocked",
+        "reason": "status=403",
+        "timestamp": "2026-02-03T12:00:00Z"
+      }
+    ]
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports</h3>
+            <p>List saved Virtual Adversary reports.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "reports": [
+    {
+      "id": "va-20260203T120000-example.com.json",
+      "target_url": "https://example.com",
+      "created_at": "2026-02-03T12:00:00Z",
+      "plan_size": 24,
+      "blocked": 10,
+      "challenge": 4,
+      "allowed": 8,
+      "error": 2,
+      "risk_label": "MEDIUM"
+    }
+  ],
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports.csv</h3>
+            <p>Download saved Virtual Adversary reports as CSV.</p>
+
+            <h4>Response</h4>
+            <pre><code>id,target_url,created_at,plan_size,blocked,challenge,allowed,error,risk_label
+va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,10,4,8,2,MEDIUM</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary/reports/cleanup</h3>
+            <p>Apply retention to saved Virtual Adversary reports.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "max_reports": 50
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "kept": 50,
+  "deleted": 12,
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary/reports/delete-range</h3>
+            <p>Delete saved Virtual Adversary reports in a date range (inclusive).</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "start_date": "2026-02-01",
+  "end_date": "2026-02-02"
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "deleted": 8,
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id</h3>
+            <p>Fetch a saved Virtual Adversary report by id.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "report": {
+    "id": "va-20260203T120000-example.com.json",
+    "created_at": "2026-02-03T12:00:00Z",
+    "report": {
+      "target_url": "https://example.com",
+      "plan_size": 24,
+      "summary": {
+        "total": 24,
+        "blocked": 10,
+        "challenge": 4,
+        "allowed": 8,
+        "error": 2
+      },
+      "config": {
+        "tier": 2,
+        "request_budget": 120,
+        "request_timeout": { "secs": 15, "nanos": 0 },
+        "request_delay": { "secs": 0, "nanos": 750000000 },
+        "max_variants_per_payload": 4
+      },
+      "results": []
+    }
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id.csv</h3>
+            <p>Download a saved Virtual Adversary report as CSV.</p>
+
+            <h4>Response</h4>
+            <pre><code>report_id,target_url,created_at,index,category,payload,outcome,reason
+va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,SqlInjection,' OR '1'='1,Blocked,status=403</code></pre>
+        </div>
+
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/consent-status</h3>
+            <p>Return consent status and authorized targets for the local user.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "status": {
+    "has_consent": true,
+    "terms_version": "1.0.0",
+    "expires_in_days": 23,
+    "authorized_targets": ["example.com"],
+    "consent_timestamp": "2026-02-03T10:00:00Z"
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/consent/add-target</h3>
+            <p>Add an authorized target to the consent list.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target": "example.com"
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "status": {
+    "has_consent": true,
+    "terms_version": "1.0.0",
+    "expires_in_days": 23,
+    "authorized_targets": ["example.com"],
+    "consent_timestamp": "2026-02-03T10:00:00Z"
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/consent/remove-target</h3>
+            <p>Remove an authorized target from the consent list.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target": "example.com"
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "status": {
+    "has_consent": true,
+    "terms_version": "1.0.0",
+    "expires_in_days": 23,
+    "authorized_targets": [],
+    "consent_timestamp": "2026-02-03T10:00:00Z"
+  },
+  "error": null
+}</code></pre>
+        </div>
         
         <div class="endpoint">
             <h3><span class="method get">GET</span> /api/providers</h3>
@@ -228,3 +504,29 @@ pub const API_DOCS_HTML: &str = r#"
 </body>
 </html>
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::DASHBOARD_HTML;
+
+    #[test]
+    fn dashboard_html_contains_va_placeholder() {
+        assert!(DASHBOARD_HTML.contains("Virtual Adversary"));
+        assert!(DASHBOARD_HTML.contains("vaTestForm"));
+        assert!(DASHBOARD_HTML.contains("Download VA Report"));
+        assert!(DASHBOARD_HTML.contains("consentTargetInput"));
+        assert!(DASHBOARD_HTML.contains("vaHistoryList"));
+        assert!(DASHBOARD_HTML.contains("vaActivityLog"));
+        assert!(DASHBOARD_HTML.contains("reports.csv"));
+        assert!(DASHBOARD_HTML.contains("vaRetentionInput"));
+        assert!(DASHBOARD_HTML.contains("vaActivityFilter"));
+        assert!(DASHBOARD_HTML.contains("downloadVaReportCsv"));
+        assert!(DASHBOARD_HTML.contains("vaHistorySearch"));
+        assert!(DASHBOARD_HTML.contains("vaAutoScroll"));
+        assert!(DASHBOARD_HTML.contains("vaHistoryDate"));
+        assert!(DASHBOARD_HTML.contains("vaReportModal"));
+        assert!(DASHBOARD_HTML.contains("vaHistorySort"));
+        assert!(DASHBOARD_HTML.contains("vaActivitySearch"));
+        assert!(DASHBOARD_HTML.contains("deleteVaHistoryRange"));
+    }
+}

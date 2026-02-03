@@ -7,6 +7,7 @@ use crate::providers::{
     f5::F5Provider, fastly::FastlyProvider, vercel::VercelProvider, Provider,
 };
 use crate::registry::ProviderRegistry;
+use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use clap::{Arg, ArgMatches, Command};
@@ -66,6 +67,111 @@ impl SimpleCliApp {
         // Handle smoke test command
         if matches.get_flag("smoke-test") {
             return self.run_smoke_test(&matches).await;
+        }
+
+        // Handle virtual adversary (VA) schema output
+        if matches.get_flag("va-schema") {
+            let schema = crate::virtual_adversary::va_report_schema();
+            println!("{}", serde_json::to_string_pretty(&schema)?);
+            return Ok(());
+        }
+
+        // Handle virtual adversary (VA) mode
+        if let Some(url) = matches.get_one::<String>("va") {
+            let config = VirtualAdversaryConfig {
+                tier: *matches.get_one::<u8>("va-tier").unwrap_or(&1),
+                request_budget: *matches.get_one::<u32>("va-budget").unwrap_or(&120),
+                request_timeout: std::time::Duration::from_secs(
+                    *matches.get_one::<u64>("va-timeout").unwrap_or(&15),
+                ),
+                request_delay: std::time::Duration::from_millis(
+                    *matches.get_one::<u64>("va-delay").unwrap_or(&750),
+                ),
+                max_variants_per_payload: *matches
+                    .get_one::<u8>("va-variants")
+                    .unwrap_or(&4),
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)?;
+            if matches.get_flag("va-dry-run") {
+                let plan = runner.plan();
+                println!("🧪 VA Dry Run: {} planned payloads", plan.len());
+                for payload in plan {
+                    println!(" - {:?}: {}", payload.category, payload.payload);
+                }
+                return Ok(());
+            }
+            let report = runner.run(url)?;
+            if matches.get_flag("va-json") {
+                let json = serde_json::to_string_pretty(&report)?;
+                println!("{json}");
+                return Ok(());
+            }
+            if let Some(output) = matches.get_one::<String>("va-output") {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(output, json)?;
+                let summary_path = format!(
+                    "{}.summary.txt",
+                    output.trim_end_matches(".json")
+                );
+                let summary = format!(
+                    "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
+                    report.target_url,
+                    report.summary.confidence_score(),
+                    report.summary.risk_label(),
+                    report.summary.blocked,
+                    report.summary.challenge,
+                    report.summary.allowed,
+                    report.summary.error
+                );
+                std::fs::write(&summary_path, summary)?;
+                println!("📄 VA report saved to: {output}");
+                println!("📄 VA summary saved to: {summary_path}");
+                return Ok(());
+            }
+            println!(
+                "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {}",
+                report.target_url,
+                report.summary.total,
+                report.summary.blocked,
+                report.summary.challenge,
+                report.summary.allowed,
+                report.summary.error,
+                report.summary.confidence_score(),
+                report.summary.risk_label()
+            );
+            println!(
+                "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",
+                report.config.tier,
+                report.config.request_budget,
+                report.config.request_delay.as_millis(),
+                report.config.request_timeout.as_secs(),
+                report.config.max_variants_per_payload
+            );
+            let max_results = *matches.get_one::<u8>("va-top").unwrap_or(&3) as usize;
+            if !report.results.is_empty() {
+                println!("   Top Results:");
+                let reason_level = *matches.get_one::<u8>("va-reason-level").unwrap_or(&1);
+                let max_len = *matches.get_one::<u16>("va-max-len").unwrap_or(&80) as usize;
+                for result in report.results.iter().take(max_results) {
+                    let payload = if result.payload.len() > max_len {
+                        format!("{}...", &result.payload[..max_len.saturating_sub(3)])
+                    } else {
+                        result.payload.clone()
+                    };
+                    if reason_level == 0 {
+                        println!(
+                            "   - {:?} | {} | {:?}",
+                            result.category, payload, result.outcome
+                        );
+                    } else {
+                        println!(
+                            "   - {:?} | {} | {:?} | {}",
+                            result.category, payload, result.outcome, result.reason
+                        );
+                    }
+                }
+            }
+            return Ok(());
         }
 
         // Get targets to scan
@@ -718,6 +824,112 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Run comprehensive WAF effectiveness testing (requires consent)")
                 .value_name("URL")
                 .num_args(1),
+        )
+        .arg(
+            Arg::new("va")
+                .long("va")
+                .help("Run Virtual Adversary effectiveness validation (requires consent)")
+                .value_name("URL")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("va-schema")
+                .long("va-schema")
+                .help("Print VA report JSON schema")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("va-dry-run")
+                .long("va-dry-run")
+                .help("Print planned VA payloads without executing")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-top")
+                .long("va-top")
+                .help("Number of VA results to print")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("3")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-reason-level")
+                .long("va-reason-level")
+                .help("VA reason verbosity (0=none, 1=default)")
+                .value_name("LEVEL")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("1")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-max-len")
+                .long("va-max-len")
+                .help("Max payload length to print in VA output")
+                .value_name("LEN")
+                .value_parser(clap::value_parser!(u16))
+                .default_value("80")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-output")
+                .long("va-output")
+                .help("Write VA report JSON and summary to file")
+                .value_name("FILE")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-json")
+                .long("va-json")
+                .help("Print VA report JSON to stdout")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-tier")
+                .long("va-tier")
+                .help("VA safety tier (1-3)")
+                .value_name("TIER")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("1")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-budget")
+                .long("va-budget")
+                .help("VA request budget (max total requests)")
+                .value_name("BUDGET")
+                .value_parser(clap::value_parser!(u32))
+                .default_value("120")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-timeout")
+                .long("va-timeout")
+                .help("VA per-request timeout (seconds)")
+                .value_name("SECONDS")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("15")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-delay")
+                .long("va-delay")
+                .help("VA delay between requests (milliseconds)")
+                .value_name("MS")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("750")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-variants")
+                .long("va-variants")
+                .help("VA max variants per payload")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("4")
+                .requires("va"),
         )
 }
 
