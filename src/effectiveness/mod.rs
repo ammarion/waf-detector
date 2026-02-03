@@ -7,6 +7,7 @@
 //! ⚠️ WARNING: Only use this module against systems you own or have explicit permission to test.
 
 use anyhow::{anyhow, Result};
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::collections::HashMap;
@@ -546,7 +547,13 @@ impl EffectivenessTest {
             .iter()
             .any(|(k, v)| k.eq_ignore_ascii_case("user-agent") && !v.trim().is_empty());
         if !has_valid_user_agent {
-            request_builder = request_builder.header("User-Agent", "WAF-Detector/1.0");
+            let agents = techniques::get_user_agents();
+            let mut rng = rand::thread_rng();
+            let ua = agents
+                .choose(&mut rng)
+                .copied()
+                .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            request_builder = request_builder.header("User-Agent", ua);
         }
 
         let start = Instant::now();

@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::time::Duration;
 use url::Url;
 
@@ -874,6 +875,8 @@ impl VirtualAdversaryRunner {
                 "replay url host mismatch: expected {target_host}, got {host}"
             ));
         }
+        let port = parsed.port_or_known_default().unwrap_or(443);
+        validate_replay_host_public(host, port)?;
 
         let class = parse_probe_class(&item.class)?;
         let channel = parse_probe_channel(&item.channel)?;
@@ -1034,6 +1037,43 @@ impl VirtualAdversaryRunner {
 
     pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
         self.run_with_events(target_url, |_, _| {}, |_| {})
+    }
+}
+
+fn validate_replay_host_public(host: &str, port: u16) -> Result<()> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_ip(&ip) {
+            return Err(anyhow!("replay host resolves to private or loopback IP"));
+        }
+        return Ok(());
+    }
+
+    let addrs = (host, port)
+        .to_socket_addrs()
+        .map_err(|err| anyhow!("failed to resolve replay host: {err}"))?;
+    let mut found = false;
+    for addr in addrs {
+        found = true;
+        if is_private_ip(&addr.ip()) {
+            return Err(anyhow!("replay host resolves to private or loopback IP"));
+        }
+    }
+    if !found {
+        return Err(anyhow!("replay host resolution returned no addresses"));
+    }
+    Ok(())
+}
+
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6.is_multicast()
+                || v6.is_unspecified()
+        }
     }
 }
 
@@ -1766,7 +1806,7 @@ mod tests {
     #[test]
     fn test_va_report_replay_plan_matches_plan_size() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(&temp_dir, vec!["93.184.216.34".to_string()]);
 
             let config = VirtualAdversaryConfig {
                 tier: 1,
@@ -1777,11 +1817,11 @@ mod tests {
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
                 .with_http_adapter(Box::new(StubHttpAdapter::default()));
-            let report = runner.run("https://example.com").unwrap();
+            let report = runner.run("https://93.184.216.34").unwrap();
             assert_eq!(report.replay_plan.len(), report.plan_size);
             let first = report.replay_plan.first().unwrap();
             assert!(!first.method.is_empty());
-            assert!(first.url.contains("example.com"));
+            assert!(first.url.contains("93.184.216.34"));
         });
     }
 
@@ -1796,7 +1836,7 @@ mod tests {
     #[test]
     fn test_replay_plan_rejects_host_mismatch() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(&temp_dir, vec!["93.184.216.34".to_string()]);
             let config = VirtualAdversaryConfig {
                 request_budget: 3,
                 ..Default::default()
@@ -1814,7 +1854,7 @@ mod tests {
                 headers: Vec::new(),
                 body: None,
             }];
-            let result = runner.run_replay_plan("https://example.com", plan);
+            let result = runner.run_replay_plan("https://93.184.216.34", plan);
             assert!(result.is_err());
         });
     }
@@ -1822,7 +1862,7 @@ mod tests {
     #[test]
     fn test_replay_plan_runs() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(&temp_dir, vec!["93.184.216.34".to_string()]);
             let config = VirtualAdversaryConfig {
                 request_budget: 3,
                 ..Default::default()
@@ -1836,15 +1876,41 @@ mod tests {
                 channel: "Query".to_string(),
                 description: "replay".to_string(),
                 method: "GET".to_string(),
-                url: "https://example.com/test".to_string(),
+                url: "https://93.184.216.34/test".to_string(),
                 headers: Vec::new(),
                 body: None,
             }];
             let report = runner
-                .run_replay_plan("https://example.com", plan)
+                .run_replay_plan("https://93.184.216.34", plan)
                 .unwrap();
             assert_eq!(report.plan_size, 1);
             assert_eq!(report.results.len(), 1);
+        });
+    }
+
+    #[test]
+    fn test_replay_plan_rejects_private_ip() {
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["127.0.0.1".to_string()]);
+            let config = VirtualAdversaryConfig {
+                request_budget: 1,
+                ..Default::default()
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let plan = vec![VaReplayPlanItem {
+                index: 1,
+                class: "SemanticDrift".to_string(),
+                channel: "Query".to_string(),
+                description: "replay".to_string(),
+                method: "GET".to_string(),
+                url: "https://127.0.0.1/test".to_string(),
+                headers: Vec::new(),
+                body: None,
+            }];
+            let result = runner.run_replay_plan("https://127.0.0.1", plan);
+            assert!(result.is_err());
         });
     }
 }
