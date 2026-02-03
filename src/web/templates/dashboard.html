@@ -657,6 +657,7 @@
         let vaCurrentReportRows = [];
         let vaCurrentReportId = null;
         let vaCurrentReportTarget = null;
+        let vaCurrentReportRaw = null;
         let vaCurrentReplayPlan = [];
         let vaReplayExpanded = false;
         let vaReplayFilterText = '';
@@ -1314,6 +1315,7 @@
             vaPinnedIndexSet = new Set();
             vaCurrentReportId = stored.id || report.report_id || 'local-report';
             vaCurrentReportTarget = report.target_url || '';
+            vaCurrentReportRaw = report;
 
             if (title) {
                 title.textContent = `VA Report • ${report.target_url || 'Unknown'}`;
@@ -1337,6 +1339,11 @@
                     });
                 };
                 meta.appendChild(copyButton);
+                const bundleButton = document.createElement('button');
+                bundleButton.className = 'va-evidence-button';
+                bundleButton.textContent = 'Download Bundle';
+                bundleButton.onclick = () => downloadVaBundle();
+                meta.appendChild(bundleButton);
             }
             if (summaryEl) {
                 summaryEl.innerHTML = `
@@ -1738,6 +1745,22 @@
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
+        }
+
+        function downloadVaBundle() {
+            if (!vaCurrentReportRaw) {
+                showErrorMessage('No VA report available');
+                return;
+            }
+            const bundle = {
+                exported_at: new Date().toISOString(),
+                report_id: vaCurrentReportId || null,
+                target_url: vaCurrentReportTarget || null,
+                report: attachPinnedSummary(vaCurrentReportRaw),
+                pinned: vaPinnedRows,
+            };
+            downloadJsonFile(`va-bundle-${Date.now()}.json`, bundle);
+            showSuccessMessage('VA bundle downloaded');
         }
 
         function exportPinnedJson() {
