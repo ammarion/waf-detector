@@ -350,6 +350,20 @@ impl VirtualAdversaryRunner {
         })
     }
 
+    pub fn plan(&self) -> Vec<VaPayloadVariant> {
+        let templates = base_payloads_for_tier(self.config.tier);
+        let mut plan = Vec::new();
+
+        for template in &templates {
+            let mut variants = generate_variants(template, self.config.max_variants_per_payload);
+            plan.append(&mut variants);
+        }
+
+        let max_plan = self.config.request_budget.saturating_sub(1);
+        plan.truncate(max_plan as usize);
+        plan
+    }
+
     pub fn run(&mut self, target_url: &str) -> Result<()> {
         ensure_consent_and_target(&self.consent_manager, target_url)?;
 
@@ -600,5 +614,32 @@ mod tests {
         let variants = generate_variants(&template, 2);
         assert_eq!(variants.len(), 2);
         assert_eq!(variants[0].payload, template.payload);
+    }
+
+    #[test]
+    fn test_plan_respects_budget() {
+        let config = VirtualAdversaryConfig {
+            tier: 3,
+            request_budget: 2,
+            max_variants_per_payload: 3,
+            ..Default::default()
+        };
+        let runner = VirtualAdversaryRunner::new(config).unwrap();
+        let plan = runner.plan();
+        assert!(plan.len() <= 1);
+    }
+
+    #[test]
+    fn test_plan_generates_variants() {
+        let config = VirtualAdversaryConfig {
+            tier: 1,
+            request_budget: 10,
+            max_variants_per_payload: 2,
+            ..Default::default()
+        };
+        let runner = VirtualAdversaryRunner::new(config).unwrap();
+        let plan = runner.plan();
+        assert!(!plan.is_empty());
+        assert!(plan.len() >= 3);
     }
 }
