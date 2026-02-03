@@ -850,6 +850,19 @@ body {
     gap: 0.75rem;
 }
 
+.va-evidence-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: #cbd5f5;
+    margin-top: 0.5rem;
+}
+
+.va-evidence-toggle input {
+    accent-color: var(--accent-primary);
+}
+
 .va-evidence-section {
     background: rgba(15, 23, 42, 0.6);
     border: 1px solid rgba(148, 163, 184, 0.2);

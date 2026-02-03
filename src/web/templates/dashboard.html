@@ -311,6 +311,10 @@
             </div>
             <div id="vaEvidenceMeta" class="modal-meta"></div>
             <div id="vaEvidenceBody" class="va-evidence-body"></div>
+            <div class="va-evidence-toggle">
+                <label for="vaEvidencePayloadToggle">Show Raw Payload</label>
+                <input type="checkbox" id="vaEvidencePayloadToggle">
+            </div>
         </div>
     </div>
 
@@ -1261,9 +1265,11 @@
             const copyBtn = document.getElementById('vaEvidenceCopy');
             const exportJsonBtn = document.getElementById('vaEvidenceExportJson');
             const exportCsvBtn = document.getElementById('vaEvidenceExportCsv');
+            const payloadToggle = document.getElementById('vaEvidencePayloadToggle');
             if (!modal || !row) return;
 
             modal.dataset.currentRow = JSON.stringify(row);
+            const showRawPayload = modal.dataset.showRawPayload === 'true';
 
             if (title) {
                 title.textContent = `Probe Evidence • ${row.category || 'Unknown'}`;
@@ -1282,16 +1288,27 @@
                 : '<div class="va-evidence-empty">No evidence recorded for this probe.</div>';
 
             if (body) {
+                const payload = row.payload || '';
+                const payloadDisplay = showRawPayload ? payload : payload.slice(0, 160);
+                const payloadSuffix = payload.length > 160 && !showRawPayload ? '…' : '';
                 body.innerHTML = `
                     <div class="va-evidence-section">
                         <div class="va-evidence-label">Payload</div>
-                        <div class="va-evidence-value">${escapeHtml(row.payload || '')}</div>
+                        <div class="va-evidence-value">${escapeHtml(payloadDisplay)}${payloadSuffix}</div>
                     </div>
                     <div class="va-evidence-section">
                         <div class="va-evidence-label">Evidence</div>
                         ${evidenceList}
                     </div>
                 `;
+            }
+
+            if (payloadToggle) {
+                payloadToggle.checked = showRawPayload;
+                payloadToggle.onchange = () => {
+                    modal.dataset.showRawPayload = payloadToggle.checked ? 'true' : 'false';
+                    openVaEvidenceModal(row);
+                };
             }
 
             if (copyBtn) {
@@ -1310,6 +1327,7 @@
         function closeVaEvidenceModal() {
             const modal = document.getElementById('vaEvidenceModal');
             if (modal) {
+                modal.dataset.showRawPayload = 'false';
                 modal.classList.remove('modal-open');
             }
         }
