@@ -465,6 +465,15 @@ impl VirtualAdversaryRunner {
         plan
     }
 
+    fn collect_baseline(&self, target_url: &str) -> Result<BaselineRecord> {
+        let response = self.http.get(target_url)?;
+        Ok(BaselineRecord::from_response(
+            response.status,
+            response.headers,
+            &response.body,
+        ))
+    }
+
     pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
         ensure_consent_and_target(&self.consent_manager, target_url)?;
 
@@ -474,7 +483,7 @@ impl VirtualAdversaryRunner {
         let _baseline_wait = self.rate_limiter.record_request();
         let _attack_wait = self.rate_limiter.record_request();
 
-        let _baseline = self.http.get(target_url).ok();
+        let _baseline = self.collect_baseline(target_url)?;
         let plan = self.plan();
         let mut report = VaRunReport::new(target_url, plan.len());
         for _item in plan {
@@ -813,5 +822,20 @@ mod tests {
 
         let result = runner.run("https://example.com").unwrap();
         assert_eq!(result.target_url, "https://example.com");
+    }
+
+    #[test]
+    fn test_collect_baseline_from_http_adapter() {
+        let config = VirtualAdversaryConfig {
+            request_budget: 2,
+            ..Default::default()
+        };
+        let runner = VirtualAdversaryRunner::new(config)
+            .unwrap()
+            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+
+        let baseline = runner.collect_baseline("https://example.com").unwrap();
+        assert_eq!(baseline.status_code, 200);
+        assert_eq!(baseline.body_sample, "ok");
     }
 }
