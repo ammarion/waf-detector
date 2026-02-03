@@ -580,10 +580,30 @@ impl SimpleCliApp {
     async fn start_web_server(&self, engine: &DetectionEngine, port: u16) -> Result<()> {
         println!("🌐 Starting WAF Detector Web Server...");
 
-        let web_server = crate::web::WebServer::new(engine.clone());
-        web_server.start(port).await?;
+        let mut last_error: Option<anyhow::Error> = None;
+        let max_attempts = 10u16;
 
-        Ok(())
+        for offset in 0..max_attempts {
+            let candidate = port.saturating_add(offset);
+            let web_server = crate::web::WebServer::new(engine.clone());
+            match web_server.start(candidate).await {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    let addr_in_use = err
+                        .downcast_ref::<std::io::Error>()
+                        .map(|io_err| io_err.kind() == std::io::ErrorKind::AddrInUse)
+                        .unwrap_or(false);
+                    if addr_in_use {
+                        println!("⚠️  Port {candidate} is in use, trying next port...");
+                        last_error = Some(err);
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow!("Unable to bind to a free port")))
     }
 
     async fn run_effectiveness_test(&self, url: &str) -> Result<()> {
