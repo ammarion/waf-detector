@@ -296,6 +296,17 @@ impl VaResultSummary {
         let effective = self.blocked + self.challenge;
         effective as f64 / self.total as f64
     }
+
+    pub fn risk_label(&self) -> &'static str {
+        let score = self.confidence_score();
+        if score >= 0.8 {
+            "LOW"
+        } else if score >= 0.5 {
+            "MEDIUM"
+        } else {
+            "HIGH"
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -863,6 +874,16 @@ mod tests {
         summary.record(VaOutcome::Challenge);
         summary.record(VaOutcome::Allowed);
         assert!((summary.confidence_score() - (2.0 / 3.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_result_summary_risk_label() {
+        let mut summary = VaResultSummary::new();
+        summary.record(VaOutcome::Blocked);
+        summary.record(VaOutcome::Blocked);
+        summary.record(VaOutcome::Challenge);
+        summary.record(VaOutcome::Allowed);
+        assert_eq!(summary.risk_label(), "MEDIUM");
     }
 
     #[test]
