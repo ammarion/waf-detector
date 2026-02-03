@@ -292,6 +292,7 @@
                     <select id="vaReplayClassFilter" class="input-field"></select>
                     <select id="vaReplayChannelFilter" class="input-field"></select>
                     <select id="vaReplayMethodFilter" class="input-field"></select>
+                    <select id="vaReplayOutcomeFilter" class="input-field"></select>
                 </div>
                 <div id="vaReplayPlanList" class="va-replay-list">No replay plan loaded.</div>
             </div>
@@ -664,6 +665,7 @@
         let vaReplayFilterClass = 'all';
         let vaReplayFilterChannel = 'all';
         let vaReplayFilterMethod = 'all';
+        let vaReplayFilterOutcome = 'all';
 
         function formatReason(reason) {
             if (!reason) return '';
@@ -1594,6 +1596,7 @@
             const classSelect = document.getElementById('vaReplayClassFilter');
             const channelSelect = document.getElementById('vaReplayChannelFilter');
             const methodSelect = document.getElementById('vaReplayMethodFilter');
+            const outcomeSelect = document.getElementById('vaReplayOutcomeFilter');
             if (search) {
                 search.value = vaReplayFilterText;
                 search.oninput = (event) => {
@@ -1622,20 +1625,30 @@
                     renderReplayPlanList();
                 };
             }
+            if (outcomeSelect) {
+                outcomeSelect.value = vaReplayFilterOutcome;
+                outcomeSelect.onchange = (event) => {
+                    vaReplayFilterOutcome = event.target.value;
+                    renderReplayPlanList();
+                };
+            }
         }
 
         function updateReplayFilterOptions(plan) {
             const classSelect = document.getElementById('vaReplayClassFilter');
             const channelSelect = document.getElementById('vaReplayChannelFilter');
             const methodSelect = document.getElementById('vaReplayMethodFilter');
-            if (!classSelect || !channelSelect || !methodSelect) return;
+            const outcomeSelect = document.getElementById('vaReplayOutcomeFilter');
+            if (!classSelect || !channelSelect || !methodSelect || !outcomeSelect) return;
             const classes = Array.from(new Set(plan.map(item => item.class).filter(Boolean))).sort();
             const channels = Array.from(new Set(plan.map(item => item.channel).filter(Boolean))).sort();
             const methods = Array.from(new Set(plan.map(item => item.method).filter(Boolean))).sort();
+            const outcomes = Array.from(new Set(plan.map(item => item.outcome).filter(Boolean))).sort();
 
             const classOptions = ['all'].concat(classes);
             const channelOptions = ['all'].concat(channels);
             const methodOptions = ['all'].concat(methods);
+            const outcomeOptions = ['all'].concat(outcomes);
 
             classSelect.innerHTML = classOptions
                 .map(value => `<option value="${value}">${value === 'all' ? 'All classes' : escapeHtml(value)}</option>`)
@@ -1646,10 +1659,14 @@
             methodSelect.innerHTML = methodOptions
                 .map(value => `<option value="${value}">${value === 'all' ? 'All methods' : escapeHtml(value)}</option>`)
                 .join('');
+            outcomeSelect.innerHTML = outcomeOptions
+                .map(value => `<option value="${value}">${value === 'all' ? 'All outcomes' : escapeHtml(value)}</option>`)
+                .join('');
 
             if (!classOptions.includes(vaReplayFilterClass)) vaReplayFilterClass = 'all';
             if (!channelOptions.includes(vaReplayFilterChannel)) vaReplayFilterChannel = 'all';
             if (!methodOptions.includes(vaReplayFilterMethod)) vaReplayFilterMethod = 'all';
+            if (!outcomeOptions.includes(vaReplayFilterOutcome)) vaReplayFilterOutcome = 'all';
         }
 
         function renderReplayPlanList() {
@@ -1670,6 +1687,9 @@
                     return false;
                 }
                 if (vaReplayFilterMethod !== 'all' && item.method !== vaReplayFilterMethod) {
+                    return false;
+                }
+                if (vaReplayFilterOutcome !== 'all' && item.outcome !== vaReplayFilterOutcome) {
                     return false;
                 }
                 if (!vaReplayFilterText) return true;
