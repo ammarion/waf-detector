@@ -166,6 +166,13 @@ impl Default for Va2ChallengeProfile {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Va2ThrottleCurve {
+    pub samples: Vec<(u32, u128)>,
+    pub slope_ms_per_step: f64,
+    pub triggered: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Va2RunReport {
     pub target_url: String,
@@ -175,6 +182,7 @@ pub struct Va2RunReport {
     pub normalization: Option<Va2NormalizationVariance>,
     pub statefulness: Option<Va2StateSummary>,
     pub challenge: Option<Va2ChallengeProfile>,
+    pub throttle: Option<Va2ThrottleCurve>,
 }
 
 pub struct Va2Runner {
@@ -205,6 +213,8 @@ impl Va2Runner {
         let mut variance_samples: Vec<(u16, usize)> = Vec::new();
         let mut state_summary = Va2StateSummary::default();
         let mut challenge_profile = Va2ChallengeProfile::default();
+        let mut throttle_samples: Vec<u128> = Vec::new();
+        let mut throttle_step = 0u32;
         for step in &plan.steps {
             if step.delay_ms > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(step.delay_ms));
@@ -226,6 +236,10 @@ impl Va2Runner {
                     }
                     if step.phase == Va2Phase::ChallengeInteraction {
                         update_challenge_profile(&mut challenge_profile, &resp);
+                    }
+                    if step.phase == Va2Phase::BehavioralPressure {
+                        throttle_samples.push(duration);
+                        throttle_step = throttle_step.saturating_add(1);
                     }
                     results.push(Va2RunResult {
                         step_id: step.id,
@@ -256,6 +270,11 @@ impl Va2Runner {
                 &variance_samples,
             ))
         };
+        let throttle = if throttle_samples.is_empty() {
+            None
+        } else {
+            Some(compute_throttle_curve(&throttle_samples))
+        };
 
         Ok(Va2RunReport {
             target_url: plan.target_url.clone(),
@@ -273,6 +292,7 @@ impl Va2Runner {
             } else {
                 Some(challenge_profile)
             },
+            throttle,
         })
     }
 }
@@ -405,6 +425,23 @@ fn update_challenge_profile(profile: &mut Va2ChallengeProfile, response: &Va2Htt
     if matched {
         profile.total += 1;
     }
+}
+
+fn compute_throttle_curve(samples: &[u128]) -> Va2ThrottleCurve {
+    let mut curve = Va2ThrottleCurve::default();
+    let mut total_slope = 0f64;
+    let mut last = None;
+    for (idx, value) in samples.iter().enumerate() {
+        curve.samples.push((idx as u32, *value));
+        if let Some(prev) = last {
+            total_slope += (*value as f64) - (prev as f64);
+        }
+        last = Some(*value);
+    }
+    let steps = samples.len().saturating_sub(1) as f64;
+    curve.slope_ms_per_step = if steps > 0.0 { total_slope / steps } else { 0.0 };
+    curve.triggered = curve.slope_ms_per_step > 50.0;
+    curve
 }
 
 impl Va2CampaignPlan {
@@ -718,6 +755,7 @@ mod tests {
                 Va2Phase::ProtocolVariance,
                 Va2Phase::StateEscalation,
                 Va2Phase::ChallengeInteraction,
+                Va2Phase::BehavioralPressure,
             ];
             let mut plan = build_va2_campaign_plan(
                 "https://example.com",
@@ -733,6 +771,8 @@ mod tests {
                     step.path = "/state".to_string();
                 } else if step.phase == Va2Phase::ChallengeInteraction {
                     step.path = "/challenge".to_string();
+                } else if step.phase == Va2Phase::BehavioralPressure {
+                    step.path = "/pressure".to_string();
                 }
             }
             let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
@@ -743,6 +783,7 @@ mod tests {
             assert!(report.normalization.is_some());
             assert!(report.statefulness.is_some());
             assert!(report.challenge.is_some());
+            assert!(report.throttle.is_some());
         });
     }
 
@@ -779,5 +820,12 @@ mod tests {
         assert!(profile.captcha >= 1);
         assert!(profile.js_challenge >= 1);
         assert!(profile.cookie_gate >= 1);
+    }
+
+    #[test]
+    fn test_va2_throttle_curve_detects_increase() {
+        let curve = compute_throttle_curve(&[10, 80, 140]);
+        assert!(curve.slope_ms_per_step > 0.0);
+        assert!(curve.triggered);
     }
 }
