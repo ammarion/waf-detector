@@ -366,6 +366,15 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,
         </div>
 
         <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id.csv</h3>
+            <p>Download a saved Virtual Adversary report as CSV.</p>
+
+            <h4>Response</h4>
+            <pre><code>report_id,target_url,created_at,index,category,payload,outcome,reason
+va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,SqlInjection,' OR '1'='1,Blocked,status=403</code></pre>
+        </div>
+
+        <div class="endpoint">
             <h3><span class="method get">GET</span> /api/consent-status</h3>
             <p>Return consent status and authorized targets for the local user.</p>
 
@@ -492,5 +501,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("reports.csv"));
         assert!(DASHBOARD_HTML.contains("vaRetentionInput"));
         assert!(DASHBOARD_HTML.contains("vaActivityFilter"));
+        assert!(DASHBOARD_HTML.contains("downloadVaReportCsv"));
     }
 }

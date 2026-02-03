@@ -307,6 +307,10 @@ impl WebServer {
                 get(virtual_adversary_report),
             )
             .route(
+                "/api/virtual-adversary/reports/:id.csv",
+                get(virtual_adversary_report_csv),
+            )
+            .route(
                 "/api/virtual-adversary/reports.csv",
                 get(virtual_adversary_reports_csv),
             )
@@ -502,6 +506,26 @@ fn build_va_reports_csv(reports: &[VaReportSummary]) -> String {
             report.allowed.to_string(),
             report.error.to_string(),
             csv_escape(&report.risk_label),
+        ]
+        .join(",");
+        lines.push(row);
+    }
+    lines.join("\n")
+}
+
+fn build_va_report_csv(stored: &VaStoredReport) -> String {
+    let mut lines = Vec::new();
+    lines.push("report_id,target_url,created_at,index,category,payload,outcome,reason".to_string());
+    for (idx, record) in stored.report.results.iter().enumerate() {
+        let row = vec![
+            csv_escape(&stored.id),
+            csv_escape(&stored.report.target_url),
+            csv_escape(&stored.created_at.to_rfc3339()),
+            (idx + 1).to_string(),
+            csv_escape(&format!("{:?}", record.category)),
+            csv_escape(&record.payload),
+            csv_escape(&format!("{:?}", record.outcome)),
+            csv_escape(&record.reason),
         ]
         .join(",");
         lines.push(row);
@@ -1041,6 +1065,25 @@ async fn virtual_adversary_reports_csv() -> impl IntoResponse {
     }
 }
 
+// Handler to export a single Virtual Adversary report as CSV
+async fn virtual_adversary_report_csv(Path(report_id): Path<String>) -> impl IntoResponse {
+    match load_va_report(&report_id) {
+        Ok(report) => {
+            let body = build_va_report_csv(&report);
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/csv")],
+                body,
+            )
+        }
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("Failed to load report: {e}"),
+        ),
+    }
+}
+
 #[derive(Deserialize)]
 struct VaRetentionRequest {
     max_reports: Option<usize>,
@@ -1080,8 +1123,8 @@ async fn virtual_adversary_reports_cleanup(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_va_reports_csv, csv_escape, report_filename, sanitize_report_component, VaJobState,
-        VaReportSummary, VaRequest, VaStoredReport,
+        build_va_report_csv, build_va_reports_csv, csv_escape, report_filename,
+        sanitize_report_component, VaJobState, VaReportSummary, VaRequest, VaStoredReport,
     };
     use crate::virtual_adversary::{VaRunReport, VirtualAdversaryConfig};
     use std::time::Duration;
@@ -1190,6 +1233,25 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("target_url"));
         assert!(lines[1].contains("https://example.com"));
+    }
+
+    #[test]
+    fn build_va_report_csv_includes_payloads() {
+        let mut report = VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
+        report.results.push(crate::virtual_adversary::VaResultRecord {
+            payload: "' OR '1'='1".to_string(),
+            category: crate::virtual_adversary::VaPayloadCategory::SqlInjection,
+            outcome: crate::virtual_adversary::VaOutcome::Blocked,
+            reason: "status=403".to_string(),
+        });
+        let stored = VaStoredReport {
+            id: "va-1.json".to_string(),
+            created_at: chrono::Utc::now(),
+            report,
+        };
+        let csv = build_va_report_csv(&stored);
+        assert!(csv.contains("payload"));
+        assert!(csv.contains("' OR '1'='1"));
     }
 
     #[test]

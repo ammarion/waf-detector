@@ -415,6 +415,11 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+.va-history-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
 .va-history-meta {
     display: flex;
     flex-direction: column;
@@ -655,6 +660,7 @@ body {
     margin: 0.75rem 0;
     display: flex;
     justify-content: flex-start;
+    gap: 0.5rem;
 }
 
 .payload-table-wrapper {

@@ -513,6 +513,9 @@
 
                     if (status.state === 'completed' && status.result) {
                         status.result.is_virtual_adversary = true;
+                        if (status.report_id) {
+                            status.result.report_id = status.report_id;
+                        }
                         allResults.unshift(status.result);
                         displayResults();
                         loadVaHistory();
@@ -678,8 +681,19 @@
                     btn.textContent = 'Download';
                     btn.onclick = () => downloadVaHistoryReport(report.id);
 
+                    const csvBtn = document.createElement('button');
+                    csvBtn.type = 'button';
+                    csvBtn.className = 'btn btn-secondary va-history-download';
+                    csvBtn.textContent = 'CSV';
+                    csvBtn.onclick = () => downloadVaHistoryReportCsv(report.id);
+
+                    const actionGroup = document.createElement('div');
+                    actionGroup.className = 'va-history-actions';
+                    actionGroup.appendChild(btn);
+                    actionGroup.appendChild(csvBtn);
+
                     li.appendChild(meta);
-                    li.appendChild(btn);
+                    li.appendChild(actionGroup);
                     list.appendChild(li);
                 });
             } catch (error) {
@@ -708,6 +722,25 @@
             }
         }
 
+        async function downloadVaHistoryReportCsv(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}.csv`);
+                if (!response.ok) {
+                    throw new Error('Failed to download VA CSV');
+                }
+                const csvData = await response.text();
+                const blob = new Blob([csvData], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = reportId.replace('.json', '.csv');
+                link.click();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to download VA CSV');
+            }
+        }
+
         async function downloadVaHistoryCsv() {
             try {
                 const response = await fetch('/api/virtual-adversary/reports.csv');
@@ -725,6 +758,48 @@
             } catch (error) {
                 showErrorMessage(error.message || 'Failed to download CSV');
             }
+        }
+
+        function csvEscape(value) {
+            const str = String(value ?? '');
+            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+        }
+
+        function buildVaReportCsv(result) {
+            const header = 'index,category,payload,outcome,reason';
+            const rows = (result.results || []).map((item, index) => {
+                return [
+                    index + 1,
+                    csvEscape(item.category || ''),
+                    csvEscape(item.payload || ''),
+                    csvEscape(item.outcome || ''),
+                    csvEscape(item.reason || '')
+                ].join(',');
+            });
+            return [header].concat(rows).join('\n');
+        }
+
+        async function downloadVaReportCsv(index) {
+            const result = allResults[index];
+            if (!result) {
+                showErrorMessage('No Virtual Adversary report available');
+                return;
+            }
+            if (result.report_id) {
+                return downloadVaHistoryReportCsv(result.report_id);
+            }
+
+            const csvData = buildVaReportCsv(result);
+            const blob = new Blob([csvData], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `va-report-${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+            URL.revokeObjectURL(url);
         }
 
         async function cleanupVaHistory() {
@@ -913,6 +988,9 @@
                             <div class="va-actions">
                                 <button class="btn btn-secondary" onclick="downloadVaReport(${index})">
                                     💾 Download VA Report
+                                </button>
+                                <button class="btn btn-secondary" onclick="downloadVaReportCsv(${index})">
+                                    📄 CSV
                                 </button>
                             </div>
                             <div class="payload-table-wrapper">
