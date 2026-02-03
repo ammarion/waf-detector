@@ -304,6 +304,8 @@
                 <h3 id="vaEvidenceTitle">Probe Evidence</h3>
                 <div class="va-modal-actions">
                     <button class="va-evidence-button" id="vaEvidenceCopy">Copy Evidence</button>
+                    <button class="va-evidence-button" id="vaEvidenceExportJson">Export JSON</button>
+                    <button class="va-evidence-button" id="vaEvidenceExportCsv">Export CSV</button>
                     <button class="modal-close" onclick="closeVaEvidenceModal()">✕</button>
                 </div>
             </div>
@@ -1257,6 +1259,8 @@
             const meta = document.getElementById('vaEvidenceMeta');
             const body = document.getElementById('vaEvidenceBody');
             const copyBtn = document.getElementById('vaEvidenceCopy');
+            const exportJsonBtn = document.getElementById('vaEvidenceExportJson');
+            const exportCsvBtn = document.getElementById('vaEvidenceExportCsv');
             if (!modal || !row) return;
 
             modal.dataset.currentRow = JSON.stringify(row);
@@ -1293,6 +1297,12 @@
             if (copyBtn) {
                 copyBtn.onclick = () => copyCurrentEvidence();
             }
+            if (exportJsonBtn) {
+                exportJsonBtn.onclick = () => exportCurrentEvidenceJson();
+            }
+            if (exportCsvBtn) {
+                exportCsvBtn.onclick = () => exportCurrentEvidenceCsv();
+            }
 
             modal.classList.add('modal-open');
         }
@@ -1324,6 +1334,44 @@
             }).catch(() => {
                 showErrorMessage('Copy failed');
             });
+        }
+
+        function exportCurrentEvidenceJson() {
+            const modal = document.getElementById('vaEvidenceModal');
+            if (!modal || !modal.dataset.currentRow) return;
+            const row = JSON.parse(modal.dataset.currentRow);
+            const blob = new Blob([JSON.stringify(row, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `va-evidence-${Date.now()}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportCurrentEvidenceCsv() {
+            const modal = document.getElementById('vaEvidenceModal');
+            if (!modal || !modal.dataset.currentRow) return;
+            const row = JSON.parse(modal.dataset.currentRow);
+            const rows = Array.isArray(row.evidence) ? row.evidence : [];
+            const header = 'kind,detail';
+            const lines = rows.map(entry => {
+                const kind = csvEscape(entry.kind || '');
+                const detail = csvEscape(entry.detail || '');
+                return `${kind},${detail}`;
+            });
+            const csv = [header].concat(lines).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `va-evidence-${Date.now()}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
 
         function closeVaReportModal() {
