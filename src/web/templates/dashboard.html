@@ -136,6 +136,8 @@
                                 <option value="allowed">Allowed</option>
                                 <option value="error">Error</option>
                             </select>
+                            <input id="vaActivitySearch" class="input-field va-activity-input" type="text"
+                                placeholder="Search payloads">
                             <label class="va-activity-toggle">
                                 <input type="checkbox" id="vaAutoScroll" checked>
                                 Auto-scroll
@@ -423,6 +425,7 @@
         let vaEventCursor = {};
         let vaEventCache = {};
         let vaActivityFilter = 'all';
+        let vaActivitySearchTerm = '';
         let vaAutoScroll = true;
         let currentVaJobId = null;
 
@@ -438,6 +441,12 @@
         }
 
         function shouldShowVaEvent(event) {
+            if (vaActivitySearchTerm) {
+                const haystack = `${event.category || ''} ${event.payload || ''} ${event.reason || ''} ${event.outcome || ''}`.toLowerCase();
+                if (!haystack.includes(vaActivitySearchTerm)) {
+                    return false;
+                }
+            }
             if (vaActivityFilter === 'all') return true;
             if (vaActivityFilter === 'blocked_challenge') {
                 return event.outcome === 'Blocked' || event.outcome === 'Challenge';
@@ -898,6 +907,7 @@
             }
         }
 
+
         async function downloadVaHistoryCsv() {
             try {
                 const response = await fetch('/api/virtual-adversary/reports.csv');
@@ -958,6 +968,7 @@
             link.click();
             URL.revokeObjectURL(url);
         }
+
 
         function openVaReportModalFromResult(index) {
             const result = allResults[index];
@@ -1642,6 +1653,15 @@
             if (autoScrollToggle) {
                 autoScrollToggle.addEventListener('change', (event) => {
                     vaAutoScroll = event.target.checked;
+                    if (currentVaJobId) {
+                        renderVaActivity(currentVaJobId);
+                    }
+                });
+            }
+            const activitySearch = document.getElementById('vaActivitySearch');
+            if (activitySearch) {
+                activitySearch.addEventListener('input', (event) => {
+                    vaActivitySearchTerm = event.target.value.trim().toLowerCase();
                     if (currentVaJobId) {
                         renderVaActivity(currentVaJobId);
                     }

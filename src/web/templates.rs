@@ -374,6 +374,7 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,
 va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,SqlInjection,' OR '1'='1,Blocked,status=403</code></pre>
         </div>
 
+
         <div class="endpoint">
             <h3><span class="method get">GET</span> /api/consent-status</h3>
             <p>Return consent status and authorized targets for the local user.</p>
@@ -507,5 +508,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaHistoryDate"));
         assert!(DASHBOARD_HTML.contains("vaReportModal"));
         assert!(DASHBOARD_HTML.contains("vaHistorySort"));
+        assert!(DASHBOARD_HTML.contains("vaActivitySearch"));
     }
 }

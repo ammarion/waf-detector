@@ -518,6 +518,11 @@ body {
     min-width: 180px;
 }
 
+.va-activity-input {
+    min-width: 180px;
+    padding: 0.45rem 0.75rem;
+}
+
 .va-activity-toggle {
     display: flex;
     align-items: center;
