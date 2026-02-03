@@ -577,5 +577,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaReplaySearch"));
         assert!(DASHBOARD_HTML.contains("vaReplayClassFilter"));
         assert!(DASHBOARD_HTML.contains("vaReplayChannelFilter"));
+        assert!(DASHBOARD_HTML.contains("vaReplayMethodFilter"));
     }
 }

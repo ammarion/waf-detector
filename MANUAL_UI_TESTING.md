@@ -131,6 +131,7 @@ For each positive detection, verify:
 - [ ] Replay plan search filters by class/channel/url text
 - [ ] Class filter reduces visible replay rows
 - [ ] Channel filter reduces visible replay rows
+- [ ] Method filter reduces visible replay rows
 - [ ] "Show all" reflects filtered count
 
 #### 2.7 Virtual Adversary Evidence Modal
