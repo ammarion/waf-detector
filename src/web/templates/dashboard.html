@@ -205,6 +205,13 @@
                             <option value="30">Last 30 days</option>
                             <option value="custom">Custom</option>
                         </select>
+                        <label for="vaHistorySort">Sort</label>
+                        <select id="vaHistorySort" class="input-field va-history-select">
+                            <option value="newest">Newest</option>
+                            <option value="oldest">Oldest</option>
+                            <option value="risk">Risk (High → Low)</option>
+                            <option value="blocked">Blocked Rate</option>
+                        </select>
                         <input id="vaHistoryStart" class="input-field va-history-date" type="date" disabled>
                         <input id="vaHistoryEnd" class="input-field va-history-date" type="date" disabled>
                         <button type="button" class="btn btn-secondary" onclick="applyVaHistoryFilter()">
@@ -759,14 +766,23 @@
             return Number.isNaN(date.getTime()) ? null : date;
         }
 
+        function historyRiskScore(report) {
+            const total = report.plan_size || 0;
+            const effective = (report.blocked || 0) + (report.challenge || 0);
+            if (total === 0) return 0;
+            return effective / total;
+        }
+
         function applyVaHistoryFilter() {
             const input = document.getElementById('vaHistorySearch');
             const term = input ? input.value.trim().toLowerCase() : '';
             const dateSelect = document.getElementById('vaHistoryDate');
+            const sortSelect = document.getElementById('vaHistorySort');
             const startInput = document.getElementById('vaHistoryStart');
             const endInput = document.getElementById('vaHistoryEnd');
 
             const dateFilter = dateSelect ? dateSelect.value : 'all';
+            const sortMode = sortSelect ? sortSelect.value : 'newest';
             let startDate = null;
             let endDate = null;
 
@@ -801,7 +817,17 @@
                 }
                 return true;
             });
-            renderVaHistoryList(filtered);
+            const sorted = filtered.slice();
+            if (sortMode === 'oldest') {
+                sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            } else if (sortMode === 'risk') {
+                sorted.sort((a, b) => historyRiskScore(a) - historyRiskScore(b));
+            } else if (sortMode === 'blocked') {
+                sorted.sort((a, b) => historyRiskScore(b) - historyRiskScore(a));
+            } else {
+                sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            }
+            renderVaHistoryList(sorted);
         }
 
         async function loadVaHistory() {
@@ -1580,6 +1606,7 @@
             const historyDate = document.getElementById('vaHistoryDate');
             const historyStart = document.getElementById('vaHistoryStart');
             const historyEnd = document.getElementById('vaHistoryEnd');
+            const historySort = document.getElementById('vaHistorySort');
             if (historyDate) {
                 historyDate.addEventListener('change', (event) => {
                     const isCustom = event.target.value === 'custom';
@@ -1593,6 +1620,9 @@
             }
             if (historyEnd) {
                 historyEnd.addEventListener('change', () => applyVaHistoryFilter());
+            }
+            if (historySort) {
+                historySort.addEventListener('change', () => applyVaHistoryFilter());
             }
             document.addEventListener('keydown', (event) => {
                 if (event.key === 'Escape') {
