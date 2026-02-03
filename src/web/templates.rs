@@ -332,6 +332,24 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,
         </div>
 
         <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary/reports/delete-range</h3>
+            <p>Delete saved Virtual Adversary reports in a date range (inclusive).</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "start_date": "2026-02-01",
+  "end_date": "2026-02-02"
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "deleted": 8,
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
             <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id</h3>
             <p>Fetch a saved Virtual Adversary report by id.</p>
 
@@ -509,5 +527,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaReportModal"));
         assert!(DASHBOARD_HTML.contains("vaHistorySort"));
         assert!(DASHBOARD_HTML.contains("vaActivitySearch"));
+        assert!(DASHBOARD_HTML.contains("deleteVaHistoryRange"));
     }
 }

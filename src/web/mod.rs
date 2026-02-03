@@ -7,7 +7,7 @@ use crate::virtual_adversary::{
 };
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
@@ -267,6 +267,13 @@ pub struct VaRetentionResponse {
 }
 
 #[derive(Serialize)]
+pub struct VaRangeDeleteResponse {
+    success: bool,
+    deleted: usize,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct ConsentStatusResponse {
     success: bool,
     status: Option<ConsentStatus>,
@@ -317,6 +324,10 @@ impl WebServer {
             .route(
                 "/api/virtual-adversary/reports/cleanup",
                 post(virtual_adversary_reports_cleanup),
+            )
+            .route(
+                "/api/virtual-adversary/reports/delete-range",
+                post(virtual_adversary_reports_delete_range),
             )
             .route("/api/consent-status", get(consent_status))
             .route("/api/consent/add-target", post(consent_add_target))
@@ -379,8 +390,11 @@ async fn scan_url(
 }
 
 fn va_reports_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow!("Unable to resolve HOME directory"))?;
-    let dir = home.join(VA_REPORTS_DIR);
+    let base = match std::env::var("WAF_DETECTOR_HOME") {
+        Ok(custom) => PathBuf::from(custom),
+        Err(_) => dirs::home_dir().ok_or_else(|| anyhow!("Unable to resolve HOME directory"))?,
+    };
+    let dir = base.join(VA_REPORTS_DIR);
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -482,6 +496,42 @@ fn enforce_va_report_retention(max_reports: usize) -> Result<(usize, usize)> {
     }
     let kept = max_reports.min(reports.len());
     Ok((kept, deleted))
+}
+
+fn parse_date_range(start: &str, end: &str) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
+    let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d")
+        .map_err(|_| anyhow!("Invalid start date"))?;
+    let end_date =
+        NaiveDate::parse_from_str(end, "%Y-%m-%d").map_err(|_| anyhow!("Invalid end date"))?;
+
+    let start_dt = start_date.and_hms_opt(0, 0, 0).ok_or_else(|| anyhow!("Invalid start date"))?;
+    let end_dt = end_date
+        .and_hms_opt(23, 59, 59)
+        .ok_or_else(|| anyhow!("Invalid end date"))?;
+
+    let start_utc = DateTime::<Utc>::from_naive_utc_and_offset(start_dt, Utc);
+    let end_utc = DateTime::<Utc>::from_naive_utc_and_offset(end_dt, Utc);
+
+    if start_utc > end_utc {
+        return Err(anyhow!("Start date must be before end date"));
+    }
+
+    Ok((start_utc, end_utc))
+}
+
+fn delete_reports_in_range(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<usize> {
+    let reports = list_va_reports()?;
+    let dir = va_reports_dir()?;
+    let mut deleted = 0;
+    for report in reports {
+        if report.created_at >= start && report.created_at <= end {
+            let path = dir.join(&report.id);
+            if fs::remove_file(path).is_ok() {
+                deleted += 1;
+            }
+        }
+    }
+    Ok(deleted)
 }
 
 fn csv_escape(value: &str) -> String {
@@ -1120,6 +1170,46 @@ async fn virtual_adversary_reports_cleanup(
     }
 }
 
+#[derive(Deserialize)]
+struct VaRangeDeleteRequest {
+    start_date: String,
+    end_date: String,
+}
+
+// Handler to delete reports within a date range
+async fn virtual_adversary_reports_delete_range(
+    Json(payload): Json<VaRangeDeleteRequest>,
+) -> impl IntoResponse {
+    match parse_date_range(&payload.start_date, &payload.end_date) {
+        Ok((start, end)) => match delete_reports_in_range(start, end) {
+            Ok(deleted) => {
+                let response = VaRangeDeleteResponse {
+                    success: true,
+                    deleted,
+                    error: None,
+                };
+                (StatusCode::OK, Json(response))
+            }
+            Err(e) => {
+                let response = VaRangeDeleteResponse {
+                    success: false,
+                    deleted: 0,
+                    error: Some(format!("Failed to delete reports: {e}")),
+                };
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+            }
+        },
+        Err(e) => {
+            let response = VaRangeDeleteResponse {
+                success: false,
+                deleted: 0,
+                error: Some(e.to_string()),
+            };
+            (StatusCode::BAD_REQUEST, Json(response))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1128,6 +1218,7 @@ mod tests {
     };
     use crate::virtual_adversary::{VaRunReport, VirtualAdversaryConfig};
     use std::time::Duration;
+    use chrono::{NaiveDate, TimeZone, Timelike, Utc};
     use serde_json::json;
 
     #[test]
@@ -1256,8 +1347,11 @@ mod tests {
 
     #[test]
     fn enforce_retention_keeps_latest() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         let temp_dir = tempfile::TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
         std::fs::create_dir_all(temp_dir.path().join(".waf-detector/va-reports")).unwrap();
 
         let mut reports = Vec::new();
@@ -1290,6 +1384,68 @@ mod tests {
         let (kept, deleted) = super::enforce_va_report_retention(2).unwrap();
         assert_eq!(kept, 2);
         assert_eq!(deleted, 1);
+        std::env::remove_var("WAF_DETECTOR_HOME");
+    }
+
+    #[test]
+    fn parse_date_range_respects_bounds() {
+        let (start, end) = super::parse_date_range("2026-02-01", "2026-02-02").unwrap();
+        assert_eq!(start.date_naive(), NaiveDate::from_ymd_opt(2026, 2, 1).unwrap());
+        assert_eq!(end.date_naive(), NaiveDate::from_ymd_opt(2026, 2, 2).unwrap());
+        assert_eq!(start.time().hour(), 0);
+        assert_eq!(end.time().hour(), 23);
+    }
+
+    #[test]
+    fn parse_date_range_rejects_inverted_dates() {
+        let err = super::parse_date_range("2026-02-05", "2026-02-02").unwrap_err();
+        assert!(err.to_string().contains("Start date"));
+    }
+
+    #[test]
+    fn delete_reports_in_range_removes_matching_days() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+        let reports_dir = temp_dir.path().join(".waf-detector/va-reports");
+        std::fs::create_dir_all(&reports_dir).unwrap();
+
+        let dates = [
+            Utc.with_ymd_and_hms(2026, 2, 1, 12, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 2, 2, 12, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 2, 3, 12, 0, 0).unwrap(),
+        ];
+
+        for (idx, created_at) in dates.iter().enumerate() {
+            let id = format!("va-range-{idx}.json");
+            let report = VaRunReport::new("https://example.com", 0, VirtualAdversaryConfig::default());
+            let stored = VaStoredReport {
+                id: id.clone(),
+                created_at: *created_at,
+                report,
+            };
+            let path = reports_dir.join(&id);
+            std::fs::write(path, serde_json::to_string_pretty(&stored).unwrap()).unwrap();
+        }
+
+        let (start, end) = super::parse_date_range("2026-02-02", "2026-02-02").unwrap();
+        let deleted = super::delete_reports_in_range(start, end).unwrap();
+        assert_eq!(deleted, 1);
+
+        let remaining = std::fs::read_dir(&reports_dir)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .ok()
+                    .and_then(|item| item.path().extension().map(|ext| ext == "json"))
+                    .unwrap_or(false)
+            })
+            .count();
+        assert_eq!(remaining, 2);
+        std::env::remove_var("WAF_DETECTOR_HOME");
     }
 
     #[test]

@@ -219,6 +219,9 @@
                         <button type="button" class="btn btn-secondary" onclick="applyVaHistoryFilter()">
                             Apply
                         </button>
+                        <button type="button" class="btn btn-secondary" onclick="deleteVaHistoryRange()">
+                            🗑️ Delete range
+                        </button>
                     </div>
                     <div class="va-history-search">
                         <label for="vaHistorySearch">Search</label>
@@ -1075,6 +1078,41 @@
                 loadVaHistory();
             } catch (error) {
                 showErrorMessage(error.message || 'Failed to cleanup reports');
+            }
+        }
+
+        async function deleteVaHistoryRange() {
+            const startInput = document.getElementById('vaHistoryStart');
+            const endInput = document.getElementById('vaHistoryEnd');
+            const startDate = startInput ? startInput.value : '';
+            const endDate = endInput ? endInput.value : '';
+
+            if (!startDate || !endDate) {
+                showErrorMessage('Select a start and end date to delete');
+                return;
+            }
+            if (startDate > endDate) {
+                showErrorMessage('Start date must be before end date');
+                return;
+            }
+            if (!confirm(`Delete VA reports from ${startDate} to ${endDate}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/virtual-adversary/reports/delete-range', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ start_date: startDate, end_date: endDate })
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.error || 'Failed to delete reports');
+                }
+                showSuccessMessage(`Deleted ${data.deleted} report${data.deleted === 1 ? '' : 's'}`);
+                loadVaHistory();
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to delete reports');
             }
         }
 

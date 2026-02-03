@@ -654,6 +654,24 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    fn with_temp_home<F>(f: F)
+    where
+        F: FnOnce(&TempDir),
+    {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+        f(&temp_dir);
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
+    }
+
     #[derive(Default)]
     struct StubHttpAdapter;
 
@@ -728,34 +746,33 @@ mod tests {
 
     #[test]
     fn test_consent_required_for_va() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-
-        let consent_manager = ConsentManager::new();
-        let result = ensure_consent_and_target(&consent_manager, "https://example.com");
-        assert!(result.is_err());
+        with_temp_home(|_temp_dir| {
+            let consent_manager = ConsentManager::new();
+            let result = ensure_consent_and_target(&consent_manager, "https://example.com");
+            assert!(result.is_err());
+        });
     }
 
     #[test]
     fn test_target_must_be_authorized() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
 
-        let consent_manager = ConsentManager::new();
-        let result = ensure_consent_and_target(&consent_manager, "https://notallowed.com");
-        assert!(result.is_err());
+            let consent_manager = ConsentManager::new();
+            let result = ensure_consent_and_target(&consent_manager, "https://notallowed.com");
+            assert!(result.is_err());
+        });
     }
 
     #[test]
     fn test_authorized_target_passes() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
 
-        let consent_manager = ConsentManager::new();
-        let result = ensure_consent_and_target(&consent_manager, "https://example.com/path");
-        assert!(result.is_ok());
+            let consent_manager = ConsentManager::new();
+            let result = ensure_consent_and_target(&consent_manager, "https://example.com/path");
+            assert!(result.is_ok());
+        });
     }
 
     #[test]
@@ -778,97 +795,98 @@ mod tests {
 
     #[test]
     fn test_runner_enforces_consent_and_budget() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
 
-        let config = VirtualAdversaryConfig {
-            request_budget: 1,
-            ..Default::default()
-        };
+            let config = VirtualAdversaryConfig {
+                request_budget: 1,
+                ..Default::default()
+            };
 
-        let mut runner = VirtualAdversaryRunner::new(config)
-            .unwrap()
-            .with_http_adapter(Box::new(StubHttpAdapter::default()));
-        let result = runner.run("https://example.com");
-        assert!(result.is_err());
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let result = runner.run("https://example.com");
+            assert!(result.is_err());
+        });
     }
 
     #[test]
     fn test_runner_reports_progress() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
 
-        let config = VirtualAdversaryConfig {
-            request_budget: 6,
-            max_variants_per_payload: 1,
-            ..VirtualAdversaryConfig::default()
-        };
-        let mut runner = VirtualAdversaryRunner::new(config)
-            .unwrap()
-            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let config = VirtualAdversaryConfig {
+                request_budget: 6,
+                max_variants_per_payload: 1,
+                ..VirtualAdversaryConfig::default()
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
 
-        let mut updates = Vec::new();
-        let report = runner
-            .run_with_progress("https://example.com", |done, total| {
-                updates.push((done, total));
-            })
-            .unwrap();
+            let mut updates = Vec::new();
+            let report = runner
+                .run_with_progress("https://example.com", |done, total| {
+                    updates.push((done, total));
+                })
+                .unwrap();
 
-        assert!(!updates.is_empty());
-        let (first_done, first_total) = updates.first().copied().unwrap();
-        let (last_done, last_total) = updates.last().copied().unwrap();
-        assert_eq!(first_done, 0);
-        assert_eq!(first_total, report.plan_size);
-        assert_eq!(last_done, report.plan_size);
-        assert_eq!(last_total, report.plan_size);
+            assert!(!updates.is_empty());
+            let (first_done, first_total) = updates.first().copied().unwrap();
+            let (last_done, last_total) = updates.last().copied().unwrap();
+            assert_eq!(first_done, 0);
+            assert_eq!(first_total, report.plan_size);
+            assert_eq!(last_done, report.plan_size);
+            assert_eq!(last_total, report.plan_size);
+        });
     }
 
     #[test]
     fn test_runner_emits_events() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
 
-        let config = VirtualAdversaryConfig {
-            request_budget: 6,
-            max_variants_per_payload: 1,
-            ..VirtualAdversaryConfig::default()
-        };
-        let mut runner = VirtualAdversaryRunner::new(config)
-            .unwrap()
-            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let config = VirtualAdversaryConfig {
+                request_budget: 6,
+                max_variants_per_payload: 1,
+                ..VirtualAdversaryConfig::default()
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
 
-        let mut events = Vec::new();
-        let report = runner
-            .run_with_events("https://example.com", |_, _| {}, |event| {
-                events.push(event);
-            })
-            .unwrap();
+            let mut events = Vec::new();
+            let report = runner
+                .run_with_events("https://example.com", |_, _| {}, |event| {
+                    events.push(event);
+                })
+                .unwrap();
 
-        assert_eq!(events.len(), report.plan_size);
-        assert_eq!(events.first().unwrap().index, 1);
-        assert_eq!(events.last().unwrap().index, report.plan_size);
+            assert_eq!(events.len(), report.plan_size);
+            assert_eq!(events.first().unwrap().index, 1);
+            assert_eq!(events.last().unwrap().index, report.plan_size);
+        });
     }
 
     #[test]
     fn test_runner_allows_valid_run() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
 
-        let config = VirtualAdversaryConfig {
-            request_budget: 2,
-            ..Default::default()
-        };
+            let config = VirtualAdversaryConfig {
+                request_budget: 2,
+                ..Default::default()
+            };
 
-        let mut runner = VirtualAdversaryRunner::new(config)
-            .unwrap()
-            .with_http_adapter(Box::new(StubHttpAdapter::default()));
-        let result = runner.run("https://example.com").unwrap();
-        assert!(result.summary.total >= 1);
-        assert_eq!(result.summary.allowed, result.summary.total);
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let result = runner.run("https://example.com").unwrap();
+            assert!(result.summary.total >= 1);
+            assert_eq!(result.summary.blocked, result.summary.total);
+            assert_eq!(result.summary.allowed, 0);
+        });
     }
 
     #[test]
@@ -1092,20 +1110,20 @@ mod tests {
 
     #[test]
     fn test_runner_uses_http_adapter() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
 
-        let config = VirtualAdversaryConfig {
-            request_budget: 2,
-            ..Default::default()
-        };
-        let mut runner = VirtualAdversaryRunner::new(config)
-            .unwrap()
-            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let config = VirtualAdversaryConfig {
+                request_budget: 2,
+                ..Default::default()
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
 
-        let result = runner.run("https://example.com").unwrap();
-        assert_eq!(result.target_url, "https://example.com");
+            let result = runner.run("https://example.com").unwrap();
+            assert_eq!(result.target_url, "https://example.com");
+        });
     }
 
     #[test]
@@ -1148,25 +1166,25 @@ mod tests {
 
     #[test]
     fn test_runner_reports_plan_summary() {
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("HOME", temp_dir.path());
-        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
 
-        let config = VirtualAdversaryConfig {
-            tier: 1,
-            request_budget: 5,
-            max_variants_per_payload: 1,
-            ..Default::default()
-        };
+            let config = VirtualAdversaryConfig {
+                tier: 1,
+                request_budget: 5,
+                max_variants_per_payload: 1,
+                ..Default::default()
+            };
 
-        let mut runner = VirtualAdversaryRunner::new(config)
-            .unwrap()
-            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
 
-        let report = runner.run("https://example.com").unwrap();
-        assert_eq!(report.summary.total, report.plan_size);
-        assert_eq!(report.summary.blocked, report.plan_size);
-        assert_eq!(report.results.len(), report.plan_size);
+            let report = runner.run("https://example.com").unwrap();
+            assert_eq!(report.summary.total, report.plan_size);
+            assert_eq!(report.summary.blocked, report.plan_size);
+            assert_eq!(report.results.len(), report.plan_size);
+        });
     }
 
     #[test]

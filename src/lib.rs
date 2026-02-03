@@ -12,6 +12,9 @@ pub mod script_executor;
 pub mod utils;
 pub mod web;
 
+#[cfg(test)]
+mod test_utils;
+
 // NEW: Advanced confidence and validation modules
 pub mod dns;
 pub mod payload;

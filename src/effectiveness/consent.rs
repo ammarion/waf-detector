@@ -45,7 +45,10 @@ struct ConsentRecord {
 impl ConsentManager {
     /// Create a new consent manager
     pub fn new() -> Self {
-        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home_dir = match std::env::var("WAF_DETECTOR_HOME") {
+            Ok(path) => PathBuf::from(path),
+            Err(_) => dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+        };
         let consent_file_path = home_dir.join(CONSENT_FILE);
 
         Self { consent_file_path }
