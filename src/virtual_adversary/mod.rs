@@ -212,6 +212,39 @@ impl ResponseDiff {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaOutcome {
+    Blocked,
+    Challenge,
+    Allowed,
+    Error,
+}
+
+pub fn classify_outcome(status_code: u16, diff: &ResponseDiff) -> VaOutcome {
+    if status_code == 0 {
+        return VaOutcome::Error;
+    }
+
+    if status_code == 429 || status_code == 403 || status_code == 406 {
+        return VaOutcome::Blocked;
+    }
+
+    let challenge_headers = ["cf-ray", "cf-chl-bypass", "x-akamai-transformed"];
+    if diff
+        .header_differences
+        .iter()
+        .any(|h| challenge_headers.contains(&h.as_str()))
+    {
+        return VaOutcome::Challenge;
+    }
+
+    if diff.significant_length_change || diff.status_changed {
+        return VaOutcome::Challenge;
+    }
+
+    VaOutcome::Allowed
+}
+
 impl VirtualAdversaryRunner {
     pub fn new(config: VirtualAdversaryConfig) -> Result<Self> {
         config
@@ -430,5 +463,28 @@ mod tests {
         let diff = ResponseDiff::compare(&baseline, 200, &headers, "ok");
         assert!(diff.header_differences.contains(&"server".to_string()));
         assert!(diff.header_differences.contains(&"cf-ray".to_string()));
+    }
+
+    #[test]
+    fn test_classify_outcome_blocked_by_status() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
+        let diff = ResponseDiff::compare(&baseline, 403, &HashMap::new(), "blocked");
+        assert_eq!(classify_outcome(403, &diff), VaOutcome::Blocked);
+    }
+
+    #[test]
+    fn test_classify_outcome_challenge_by_header() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
+        let mut headers = HashMap::new();
+        headers.insert("cf-ray".to_string(), "123".to_string());
+        let diff = ResponseDiff::compare(&baseline, 200, &headers, "ok");
+        assert_eq!(classify_outcome(200, &diff), VaOutcome::Challenge);
+    }
+
+    #[test]
+    fn test_classify_outcome_allowed() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
+        let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
+        assert_eq!(classify_outcome(200, &diff), VaOutcome::Allowed);
     }
 }
