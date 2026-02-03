@@ -245,6 +245,37 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff) -> VaOutcome {
     VaOutcome::Allowed
 }
 
+#[derive(Debug, Clone)]
+pub struct VaResultSummary {
+    pub total: usize,
+    pub blocked: usize,
+    pub challenge: usize,
+    pub allowed: usize,
+    pub error: usize,
+}
+
+impl VaResultSummary {
+    pub fn new() -> Self {
+        Self {
+            total: 0,
+            blocked: 0,
+            challenge: 0,
+            allowed: 0,
+            error: 0,
+        }
+    }
+
+    pub fn record(&mut self, outcome: VaOutcome) {
+        self.total += 1;
+        match outcome {
+            VaOutcome::Blocked => self.blocked += 1,
+            VaOutcome::Challenge => self.challenge += 1,
+            VaOutcome::Allowed => self.allowed += 1,
+            VaOutcome::Error => self.error += 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaPayloadCategory {
     SqlInjection,
@@ -590,6 +621,22 @@ mod tests {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
         assert_eq!(classify_outcome(200, &diff), VaOutcome::Allowed);
+    }
+
+    #[test]
+    fn test_result_summary_counts() {
+        let mut summary = VaResultSummary::new();
+        summary.record(VaOutcome::Blocked);
+        summary.record(VaOutcome::Challenge);
+        summary.record(VaOutcome::Allowed);
+        summary.record(VaOutcome::Error);
+        summary.record(VaOutcome::Allowed);
+
+        assert_eq!(summary.total, 5);
+        assert_eq!(summary.blocked, 1);
+        assert_eq!(summary.challenge, 1);
+        assert_eq!(summary.allowed, 2);
+        assert_eq!(summary.error, 1);
     }
 
     #[test]
