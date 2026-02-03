@@ -577,9 +577,10 @@ fn format_va_evidence(evidence: &[crate::virtual_adversary::VaEvidence]) -> Stri
 fn build_va_report_csv(stored: &VaStoredReport) -> String {
     let mut lines = Vec::new();
     lines.push(
-        "report_id,target_url,created_at,index,category,payload,outcome,reason,evidence".to_string(),
+        "report_id,target_url,created_at,index,category,payload,outcome,reason,evidence,probe_class,probe_channel,probe_description,method,url".to_string(),
     );
     for (idx, record) in stored.report.results.iter().enumerate() {
+        let replay = stored.report.replay_plan.get(idx);
         let row = vec![
             csv_escape(&stored.id),
             csv_escape(&stored.report.target_url),
@@ -590,6 +591,11 @@ fn build_va_report_csv(stored: &VaStoredReport) -> String {
             csv_escape(&format!("{:?}", record.outcome)),
             csv_escape(&record.reason),
             csv_escape(&format_va_evidence(&record.evidence)),
+            csv_escape(&replay.map(|item| item.class.as_str()).unwrap_or("")),
+            csv_escape(&replay.map(|item| item.channel.as_str()).unwrap_or("")),
+            csv_escape(&replay.map(|item| item.description.as_str()).unwrap_or("")),
+            csv_escape(&replay.map(|item| item.method.as_str()).unwrap_or("")),
+            csv_escape(&replay.map(|item| item.url.as_str()).unwrap_or("")),
         ]
         .join(",");
         lines.push(row);
@@ -1343,6 +1349,16 @@ mod tests {
     #[test]
     fn build_va_report_csv_includes_payloads() {
         let mut report = VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
+        report.replay_plan.push(crate::virtual_adversary::VaReplayPlanItem {
+            index: 1,
+            class: "SemanticDrift".to_string(),
+            channel: "Query".to_string(),
+            description: "Duplicate key ordering drift".to_string(),
+            method: "GET".to_string(),
+            url: "https://example.com/?a=1&a=2".to_string(),
+            headers: Vec::new(),
+            body: None,
+        });
         report.results.push(crate::virtual_adversary::VaResultRecord {
             payload: "' OR '1'='1".to_string(),
             category: crate::virtual_adversary::VaPayloadCategory::SqlInjection,
@@ -1358,6 +1374,9 @@ mod tests {
         let csv = build_va_report_csv(&stored);
         assert!(csv.contains("payload"));
         assert!(csv.contains("' OR '1'='1"));
+        assert!(csv.contains("probe_class"));
+        assert!(csv.contains("SemanticDrift"));
+        assert!(csv.contains("https://example.com/?a=1&a=2"));
     }
 
     #[test]
