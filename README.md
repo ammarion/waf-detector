@@ -169,6 +169,28 @@ The effectiveness testing module includes a robust consent management system:
 
 ⚠️ **Ethical Use Required**: Effectiveness testing includes advanced techniques that could bypass security controls. Only use on systems you own or have explicit permission to test. Unauthorized testing may violate laws and terms of service.
 
+## 🧠 Virtual Adversary (Beta)
+
+Virtual Adversary adds adaptive, consent-gated effectiveness testing with baseline-aware response analysis and strict request budgets.
+
+```bash
+# First-time setup: provide consent and authorized targets
+./target/release/waf-detect --consent request
+
+# Run Virtual Adversary testing
+./target/release/waf-detect --va https://example.com
+```
+
+**Common options:**
+- `--va-tier 1|2|3`: Safety tier for payload sophistication.
+- `--va-budget N`: Max requests allowed per run.
+- `--va-timeout MS`: Per-request timeout in milliseconds.
+- `--va-delay MS`: Delay between requests in milliseconds.
+- `--va-variants N`: Variants per payload template.
+- `--va-output report.json`: Save JSON report (also writes a `.summary.txt`).
+
+> ⚠️ **Ethical Use Required:** Virtual Adversary simulates evasive attackers. Only use on systems you own or have explicit permission to test.
+
 ## 📊 Output Options
 
 ```bash
