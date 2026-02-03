@@ -886,6 +886,11 @@ body {
     border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
+.va-row-pinned {
+    background: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
 .va-pinned-index {
     font-family: var(--font-mono);
     color: #94a3b8;

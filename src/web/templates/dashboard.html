@@ -427,6 +427,10 @@
                             <option value="full">Full</option>
                         </select>
                     </div>
+                    <div class="va-explainability-toggle">
+                        <label for="vaPinnedSort">Pinned first</label>
+                        <input type="checkbox" id="vaPinnedSort">
+                    </div>
                     <div class="va-explainability-text">Controls evidence depth in the report table.</div>
                 </div>
                 <div class="va-explainability-card">
@@ -466,6 +470,17 @@
             const pinClearBtn = document.getElementById('vaPinClear');
             if (pinClearBtn) {
                 pinClearBtn.onclick = () => clearPins();
+            }
+            const pinnedSortToggle = document.getElementById('vaPinnedSort');
+            if (pinnedSortToggle) {
+                pinnedSortToggle.checked = vaPinnedSort;
+                pinnedSortToggle.onchange = () => {
+                    vaPinnedSort = pinnedSortToggle.checked;
+                    const tableBody = document.getElementById('vaReportTableBody');
+                    if (tableBody) {
+                        renderVaReportTable(tableBody, vaCurrentReportRows);
+                    }
+                };
             }
         }
 
@@ -602,6 +617,7 @@
         let vaActivitySearchTerm = '';
         let vaReasonLevel = 'compact';
         let vaReportEvidenceDepth = 'compact';
+        let vaPinnedSort = false;
         let vaAutoScroll = true;
         let currentVaJobId = null;
         let vaPinnedRows = [];
@@ -1278,8 +1294,17 @@
 
         function renderVaReportTable(tableBody, rows) {
             if (!tableBody) return;
-            tableBody.innerHTML = rows.map((row, idx) => `
-                <tr>
+            const decorated = rows.map((row, idx) => ({ row, idx }));
+            const sorted = vaPinnedSort
+                ? decorated.sort((a, b) => {
+                    const aPinned = vaPinnedIndexSet.has(a.idx) ? 1 : 0;
+                    const bPinned = vaPinnedIndexSet.has(b.idx) ? 1 : 0;
+                    if (aPinned !== bPinned) return bPinned - aPinned;
+                    return a.idx - b.idx;
+                })
+                : decorated;
+            tableBody.innerHTML = sorted.map(({ row, idx }) => `
+                <tr class="${vaPinnedIndexSet.has(idx) ? 'va-row-pinned' : ''}">
                     <td>${idx + 1}</td>
                     <td>${escapeHtml(row.category || '')}</td>
                     <td>${escapeHtml(row.payload || '')}</td>
@@ -1356,22 +1381,18 @@
         function pinByOutcome(outcome) {
             const modal = document.getElementById('vaReportModal');
             if (!modal || !modal.classList.contains('modal-open')) return;
-            const tableBody = document.getElementById('vaReportTableBody');
-            if (!tableBody) return;
-            const rows = Array.from(tableBody.querySelectorAll('tr'));
+            const rows = Array.isArray(vaCurrentReportRows) ? vaCurrentReportRows : [];
             rows.forEach((row, idx) => {
-                const outcomeCell = row.querySelector('td:nth-child(4)');
-                if (outcomeCell && outcomeCell.textContent.trim() === outcome) {
+                if ((row.outcome || '').trim() === outcome) {
                     if (!vaPinnedIndexSet.has(idx)) {
-                        const rowData = {
-                            category: row.querySelector('td:nth-child(2)')?.textContent || 'Unknown',
-                            outcome,
-                            reason: row.querySelector('td:nth-child(5)')?.textContent || '',
-                        };
-                        toggleVaPin(rowData, idx);
+                        toggleVaPin(row, idx);
                     }
                 }
             });
+            const tableBody = document.getElementById('vaReportTableBody');
+            if (tableBody) {
+                renderVaReportTable(tableBody, rows);
+            }
         }
 
         function scoreEvidenceFromRow(row) {
