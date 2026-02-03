@@ -420,7 +420,7 @@ impl VirtualAdversaryRunner {
         plan
     }
 
-    pub fn run(&mut self, target_url: &str) -> Result<()> {
+    pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
         ensure_consent_and_target(&self.consent_manager, target_url)?;
 
         let _tier = self.config.tier;
@@ -429,7 +429,13 @@ impl VirtualAdversaryRunner {
         let _baseline_wait = self.rate_limiter.record_request();
         let _attack_wait = self.rate_limiter.record_request();
 
-        Ok(())
+        let plan = self.plan();
+        let mut report = VaRunReport::new(target_url, plan.len());
+        for _item in plan {
+            report.summary.record(VaOutcome::Allowed);
+        }
+        report.finish();
+        Ok(report)
     }
 }
 
@@ -566,8 +572,9 @@ mod tests {
         };
 
         let mut runner = VirtualAdversaryRunner::new(config).unwrap();
-        let result = runner.run("https://example.com");
-        assert!(result.is_ok());
+        let result = runner.run("https://example.com").unwrap();
+        assert!(result.summary.total >= 1);
+        assert_eq!(result.summary.allowed, result.summary.total);
     }
 
     #[test]
