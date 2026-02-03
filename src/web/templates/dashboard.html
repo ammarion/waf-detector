@@ -642,6 +642,7 @@
         let vaCurrentReportRows = [];
         let vaCurrentReportId = null;
         let vaCurrentReportTarget = null;
+        let vaCurrentReplayPlan = [];
 
         function formatReason(reason) {
             if (!reason) return '';
@@ -1284,6 +1285,11 @@
                         <strong>Evidence Summary:</strong>
                         <div class="va-evidence-chips">${renderEvidenceSummary(evidenceSummary)}</div>
                     </div>
+                    <div class="va-replay-actions">
+                        <strong>Replay Plan:</strong>
+                        <button class="va-evidence-button" id="vaReplayExportJson">Export JSON</button>
+                        <button class="va-evidence-button" id="vaReplayExportCsv">Export CSV</button>
+                    </div>
                     <div><strong>Blocked:</strong> ${blocked}</div>
                     <div><strong>Challenge:</strong> ${challenge}</div>
                     <div><strong>Allowed:</strong> ${allowed}</div>
@@ -1293,6 +1299,8 @@
 
             renderExplainabilityPanel(report, total, blocked, challenge, allowed, errorCount);
             renderVaPinnedList();
+            vaCurrentReplayPlan = Array.isArray(report.replay_plan) ? report.replay_plan : [];
+            bindReplayExportActions();
 
             const evidenceDepthSelect = document.getElementById('vaReportEvidenceDepth');
             if (evidenceDepthSelect) {
@@ -1485,6 +1493,61 @@
             vaPinnedIndexSet = new Set();
             vaPinnedRows = [];
             renderVaPinnedList();
+        }
+
+        function bindReplayExportActions() {
+            const jsonBtn = document.getElementById('vaReplayExportJson');
+            const csvBtn = document.getElementById('vaReplayExportCsv');
+            const disabled = !vaCurrentReplayPlan.length;
+            if (jsonBtn) {
+                jsonBtn.disabled = disabled;
+                jsonBtn.onclick = () => exportReplayPlanJson();
+            }
+            if (csvBtn) {
+                csvBtn.disabled = disabled;
+                csvBtn.onclick = () => exportReplayPlanCsv();
+            }
+        }
+
+        function exportReplayPlanJson() {
+            const payload = vaCurrentReplayPlan || [];
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `va-replay-plan-${Date.now()}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportReplayPlanCsv() {
+            const header = 'index,class,channel,description,method,url,headers,body';
+            const lines = (vaCurrentReplayPlan || []).map(item => {
+                const headers = csvEscape(JSON.stringify(item.headers || []));
+                const body = csvEscape(item.body || '');
+                return [
+                    item.index ?? '',
+                    csvEscape(item.class || ''),
+                    csvEscape(item.channel || ''),
+                    csvEscape(item.description || ''),
+                    csvEscape(item.method || ''),
+                    csvEscape(item.url || ''),
+                    headers,
+                    body,
+                ].join(',');
+            });
+            const csv = [header].concat(lines).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `va-replay-plan-${Date.now()}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
 
         function exportPinnedJson() {

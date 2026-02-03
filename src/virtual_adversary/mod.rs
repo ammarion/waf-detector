@@ -493,6 +493,7 @@ impl VaResultSummary {
 pub struct VaRunReport {
     pub target_url: String,
     pub plan_size: usize,
+    pub replay_plan: Vec<VaReplayPlanItem>,
     pub summary: VaResultSummary,
     pub enforcement: VaEnforcement,
     pub evidence_score: f64,
@@ -514,6 +515,7 @@ impl VaRunReport {
         Self {
             target_url: target_url.to_string(),
             plan_size,
+            replay_plan: Vec::new(),
             summary: VaResultSummary::new(),
             enforcement: VaEnforcement::Inconclusive,
             evidence_score: 0.0,
@@ -556,6 +558,18 @@ pub struct VaResultRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaReplayPlanItem {
+    pub index: usize,
+    pub class: String,
+    pub channel: String,
+    pub description: String,
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaPayloadEvent {
     pub index: usize,
     pub total: usize,
@@ -569,10 +583,11 @@ pub struct VaPayloadEvent {
 pub fn va_report_schema() -> serde_json::Value {
     json!({
         "type": "object",
-        "required": ["target_url", "plan_size", "summary", "enforcement", "evidence_score", "evidence_summary", "config"],
+        "required": ["target_url", "plan_size", "replay_plan", "summary", "enforcement", "evidence_score", "evidence_summary", "config"],
         "properties": {
             "target_url": { "type": "string" },
             "plan_size": { "type": "integer" },
+            "replay_plan": { "type": "array" },
             "enforcement": { "type": "string" },
             "evidence_score": { "type": "number" },
             "evidence_summary": { "type": "array" },
@@ -794,6 +809,22 @@ impl VirtualAdversaryRunner {
         plan
     }
 
+    fn build_replay_plan(plan: &[VaProbePlanItem]) -> Vec<VaReplayPlanItem> {
+        plan.iter()
+            .enumerate()
+            .map(|(index, item)| VaReplayPlanItem {
+                index: index + 1,
+                class: format!("{:?}", item.probe.class),
+                channel: format!("{:?}", item.probe.channel),
+                description: item.probe.description.to_string(),
+                method: item.request.method.to_string(),
+                url: item.request.url.clone(),
+                headers: item.request.headers.clone(),
+                body: item.request.body.clone(),
+            })
+            .collect()
+    }
+
     fn collect_baseline(&self, target_url: &str) -> Result<BaselineRecord> {
         let response = self.http.get(target_url)?;
         Ok(BaselineRecord::from_response(
@@ -847,6 +878,7 @@ impl VirtualAdversaryRunner {
         let total = plan.len();
         on_progress(0, total);
         let mut report = VaRunReport::new(target_url, plan.len(), self.config.clone());
+        report.replay_plan = Self::build_replay_plan(&plan);
         for (idx, item) in plan.into_iter().enumerate() {
             let payload_value = item.display.clone();
             let category = VaPayloadCategory::AdversaryProbe;
@@ -1594,6 +1626,7 @@ mod tests {
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("example.com"));
         assert!(json.contains("plan_size"));
+        assert!(json.contains("replay_plan"));
     }
 
     #[test]
@@ -1606,10 +1639,33 @@ mod tests {
         let required_keys: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
         assert!(required_keys.contains(&"target_url"));
         assert!(required_keys.contains(&"plan_size"));
+        assert!(required_keys.contains(&"replay_plan"));
         assert!(required_keys.contains(&"summary"));
         assert!(required_keys.contains(&"enforcement"));
         assert!(required_keys.contains(&"evidence_score"));
         assert!(required_keys.contains(&"evidence_summary"));
         assert!(required_keys.contains(&"config"));
+    }
+
+    #[test]
+    fn test_va_report_replay_plan_matches_plan_size() {
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+
+            let config = VirtualAdversaryConfig {
+                tier: 1,
+                request_budget: 8,
+                max_variants_per_payload: 1,
+                ..Default::default()
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let report = runner.run("https://example.com").unwrap();
+            assert_eq!(report.replay_plan.len(), report.plan_size);
+            let first = report.replay_plan.first().unwrap();
+            assert!(!first.method.is_empty());
+            assert!(first.url.contains("example.com"));
+        });
     }
 }

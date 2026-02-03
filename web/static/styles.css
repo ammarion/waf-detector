@@ -899,6 +899,23 @@ body {
     cursor: not-allowed;
 }
 
+.va-replay-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin: 0.2rem 0 0.4rem;
+}
+
+.va-replay-actions strong {
+    color: #f8fafc;
+}
+
+.va-replay-actions .va-evidence-button[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .va-pinned-actions {
     display: flex;
     gap: 0.4rem;
