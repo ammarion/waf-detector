@@ -150,6 +150,11 @@
                             </select>
                             <input id="vaActivitySearch" class="input-field va-activity-input" type="text"
                                 placeholder="Search payloads">
+                            <label for="vaReasonLevel">Detail</label>
+                            <select id="vaReasonLevel" class="input-field va-activity-select">
+                                <option value="compact">Compact</option>
+                                <option value="full">Full</option>
+                            </select>
                             <label class="va-activity-toggle">
                                 <input type="checkbox" id="vaAutoScroll" checked>
                                 Auto-scroll
@@ -511,8 +516,15 @@
         let vaActivityFilter = 'all';
         let vaEvidenceFilter = 'all';
         let vaActivitySearchTerm = '';
+        let vaReasonLevel = 'compact';
         let vaAutoScroll = true;
         let currentVaJobId = null;
+
+        function formatReason(reason) {
+            if (!reason) return '';
+            if (vaReasonLevel === 'full') return reason;
+            return reason.split(' status=')[0];
+        }
 
         function resetVaActivity() {
             const log = document.getElementById('vaActivityLog');
@@ -569,7 +581,7 @@
                     <span class="va-activity-index">#${event.index}/${event.total}</span>
                     <span class="va-activity-category">${escapeHtml(event.category)}</span>
                     <span class="va-activity-outcome ${outcomeClass}">${escapeHtml(event.outcome)}</span>
-                    <span class="va-activity-reason">${escapeHtml(event.reason)}</span>
+                    <span class="va-activity-reason">${escapeHtml(formatReason(event.reason))}</span>
                     <span class="va-activity-evidence">${escapeHtml(formatVaEvidence(event.evidence))}</span>
                 `;
                 log.appendChild(li);
@@ -1811,6 +1823,16 @@
             if (evidenceFilter) {
                 evidenceFilter.addEventListener('change', (event) => {
                     vaEvidenceFilter = event.target.value;
+                    if (currentVaJobId) {
+                        renderVaActivity(currentVaJobId);
+                    }
+                });
+            }
+
+            const reasonLevel = document.getElementById('vaReasonLevel');
+            if (reasonLevel) {
+                reasonLevel.addEventListener('change', (event) => {
+                    vaReasonLevel = event.target.value;
                     if (currentVaJobId) {
                         renderVaActivity(currentVaJobId);
                     }
