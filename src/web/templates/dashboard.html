@@ -429,6 +429,10 @@
                     </div>
                     <div class="va-explainability-text">Controls evidence depth in the report table.</div>
                 </div>
+                <div class="va-explainability-card">
+                    <div class="va-explainability-title">Pinned Probes</div>
+                    <div id="vaPinnedList" class="va-pinned-list">No pins yet.</div>
+                </div>
             `;
         }
 
@@ -567,6 +571,8 @@
         let vaReportEvidenceDepth = 'compact';
         let vaAutoScroll = true;
         let currentVaJobId = null;
+        let vaPinnedRows = [];
+        let vaPinnedIndexSet = new Set();
 
         function formatReason(reason) {
             if (!reason) return '';
@@ -1170,6 +1176,8 @@
             const evidenceSummary = report.evidence_summary || [];
             const risk = computeVaRisk(summary, total);
             const effectiveness = total > 0 ? ((blocked + challenge) / total) * 100 : 0;
+            vaPinnedRows = [];
+            vaPinnedIndexSet = new Set();
 
             if (title) {
                 title.textContent = `VA Report • ${report.target_url || 'Unknown'}`;
@@ -1212,6 +1220,7 @@
             }
 
             renderExplainabilityPanel(report, total, blocked, challenge, allowed, errorCount);
+            renderVaPinnedList();
 
             const evidenceDepthSelect = document.getElementById('vaReportEvidenceDepth');
             if (evidenceDepthSelect) {
@@ -1244,6 +1253,9 @@
                     <td class="va-evidence-cell">
                         ${renderEvidenceChipsInline(row.evidence, vaReportEvidenceDepth === 'full' ? 10 : 3)}
                         <button class="va-evidence-button" data-va-index="${idx}">Details</button>
+                        <button class="va-pin-button" data-va-pin="${idx}">
+                            ${vaPinnedIndexSet.has(idx) ? 'Unpin' : 'Pin'}
+                        </button>
                     </td>
                 </tr>
             `).join('');
@@ -1253,6 +1265,55 @@
                     const index = Number(event.currentTarget.getAttribute('data-va-index'));
                     if (!Number.isFinite(index)) return;
                     openVaEvidenceModal(rows[index]);
+                });
+            });
+            tableBody.querySelectorAll('.va-pin-button').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const index = Number(event.currentTarget.getAttribute('data-va-pin'));
+                    if (!Number.isFinite(index)) return;
+                    toggleVaPin(rows[index], index);
+                    renderVaReportTable(tableBody, rows);
+                });
+            });
+        }
+
+        function toggleVaPin(row, index) {
+            if (vaPinnedIndexSet.has(index)) {
+                vaPinnedIndexSet.delete(index);
+                vaPinnedRows = vaPinnedRows.filter((item) => item.index !== index);
+            } else {
+                vaPinnedIndexSet.add(index);
+                vaPinnedRows.push({
+                    index,
+                    category: row.category || 'Unknown',
+                    outcome: row.outcome || 'Unknown',
+                    reason: row.reason || '',
+                });
+            }
+            renderVaPinnedList();
+        }
+
+        function renderVaPinnedList() {
+            const container = document.getElementById('vaPinnedList');
+            if (!container) return;
+            if (!vaPinnedRows.length) {
+                container.textContent = 'No pins yet.';
+                return;
+            }
+            container.innerHTML = vaPinnedRows.map(item => `
+                <div class="va-pinned-item">
+                    <span class="va-pinned-index">#${item.index + 1}</span>
+                    <span class="va-pinned-category">${escapeHtml(item.category)}</span>
+                    <span class="va-pinned-outcome">${escapeHtml(item.outcome)}</span>
+                    <span class="va-pinned-reason">${escapeHtml(item.reason)}</span>
+                    <button class="va-pin-button" data-va-unpin="${item.index}">Remove</button>
+                </div>
+            `).join('');
+            container.querySelectorAll('.va-pin-button').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const index = Number(event.currentTarget.getAttribute('data-va-unpin'));
+                    if (!Number.isFinite(index)) return;
+                    toggleVaPin({ category: '', outcome: '', reason: '' }, index);
                 });
             });
         }

@@ -844,6 +844,62 @@ body {
     background: rgba(148, 163, 184, 0.2);
 }
 
+.va-pin-button {
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    color: #6ee7b7;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    padding: 0.15rem 0.45rem;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.va-pin-button:hover {
+    background: rgba(16, 185, 129, 0.22);
+}
+
+.va-pinned-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: #e2e8f0;
+}
+
+.va-pinned-item {
+    display: grid;
+    grid-template-columns: auto auto auto 1fr auto;
+    gap: 0.4rem;
+    align-items: center;
+    padding: 0.35rem 0.45rem;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.va-pinned-index {
+    font-family: var(--font-mono);
+    color: #94a3b8;
+}
+
+.va-pinned-category {
+    font-weight: 600;
+    color: #e2e8f0;
+}
+
+.va-pinned-outcome {
+    color: #fbbf24;
+    font-weight: 600;
+}
+
+.va-pinned-reason {
+    color: #cbd5f5;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+
 .va-evidence-body {
     display: flex;
     flex-direction: column;
