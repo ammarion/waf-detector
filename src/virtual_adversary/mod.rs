@@ -222,13 +222,13 @@ pub enum VaOutcome {
     Error,
 }
 
-pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> VaOutcome {
+pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> (VaOutcome, String) {
     if status_code == 0 {
-        return VaOutcome::Error;
+        return (VaOutcome::Error, "status=0".to_string());
     }
 
     if status_code == 429 || status_code == 403 || status_code == 406 {
-        return VaOutcome::Blocked;
+        return (VaOutcome::Blocked, format!("status={status_code}"));
     }
 
     let challenge_headers = ["cf-ray", "cf-chl-bypass", "x-akamai-transformed"];
@@ -237,7 +237,7 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> Va
         .iter()
         .any(|h| challenge_headers.contains(&h.as_str()))
     {
-        return VaOutcome::Challenge;
+        return (VaOutcome::Challenge, "challenge-header".to_string());
     }
 
     let body_lc = body.to_lowercase();
@@ -245,18 +245,18 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> Va
         || body_lc.contains("request blocked")
         || body_lc.contains("forbidden")
     {
-        return VaOutcome::Blocked;
+        return (VaOutcome::Blocked, "blocked-keyword".to_string());
     }
 
     if body_lc.contains("captcha") || body_lc.contains("challenge") || body_lc.contains("verify") {
-        return VaOutcome::Challenge;
+        return (VaOutcome::Challenge, "challenge-keyword".to_string());
     }
 
     if diff.significant_length_change || (diff.status_changed && diff.length_delta > 200) {
-        return VaOutcome::Challenge;
+        return (VaOutcome::Challenge, "baseline-deviation".to_string());
     }
 
-    VaOutcome::Allowed
+    (VaOutcome::Allowed, "no-anomaly".to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -562,13 +562,13 @@ impl VirtualAdversaryRunner {
             &response.headers,
             &response.body,
         );
-        let outcome = classify_outcome(response.status, &diff, &response.body);
-        let reason = format!(
-            "status={} len_delta={} header_diff={}",
+        let (outcome, mut reason) = classify_outcome(response.status, &diff, &response.body);
+        reason.push_str(&format!(
+            " status={} len_delta={} header_diff={}",
             response.status,
             diff.length_delta,
             diff.header_differences.len()
-        );
+        ));
         Ok((outcome, reason))
     }
 
@@ -825,7 +825,10 @@ mod tests {
     fn test_classify_outcome_blocked_by_status() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 403, &HashMap::new(), "blocked");
-        assert_eq!(classify_outcome(403, &diff, "blocked"), VaOutcome::Blocked);
+        assert_eq!(
+            classify_outcome(403, &diff, "blocked").0,
+            VaOutcome::Blocked
+        );
     }
 
     #[test]
@@ -834,14 +837,20 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("cf-ray".to_string(), "123".to_string());
         let diff = ResponseDiff::compare(&baseline, 200, &headers, "ok");
-        assert_eq!(classify_outcome(200, &diff, "ok"), VaOutcome::Challenge);
+        assert_eq!(
+            classify_outcome(200, &diff, "ok").0,
+            VaOutcome::Challenge
+        );
     }
 
     #[test]
     fn test_classify_outcome_allowed() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
-        assert_eq!(classify_outcome(200, &diff, "ok"), VaOutcome::Allowed);
+        assert_eq!(
+            classify_outcome(200, &diff, "ok").0,
+            VaOutcome::Allowed
+        );
     }
 
     #[test]
@@ -849,7 +858,7 @@ mod tests {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "captcha required");
         assert_eq!(
-            classify_outcome(200, &diff, "captcha required"),
+            classify_outcome(200, &diff, "captcha required").0,
             VaOutcome::Challenge
         );
     }
@@ -859,7 +868,7 @@ mod tests {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), &"a".repeat(1000));
         let diff = ResponseDiff::compare(&baseline, 500, &HashMap::new(), &"b".repeat(10));
         assert_eq!(
-            classify_outcome(500, &diff, "error"),
+            classify_outcome(500, &diff, "error").0,
             VaOutcome::Challenge
         );
     }
@@ -869,7 +878,7 @@ mod tests {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "Access Denied");
         assert_eq!(
-            classify_outcome(200, &diff, "Access Denied"),
+            classify_outcome(200, &diff, "Access Denied").0,
             VaOutcome::Blocked
         );
     }
