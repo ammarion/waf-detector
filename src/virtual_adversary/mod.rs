@@ -15,6 +15,43 @@ use crate::virtual_adversary::dae::{probe_catalog_for_tier, Probe};
 
 pub mod dae;
 
+fn parse_probe_class(value: &str) -> Result<dae::ProbeClass> {
+    match value.to_lowercase().as_str() {
+        "parserambiguity" => Ok(dae::ProbeClass::ParserAmbiguity),
+        "protocolmutation" => Ok(dae::ProbeClass::ProtocolMutation),
+        "encodingboundary" => Ok(dae::ProbeClass::EncodingBoundary),
+        "behavioralthrottle" => Ok(dae::ProbeClass::BehavioralThrottle),
+        "responsefingerprint" => Ok(dae::ProbeClass::ResponseFingerprint),
+        "semanticdrift" => Ok(dae::ProbeClass::SemanticDrift),
+        other => Err(anyhow!("unknown probe class: {other}")),
+    }
+}
+
+fn parse_probe_channel(value: &str) -> Result<dae::ProbeChannel> {
+    match value.to_lowercase().as_str() {
+        "path" => Ok(dae::ProbeChannel::Path),
+        "query" => Ok(dae::ProbeChannel::Query),
+        "header" => Ok(dae::ProbeChannel::Header),
+        "body" => Ok(dae::ProbeChannel::Body),
+        "method" => Ok(dae::ProbeChannel::Method),
+        "cookie" => Ok(dae::ProbeChannel::Cookie),
+        other => Err(anyhow!("unknown probe channel: {other}")),
+    }
+}
+
+fn parse_http_method(value: &str) -> Result<&'static str> {
+    match value.to_uppercase().as_str() {
+        "GET" => Ok("GET"),
+        "POST" => Ok("POST"),
+        "PUT" => Ok("PUT"),
+        "DELETE" => Ok("DELETE"),
+        "PATCH" => Ok("PATCH"),
+        "HEAD" => Ok("HEAD"),
+        "OPTIONS" => Ok("OPTIONS"),
+        other => Err(anyhow!("unsupported http method: {other}")),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VirtualAdversaryConfig {
     /// Safety tier (1-3). Higher tiers enable more advanced mutations.
@@ -825,6 +862,49 @@ impl VirtualAdversaryRunner {
             .collect()
     }
 
+    fn build_replay_item(
+        target_host: &str,
+        item: &VaReplayPlanItem,
+    ) -> Result<VaProbePlanItem> {
+        let parsed = Url::parse(&item.url)
+            .or_else(|_| Url::parse(&format!("https://{}", item.url)))?;
+        let host = parsed.host_str().ok_or_else(|| anyhow!("replay url missing host"))?;
+        if host != target_host {
+            return Err(anyhow!(
+                "replay url host mismatch: expected {target_host}, got {host}"
+            ));
+        }
+
+        let class = parse_probe_class(&item.class)?;
+        let channel = parse_probe_channel(&item.channel)?;
+        let method = parse_http_method(&item.method)?;
+
+        let probe = Probe {
+            class,
+            channel,
+            description: "Replay",
+            payload: item.description.clone(),
+            headers: item.headers.clone(),
+            method,
+            body: item.body.clone(),
+        };
+        let request = VaHttpRequest {
+            method,
+            url: parsed.to_string(),
+            headers: item.headers.clone(),
+            body: item.body.clone(),
+        };
+        let display = format!(
+            "{:?}::{:?} {} {}",
+            class, channel, item.method, item.description
+        );
+        Ok(VaProbePlanItem {
+            probe,
+            request,
+            display,
+        })
+    }
+
     fn collect_baseline(&self, target_url: &str) -> Result<BaselineRecord> {
         let response = self.http.get(target_url)?;
         Ok(BaselineRecord::from_response(
@@ -854,6 +934,42 @@ impl VirtualAdversaryRunner {
             diff.header_differences.len()
         ));
         Ok(evaluation)
+    }
+
+    pub fn run_replay_plan(
+        &mut self,
+        target_url: &str,
+        replay_plan: Vec<VaReplayPlanItem>,
+    ) -> Result<VaRunReport> {
+        ensure_consent_and_target(&self.consent_manager, target_url)?;
+        if replay_plan.is_empty() {
+            return Err(anyhow!("replay plan is empty"));
+        }
+        let base = Url::parse(target_url)
+            .or_else(|_| Url::parse(&format!("https://{target_url}")))?;
+        let target_host = base.host_str().ok_or_else(|| anyhow!("target url missing host"))?;
+
+        let required = 1 + replay_plan.len() as u32;
+        self.budget.consume(required)?;
+
+        let baseline = self.collect_baseline(target_url)?;
+        let total = replay_plan.len();
+        let mut report = VaRunReport::new(target_url, total, self.config.clone());
+        report.replay_plan = replay_plan.clone();
+
+        for item in replay_plan.into_iter() {
+            let plan_item = Self::build_replay_item(target_host, &item)?;
+            let evaluation = self.evaluate_probe(&baseline, &plan_item)?;
+            report.summary.record(evaluation.outcome);
+            report.results.push(VaResultRecord {
+                payload: plan_item.display,
+                category: VaPayloadCategory::AdversaryProbe,
+                outcome: evaluation.outcome,
+                reason: format!("replay {}", evaluation.reason),
+                evidence: evaluation.evidence,
+            });
+        }
+        Ok(report)
     }
     pub fn run_with_events<F, G>(
         &mut self,
@@ -1666,6 +1782,69 @@ mod tests {
             let first = report.replay_plan.first().unwrap();
             assert!(!first.method.is_empty());
             assert!(first.url.contains("example.com"));
+        });
+    }
+
+    #[test]
+    fn test_parse_probe_class_channel() {
+        assert!(parse_probe_class("SemanticDrift").is_ok());
+        assert!(parse_probe_channel("Query").is_ok());
+        assert!(parse_probe_class("Unknown").is_err());
+        assert!(parse_probe_channel("Nope").is_err());
+    }
+
+    #[test]
+    fn test_replay_plan_rejects_host_mismatch() {
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            let config = VirtualAdversaryConfig {
+                request_budget: 3,
+                ..Default::default()
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let plan = vec![VaReplayPlanItem {
+                index: 1,
+                class: "SemanticDrift".to_string(),
+                channel: "Query".to_string(),
+                description: "replay".to_string(),
+                method: "GET".to_string(),
+                url: "https://evil.example.com/test".to_string(),
+                headers: Vec::new(),
+                body: None,
+            }];
+            let result = runner.run_replay_plan("https://example.com", plan);
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_replay_plan_runs() {
+        with_temp_home(|temp_dir| {
+            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            let config = VirtualAdversaryConfig {
+                request_budget: 3,
+                ..Default::default()
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            let plan = vec![VaReplayPlanItem {
+                index: 1,
+                class: "SemanticDrift".to_string(),
+                channel: "Query".to_string(),
+                description: "replay".to_string(),
+                method: "GET".to_string(),
+                url: "https://example.com/test".to_string(),
+                headers: Vec::new(),
+                body: None,
+            }];
+            let report = runner
+                .run_replay_plan("https://example.com", plan)
+                .unwrap();
+            assert_eq!(report.plan_size, 1);
+            assert_eq!(report.results.len(), 1);
         });
     }
 }

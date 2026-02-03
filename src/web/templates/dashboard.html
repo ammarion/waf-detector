@@ -1677,9 +1677,13 @@
                 container.textContent = 'No replay plan loaded.';
                 return;
             }
-            updateReplayFilterOptions(plan);
+            const planWithOutcome = plan.map((item, idx) => ({
+                ...item,
+                outcome: (vaCurrentReportRows[idx] && vaCurrentReportRows[idx].outcome) ? vaCurrentReportRows[idx].outcome : item.outcome,
+            }));
+            updateReplayFilterOptions(planWithOutcome);
             bindReplayFilters();
-            const filtered = plan.filter(item => {
+            const filtered = planWithOutcome.filter(item => {
                 if (vaReplayFilterClass !== 'all' && item.class !== vaReplayFilterClass) {
                     return false;
                 }

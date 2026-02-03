@@ -89,6 +89,113 @@ impl SimpleCliApp {
         }
 
         // Handle virtual adversary (VA) mode
+        if let Some(replay_path) = matches.get_one::<String>("va-replay-run") {
+            let raw = fs::read_to_string(replay_path)?;
+            let report = serde_json::from_str::<crate::virtual_adversary::VaRunReport>(&raw)
+                .or_else(|_| {
+                    serde_json::from_str::<crate::web::VaStoredReport>(&raw)
+                        .map(|stored| stored.report)
+                })
+                .map_err(|err| anyhow!("failed to parse replay report: {err}"))?;
+            let target = matches
+                .get_one::<String>("va-replay-target")
+                .cloned()
+                .unwrap_or_else(|| report.target_url.clone());
+            let mut runner = VirtualAdversaryRunner::new(report.config.clone())?;
+            let report = runner.run_replay_plan(&target, report.replay_plan.clone())?;
+
+            if matches.get_flag("va-json") {
+                let json = serde_json::to_string_pretty(&report)?;
+                println!("{json}");
+                return Ok(());
+            }
+            if matches.get_flag("va-replay") {
+                let json = serde_json::to_string_pretty(&report.replay_plan)?;
+                println!("{json}");
+                return Ok(());
+            }
+            if matches.get_flag("va-replay-csv") {
+                let mut lines = Vec::new();
+                lines.push("index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string());
+                for item in &report.replay_plan {
+                    let row = vec![
+                        item.index.to_string(),
+                        csv_escape(&item.class),
+                        csv_escape(&item.channel),
+                        csv_escape(&item.description),
+                        csv_escape(&item.method),
+                        csv_escape(&item.url),
+                        csv_escape(&serde_json::to_string(&item.headers).unwrap_or_default()),
+                        csv_escape(&item.body.clone().unwrap_or_default()),
+                    ]
+                    .join(",");
+                    lines.push(row);
+                }
+                println!("{}", lines.join("\n"));
+                return Ok(());
+            }
+            if let Some(output) = matches.get_one::<String>("va-output") {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(output, json)?;
+                let summary_path = format!(
+                    "{}.summary.txt",
+                    output.trim_end_matches(".json")
+                );
+                let summary = format!(
+                    "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
+                    report.target_url,
+                    report.summary.confidence_score(),
+                    report.summary.risk_label(),
+                    report.summary.blocked,
+                    report.summary.challenge,
+                    report.summary.allowed,
+                    report.summary.error
+                );
+                std::fs::write(&summary_path, summary)?;
+                println!("📄 VA replay report saved to: {output}");
+                println!("📄 VA replay summary saved to: {summary_path}");
+                return Ok(());
+            }
+            println!(
+                "🧪 Virtual Adversary Replay: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
+                report.target_url,
+                report.summary.total,
+                report.summary.blocked,
+                report.summary.challenge,
+                report.summary.allowed,
+                report.summary.error,
+                report.summary.confidence_score(),
+                report.summary.risk_label(),
+                report.enforcement,
+                report.evidence_score
+            );
+            let max_results = *matches.get_one::<u8>("va-top").unwrap_or(&3) as usize;
+            if !report.results.is_empty() {
+                println!("   Top Results:");
+                let reason_level = *matches.get_one::<u8>("va-reason-level").unwrap_or(&1);
+                let max_len = *matches.get_one::<u16>("va-max-len").unwrap_or(&80) as usize;
+                for result in report.results.iter().take(max_results) {
+                    let payload = if result.payload.len() > max_len {
+                        format!("{}...", &result.payload[..max_len.saturating_sub(3)])
+                    } else {
+                        result.payload.clone()
+                    };
+                    if reason_level == 0 {
+                        println!(
+                            "   - {:?} | {} | {:?}",
+                            result.category, payload, result.outcome
+                        );
+                    } else {
+                        println!(
+                            "   - {:?} | {} | {:?} | {}",
+                            result.category, payload, result.outcome, result.reason
+                        );
+                    }
+                }
+            }
+            return Ok(());
+        }
+
         if let Some(url) = matches.get_one::<String>("va") {
             let config = VirtualAdversaryConfig {
                 tier: *matches.get_one::<u8>("va-tier").unwrap_or(&1),
@@ -891,6 +998,20 @@ The tool automatically adds https:// if needed and supports both domain names an
             Arg::new("va")
                 .long("va")
                 .help("Run Virtual Adversary effectiveness validation (requires consent)")
+                .value_name("URL")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("va-replay-run")
+                .long("va-replay-run")
+                .help("Run a saved VA replay plan from a JSON report")
+                .value_name("FILE")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("va-replay-target")
+                .long("va-replay-target")
+                .help("Override target URL for replay run")
                 .value_name("URL")
                 .num_args(1),
         )
