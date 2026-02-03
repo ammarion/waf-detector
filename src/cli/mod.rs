@@ -136,7 +136,7 @@ impl SimpleCliApp {
                 return Ok(());
             }
             println!(
-                "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {}",
+                "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
                 report.target_url,
                 report.summary.total,
                 report.summary.blocked,
@@ -144,7 +144,9 @@ impl SimpleCliApp {
                 report.summary.allowed,
                 report.summary.error,
                 report.summary.confidence_score(),
-                report.summary.risk_label()
+                report.summary.risk_label(),
+                report.enforcement,
+                report.evidence_score
             );
             println!(
                 "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",

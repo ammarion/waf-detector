@@ -362,6 +362,62 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> Va
     }
 }
 
+fn score_evidence(evidence: &[VaEvidence]) -> f64 {
+    if evidence.is_empty() {
+        return 0.0;
+    }
+    let mut score = 0.0;
+    for entry in evidence {
+        score += match entry.kind {
+            VaEvidenceKind::StatusCode => 1.0,
+            VaEvidenceKind::BlockedKeyword => 0.9,
+            VaEvidenceKind::ChallengeHeader => 0.8,
+            VaEvidenceKind::ChallengeKeyword => 0.7,
+            VaEvidenceKind::BaselineDeviation => 0.6,
+            VaEvidenceKind::StatusChange => 0.5,
+            VaEvidenceKind::HeaderDiff => 0.4,
+            VaEvidenceKind::LengthDelta => 0.2,
+        };
+    }
+    (score / evidence.len() as f64).min(1.0)
+}
+
+fn compute_evidence_score(results: &[VaResultRecord]) -> f64 {
+    if results.is_empty() {
+        return 0.0;
+    }
+    let total: f64 = results
+        .iter()
+        .map(|record| score_evidence(&record.evidence))
+        .sum();
+    (total / results.len() as f64).min(1.0)
+}
+
+fn classify_enforcement(summary: &VaResultSummary, evidence_score: f64) -> VaEnforcement {
+    if summary.total == 0 {
+        return VaEnforcement::Inconclusive;
+    }
+
+    let blocked_rate = summary.blocked as f64 / summary.total as f64;
+    let challenge_rate = summary.challenge as f64 / summary.total as f64;
+    let allowed_rate = summary.allowed as f64 / summary.total as f64;
+
+    if blocked_rate >= 0.55 && evidence_score >= 0.6 {
+        return VaEnforcement::HardBlock;
+    }
+    if challenge_rate >= 0.35 && evidence_score >= 0.5 {
+        return VaEnforcement::ChallengeGate;
+    }
+    if blocked_rate + challenge_rate >= 0.4 && evidence_score >= 0.45 {
+        return VaEnforcement::SilentFilter;
+    }
+    if allowed_rate >= 0.8 && evidence_score < 0.35 {
+        return VaEnforcement::NoEnforcement;
+    }
+
+    VaEnforcement::Inconclusive
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaResultSummary {
     pub total: usize,
@@ -417,6 +473,8 @@ pub struct VaRunReport {
     pub target_url: String,
     pub plan_size: usize,
     pub summary: VaResultSummary,
+    pub enforcement: VaEnforcement,
+    pub evidence_score: f64,
     pub config: VirtualAdversaryConfig,
     pub results: Vec<VaResultRecord>,
     #[serde(skip, default = "default_instant")]
@@ -435,6 +493,8 @@ impl VaRunReport {
             target_url: target_url.to_string(),
             plan_size,
             summary: VaResultSummary::new(),
+            enforcement: VaEnforcement::Inconclusive,
+            evidence_score: 0.0,
             config,
             results: Vec::new(),
             started_at: std::time::Instant::now(),
@@ -445,6 +505,15 @@ impl VaRunReport {
     pub fn finish(&mut self) {
         self.finished_at = Some(std::time::Instant::now());
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VaEnforcement {
+    HardBlock,
+    ChallengeGate,
+    SilentFilter,
+    NoEnforcement,
+    Inconclusive,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -477,10 +546,12 @@ pub struct VaPayloadEvent {
 pub fn va_report_schema() -> serde_json::Value {
     json!({
         "type": "object",
-        "required": ["target_url", "plan_size", "summary", "config"],
+        "required": ["target_url", "plan_size", "summary", "enforcement", "evidence_score", "config"],
         "properties": {
             "target_url": { "type": "string" },
             "plan_size": { "type": "integer" },
+            "enforcement": { "type": "string" },
+            "evidence_score": { "type": "number" },
             "summary": {
                 "type": "object",
                 "required": ["total", "blocked", "challenge", "allowed", "error"]
@@ -775,6 +846,8 @@ impl VirtualAdversaryRunner {
             });
             on_progress(idx + 1, total);
         }
+        report.evidence_score = compute_evidence_score(&report.results);
+        report.enforcement = classify_enforcement(&report.summary, report.evidence_score);
         report.finish();
         Ok(report)
     }
@@ -1243,9 +1316,59 @@ mod tests {
         );
         assert_eq!(report.target_url, "https://example.com");
         assert_eq!(report.plan_size, 5);
+        assert_eq!(report.enforcement, VaEnforcement::Inconclusive);
+        assert_eq!(report.evidence_score, 0.0);
         assert!(report.finished_at.is_none());
         report.finish();
         assert!(report.finished_at.is_some());
+    }
+
+    #[test]
+    fn test_evidence_score_weights() {
+        let records = vec![VaResultRecord {
+            payload: "probe".to_string(),
+            category: VaPayloadCategory::AdversaryProbe,
+            outcome: VaOutcome::Blocked,
+            reason: "status=403".to_string(),
+            evidence: vec![
+                VaEvidence {
+                    kind: VaEvidenceKind::StatusCode,
+                    detail: "status=403".to_string(),
+                },
+                VaEvidence {
+                    kind: VaEvidenceKind::BlockedKeyword,
+                    detail: "blocked-keyword".to_string(),
+                },
+            ],
+        }];
+        let score = compute_evidence_score(&records);
+        assert!(score >= 0.9);
+    }
+
+    #[test]
+    fn test_enforcement_classification_hard_block() {
+        let summary = VaResultSummary {
+            total: 10,
+            blocked: 6,
+            challenge: 1,
+            allowed: 3,
+            error: 0,
+        };
+        let enforcement = classify_enforcement(&summary, 0.7);
+        assert_eq!(enforcement, VaEnforcement::HardBlock);
+    }
+
+    #[test]
+    fn test_enforcement_classification_no_enforcement() {
+        let summary = VaResultSummary {
+            total: 10,
+            blocked: 1,
+            challenge: 1,
+            allowed: 8,
+            error: 0,
+        };
+        let enforcement = classify_enforcement(&summary, 0.2);
+        assert_eq!(enforcement, VaEnforcement::NoEnforcement);
     }
 
     #[test]
@@ -1411,6 +1534,8 @@ mod tests {
         assert!(required_keys.contains(&"target_url"));
         assert!(required_keys.contains(&"plan_size"));
         assert!(required_keys.contains(&"summary"));
+        assert!(required_keys.contains(&"enforcement"));
+        assert!(required_keys.contains(&"evidence_score"));
         assert!(required_keys.contains(&"config"));
     }
 }
