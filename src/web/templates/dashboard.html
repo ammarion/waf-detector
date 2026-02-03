@@ -453,10 +453,10 @@
             section.style.display = 'block';
             count.textContent = `${allResults.length} result${allResults.length !== 1 ? 's' : ''}`;
 
-            container.innerHTML = allResults.map(result => createResultCard(result)).join('');
+            container.innerHTML = allResults.map((result, index) => createResultCard(result, index)).join('');
         }
 
-        function createResultCard(result) {
+        function createResultCard(result, index) {
             // Ensure result is defined
             if (!result) {
                 console.error("Result is undefined");
@@ -581,6 +581,11 @@
                                 <div><strong>Challenge:</strong> ${challenge}</div>
                                 <div><strong>Allowed:</strong> ${allowed}</div>
                                 <div><strong>Errors:</strong> ${errorCount}</div>
+                            </div>
+                            <div class="va-actions">
+                                <button class="btn btn-secondary" onclick="downloadVaReport(${index})">
+                                    💾 Download VA Report
+                                </button>
                             </div>
                             <div class="payload-table-wrapper">
                                 <table class="payload-table">
@@ -820,6 +825,29 @@
             linkElement.click();
 
             showSuccessMessage('Results exported successfully');
+        }
+
+        function downloadVaReport(index) {
+            const result = allResults[index];
+            const isVirtualAdversary = result && (result.is_virtual_adversary === true ||
+                (result.target_url && result.summary && Array.isArray(result.results)));
+            if (!isVirtualAdversary) {
+                showErrorMessage('No Virtual Adversary report available');
+                return;
+            }
+
+            const timestamp = new Date().toISOString().split('T')[0];
+            const jsonData = JSON.stringify(result, null, 2);
+            const jsonBlob = new Blob([jsonData], { type: 'application/json' });
+            const jsonUrl = URL.createObjectURL(jsonBlob);
+
+            const link = document.createElement('a');
+            link.href = jsonUrl;
+            link.download = `va-report-${timestamp}.json`;
+            link.click();
+
+            URL.revokeObjectURL(jsonUrl);
+            showSuccessMessage('VA report downloaded');
         }
 
         // Page load handler

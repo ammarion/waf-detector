@@ -434,6 +434,12 @@ body {
     margin-bottom: 0.5rem;
 }
 
+.va-actions {
+    margin: 0.75rem 0;
+    display: flex;
+    justify-content: flex-start;
+}
+
 .payload-table-wrapper {
     margin-top: 1rem;
     overflow-x: auto;
