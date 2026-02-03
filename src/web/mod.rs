@@ -1,3 +1,4 @@
+use crate::effectiveness::consent::{ConsentManager, ConsentStatus};
 use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, SmokeTestResult, WafSmokeTest};
 use crate::script_executor::{CombinedResult, ScriptExecutor};
@@ -109,6 +110,13 @@ pub struct VaResponse {
     error: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct ConsentStatusResponse {
+    success: bool,
+    status: Option<ConsentStatus>,
+    error: Option<String>,
+}
+
 impl WebServer {
     pub fn new(engine: DetectionEngine) -> Self {
         Self {
@@ -127,6 +135,7 @@ impl WebServer {
             .route("/api/smoke-test", post(smoke_test))
             .route("/api/batch-scan", post(batch_scan))
             .route("/api/virtual-adversary", post(virtual_adversary))
+            .route("/api/consent-status", get(consent_status))
             .route("/api/providers", get(list_providers))
             .route("/api/status", get(server_status))
             // Web pages
@@ -255,6 +264,29 @@ async fn server_status() -> impl IntoResponse {
             "uptime": 0  // You might want to track actual uptime in a real implementation
         }
     }))
+}
+
+// Handler for consent status
+async fn consent_status() -> impl IntoResponse {
+    let consent_manager = ConsentManager::new();
+    match consent_manager.status() {
+        Ok(status) => {
+            let response = ConsentStatusResponse {
+                success: true,
+                status: Some(status),
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Err(e) => {
+            let response = ConsentStatusResponse {
+                success: false,
+                status: None,
+                error: Some(format!("Failed to load consent status: {e}")),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+        }
+    }
 }
 
 // Handler for combined scan (detection + effectiveness testing)

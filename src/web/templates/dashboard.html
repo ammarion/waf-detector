@@ -139,6 +139,23 @@
                     </button>
                 </div>
             </div>
+
+            <div class="card">
+                <h2>🔐 Consent Status</h2>
+                <div class="consent-status">
+                    <div id="consentStatusBadge" class="consent-badge consent-badge-pending">Checking...</div>
+                    <div class="consent-meta">
+                        <div>Terms: <span id="consentTerms">-</span></div>
+                        <div>Expires in: <span id="consentExpires">-</span> days</div>
+                    </div>
+                    <div class="consent-targets">
+                        <div class="consent-targets-title">Authorized Targets</div>
+                        <ul id="consentTargetsList" class="consent-targets-list"></ul>
+                        <div id="consentTargetsEmpty" class="consent-targets-empty">No authorized targets.</div>
+                    </div>
+                    <p class="consent-note">Run <code>./waf-detect --consent</code> to update.</p>
+                </div>
+            </div>
         </div>
 
         <!-- Results Section -->
@@ -341,6 +358,66 @@
                 showErrorMessage(`Error: ${error.message}`);
             } finally {
                 setButtonLoading(btn, icon, text, false, 'Run Virtual Adversary');
+            }
+        }
+
+        async function loadConsentStatus() {
+            const badge = document.getElementById('consentStatusBadge');
+            const terms = document.getElementById('consentTerms');
+            const expires = document.getElementById('consentExpires');
+            const targetsList = document.getElementById('consentTargetsList');
+            const targetsEmpty = document.getElementById('consentTargetsEmpty');
+
+            if (!badge || !terms || !expires || !targetsList || !targetsEmpty) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/consent-status');
+                const data = await response.json();
+
+                if (!data.success || !data.status) {
+                    throw new Error(data.error || 'Consent status unavailable');
+                }
+
+                const status = data.status;
+                const hasConsent = status.has_consent === true;
+
+                badge.textContent = hasConsent ? 'Valid' : 'Not Granted';
+                badge.classList.remove('consent-badge-pending');
+                badge.classList.toggle('consent-badge-valid', hasConsent);
+                badge.classList.toggle('consent-badge-invalid', !hasConsent);
+
+                terms.textContent = status.terms_version || '-';
+                expires.textContent = status.expires_in_days !== null && status.expires_in_days !== undefined
+                    ? status.expires_in_days
+                    : '-';
+
+                const targets = Array.isArray(status.authorized_targets) ? status.authorized_targets : [];
+                targetsList.innerHTML = '';
+                if (targets.length === 0) {
+                    targetsEmpty.style.display = 'block';
+                } else {
+                    targetsEmpty.style.display = 'none';
+                    targets.slice(0, 5).forEach(target => {
+                        const li = document.createElement('li');
+                        li.textContent = target;
+                        targetsList.appendChild(li);
+                    });
+                    if (targets.length > 5) {
+                        const li = document.createElement('li');
+                        li.textContent = `+${targets.length - 5} more...`;
+                        targetsList.appendChild(li);
+                    }
+                }
+            } catch (error) {
+                badge.textContent = 'Unavailable';
+                badge.classList.remove('consent-badge-pending');
+                badge.classList.add('consent-badge-invalid');
+                terms.textContent = '-';
+                expires.textContent = '-';
+                targetsList.innerHTML = '';
+                targetsEmpty.style.display = 'block';
             }
         }
 
@@ -840,6 +917,7 @@
         // Apply the fix when the page loads
         document.addEventListener('DOMContentLoaded', function () {
             fixSmokeTestDisplay();
+            loadConsentStatus();
             console.log("Smoke test display fix applied on page load");
         });
     </script>

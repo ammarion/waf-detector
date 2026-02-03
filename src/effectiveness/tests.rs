@@ -147,6 +147,40 @@ mod effectiveness_tests {
     }
 
     #[test]
+    fn test_consent_status_without_file() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+
+        let consent_manager = consent::ConsentManager::new();
+        let status = consent_manager.status().unwrap();
+        assert!(!status.has_consent);
+        assert!(status.authorized_targets.is_empty());
+        assert!(status.expires_in_days.is_none());
+    }
+
+    #[test]
+    fn test_consent_status_with_file() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+
+        let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+        let record = serde_json::json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "terms_version": "1.0.0",
+            "authorized_targets": ["example.com", "api.example.com"],
+            "acknowledgment": "I AGREE"
+        });
+        std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+
+        let consent_manager = consent::ConsentManager::new();
+        let status = consent_manager.status().unwrap();
+        assert!(status.has_consent);
+        assert_eq!(status.authorized_targets.len(), 2);
+        assert_eq!(status.terms_version, "1.0.0");
+        assert!(status.expires_in_days.unwrap_or(0) > 0);
+    }
+
+    #[test]
     fn test_techniques_by_level() {
         // Level 1 should have basic techniques
         let level1 = techniques::get_techniques_for_level(1);

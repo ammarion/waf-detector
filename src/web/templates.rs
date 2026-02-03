@@ -227,6 +227,24 @@ pub const API_DOCS_HTML: &str = r#"
   "error": null
 }</code></pre>
         </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/consent-status</h3>
+            <p>Return consent status and authorized targets for the local user.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "status": {
+    "has_consent": true,
+    "terms_version": "1.0.0",
+    "expires_in_days": 23,
+    "authorized_targets": ["example.com"],
+    "consent_timestamp": "2026-02-03T10:00:00Z"
+  },
+  "error": null
+}</code></pre>
+        </div>
         
         <div class="endpoint">
             <h3><span class="method get">GET</span> /api/providers</h3>
