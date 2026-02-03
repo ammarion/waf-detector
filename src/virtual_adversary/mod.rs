@@ -900,4 +900,26 @@ mod tests {
             .unwrap();
         assert_eq!(outcome, VaOutcome::Blocked);
     }
+
+    #[test]
+    fn test_runner_reports_plan_summary() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+
+        let config = VirtualAdversaryConfig {
+            tier: 1,
+            request_budget: 5,
+            max_variants_per_payload: 1,
+            ..Default::default()
+        };
+
+        let mut runner = VirtualAdversaryRunner::new(config)
+            .unwrap()
+            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+
+        let report = runner.run("https://example.com").unwrap();
+        assert_eq!(report.summary.total, report.plan_size);
+        assert_eq!(report.summary.blocked, report.plan_size);
+    }
 }
