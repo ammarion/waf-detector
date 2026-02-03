@@ -291,6 +291,14 @@
                             <span>🧭</span>
                             <span>Generate Plan</span>
                         </button>
+                        <button type="button" class="btn btn-secondary" id="va2DownloadJsonBtn">
+                            <span>⬇️</span>
+                            <span>Download JSON</span>
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="va2DownloadCsvBtn">
+                            <span>⬇️</span>
+                            <span>Download CSV</span>
+                        </button>
                         <button type="submit" class="btn" id="va2RunBtn">
                             <span id="va2RunIcon">🧪</span>
                             <span id="va2RunText">Run VA2</span>
@@ -597,8 +605,18 @@
             await runVa2Campaign();
         });
 
+        let va2LastReport = null;
+
         document.getElementById('va2PlanBtn').addEventListener('click', async () => {
             await generateVa2Plan();
+        });
+
+        document.getElementById('va2DownloadJsonBtn').addEventListener('click', () => {
+            downloadVa2Report('json');
+        });
+
+        document.getElementById('va2DownloadCsvBtn').addEventListener('click', () => {
+            downloadVa2Report('csv');
         });
 
         async function scanSingleUrl(url) {
@@ -709,6 +727,55 @@
             box.style.borderColor = isError ? 'rgba(248,113,113,0.5)' : 'rgba(34,197,94,0.4)';
         }
 
+        function downloadVa2Report(format) {
+            if (!va2LastReport) {
+                showVa2Result('No VA2 report available. Run VA2 first.', true);
+                return;
+            }
+            if (format === 'json') {
+                const blob = new Blob([JSON.stringify(va2LastReport, null, 2)], { type: 'application/json' });
+                triggerDownload(blob, `va2-report-${Date.now()}.json`);
+                return;
+            }
+            const rows = [];
+            rows.push([
+                'step_id','phase','kind','status','duration_ms','error',
+                'pmi_score','pmi_label','wbf_normalization','wbf_statefulness','wbf_challenge','wbf_throttle'
+            ]);
+            const wbf = va2LastReport.wbf || {};
+            const pmi = va2LastReport.pmi || {};
+            (va2LastReport.results || []).forEach(result => {
+                rows.push([
+                    result.step_id,
+                    result.phase,
+                    result.kind,
+                    displayStatusCode(result.status),
+                    result.duration_ms,
+                    result.error || '',
+                    pmi.score ?? '',
+                    pmi.label ?? '',
+                    wbf.normalization_score ?? '',
+                    wbf.statefulness_score ?? '',
+                    wbf.challenge_score ?? '',
+                    wbf.throttle_score ?? ''
+                ]);
+            });
+            const csv = rows.map(row => row.map(csvEscape).join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            triggerDownload(blob, `va2-report-${Date.now()}.csv`);
+        }
+
+        function triggerDownload(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        }
+
         async function generateVa2Plan() {
             const btn = document.getElementById('va2PlanBtn');
             btn.disabled = true;
@@ -749,6 +816,7 @@
                 const data = await response.json();
                 if (data.success && data.report) {
                     const errors = data.report.results.filter(r => r.error).length;
+                    va2LastReport = data.report;
                     let summary = `VA2 run complete: ${data.report.results.length} steps, ${errors} errors.`;
                     if (data.report.pmi && data.report.wbf) {
                         summary += `\nPMI: ${data.report.pmi.score} (${data.report.pmi.label})`;
