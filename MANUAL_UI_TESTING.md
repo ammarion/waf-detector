@@ -127,6 +127,12 @@ For each positive detection, verify:
   - [ ] Download replay JSON
   - [ ] Download replay CSV
 
+#### 2.7 Virtual Adversary Replay Filters
+- [ ] Replay plan search filters by class/channel/url text
+- [ ] Class filter reduces visible replay rows
+- [ ] Channel filter reduces visible replay rows
+- [ ] "Show all" reflects filtered count
+
 #### 2.7 Virtual Adversary Evidence Modal
 - [ ] Evidence modal opens from report table
 - [ ] Copy Evidence works
