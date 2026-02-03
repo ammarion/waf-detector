@@ -270,6 +270,64 @@ pub const API_DOCS_HTML: &str = r#"
         </div>
 
         <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports</h3>
+            <p>List saved Virtual Adversary reports.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "reports": [
+    {
+      "id": "va-20260203T120000-example.com.json",
+      "target_url": "https://example.com",
+      "created_at": "2026-02-03T12:00:00Z",
+      "plan_size": 24,
+      "blocked": 10,
+      "challenge": 4,
+      "allowed": 8,
+      "error": 2,
+      "risk_label": "MEDIUM"
+    }
+  ],
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id</h3>
+            <p>Fetch a saved Virtual Adversary report by id.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "report": {
+    "id": "va-20260203T120000-example.com.json",
+    "created_at": "2026-02-03T12:00:00Z",
+    "report": {
+      "target_url": "https://example.com",
+      "plan_size": 24,
+      "summary": {
+        "total": 24,
+        "blocked": 10,
+        "challenge": 4,
+        "allowed": 8,
+        "error": 2
+      },
+      "config": {
+        "tier": 2,
+        "request_budget": 120,
+        "request_timeout": { "secs": 15, "nanos": 0 },
+        "request_delay": { "secs": 0, "nanos": 750000000 },
+        "max_variants_per_payload": 4
+      },
+      "results": []
+    }
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
             <h3><span class="method get">GET</span> /api/consent-status</h3>
             <p>Return consent status and authorized targets for the local user.</p>
 
@@ -391,5 +449,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaTestForm"));
         assert!(DASHBOARD_HTML.contains("Download VA Report"));
         assert!(DASHBOARD_HTML.contains("consentTargetInput"));
+        assert!(DASHBOARD_HTML.contains("vaHistoryList"));
     }
 }

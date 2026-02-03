@@ -5,6 +5,7 @@ use crate::script_executor::{CombinedResult, ScriptExecutor};
 use crate::virtual_adversary::{VaRunReport, VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
+use chrono::{DateTime, Utc};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -18,9 +19,13 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
 };
+use std::{fs, path::PathBuf};
+use url::Url;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
 pub mod templates;
+
+const VA_REPORTS_DIR: &str = ".waf-detector/va-reports";
 
 #[derive(Clone)]
 pub struct WebServer {
@@ -145,6 +150,7 @@ pub struct VaJobStatus {
     pub completed: usize,
     pub result: Option<VaRunReport>,
     pub error: Option<String>,
+    pub report_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -155,6 +161,7 @@ struct VaJob {
     completed: usize,
     result: Option<VaRunReport>,
     error: Option<String>,
+    report_id: Option<String>,
 }
 
 impl VaJob {
@@ -166,6 +173,7 @@ impl VaJob {
             completed: 0,
             result: None,
             error: None,
+            report_id: None,
         }
     }
 
@@ -177,6 +185,7 @@ impl VaJob {
             completed: self.completed,
             result: self.result.clone(),
             error: self.error.clone(),
+            report_id: self.report_id.clone(),
         }
     }
 }
@@ -185,6 +194,40 @@ impl VaJob {
 pub struct VaJobStatusResponse {
     success: bool,
     status: Option<VaJobStatus>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct VaReportSummary {
+    pub id: String,
+    pub target_url: String,
+    pub created_at: DateTime<Utc>,
+    pub plan_size: usize,
+    pub blocked: usize,
+    pub challenge: usize,
+    pub allowed: usize,
+    pub error: usize,
+    pub risk_label: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VaStoredReport {
+    pub id: String,
+    pub created_at: DateTime<Utc>,
+    pub report: VaRunReport,
+}
+
+#[derive(Serialize)]
+pub struct VaReportsResponse {
+    success: bool,
+    reports: Vec<VaReportSummary>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct VaReportResponse {
+    success: bool,
+    report: Option<VaStoredReport>,
     error: Option<String>,
 }
 
@@ -219,6 +262,14 @@ impl WebServer {
             .route(
                 "/api/virtual-adversary/status/:id",
                 get(virtual_adversary_status),
+            )
+            .route(
+                "/api/virtual-adversary/reports",
+                get(virtual_adversary_reports),
+            )
+            .route(
+                "/api/virtual-adversary/reports/:id",
+                get(virtual_adversary_report),
             )
             .route("/api/consent-status", get(consent_status))
             .route("/api/consent/add-target", post(consent_add_target))
@@ -278,6 +329,92 @@ async fn scan_url(
             (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
         }
     }
+}
+
+fn va_reports_dir() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("Unable to resolve HOME directory"))?;
+    let dir = home.join(VA_REPORTS_DIR);
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn sanitize_report_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn report_filename(target_url: &str, created_at: DateTime<Utc>) -> String {
+    let host = Url::parse(target_url)
+        .or_else(|_| Url::parse(&format!("https://{target_url}")))
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.to_string()))
+        .unwrap_or_else(|| "unknown".to_string());
+    let host = sanitize_report_component(&host);
+    format!(
+        "va-{}-{}.json",
+        created_at.format("%Y%m%dT%H%M%S"),
+        host
+    )
+}
+
+fn write_va_report(report: &VaRunReport) -> Result<String> {
+    let created_at = Utc::now();
+    let filename = report_filename(&report.target_url, created_at);
+    let path = va_reports_dir()?.join(&filename);
+    let stored = VaStoredReport {
+        id: filename.clone(),
+        created_at,
+        report: report.clone(),
+    };
+    let payload = serde_json::to_string_pretty(&stored)?;
+    fs::write(path, payload)?;
+    Ok(filename)
+}
+
+fn list_va_reports() -> Result<Vec<VaReportSummary>> {
+    let dir = va_reports_dir()?;
+    let mut reports = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let content = fs::read_to_string(entry.path());
+        if let Ok(content) = content {
+            if let Ok(stored) = serde_json::from_str::<VaStoredReport>(&content) {
+                let summary = VaReportSummary {
+                    id: stored.id.clone(),
+                    target_url: stored.report.target_url.clone(),
+                    created_at: stored.created_at,
+                    plan_size: stored.report.plan_size,
+                    blocked: stored.report.summary.blocked,
+                    challenge: stored.report.summary.challenge,
+                    allowed: stored.report.summary.allowed,
+                    error: stored.report.summary.error,
+                    risk_label: stored.report.summary.risk_label().to_string(),
+                };
+                reports.push(summary);
+            }
+        }
+    }
+    reports.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(reports)
+}
+
+fn load_va_report(id: &str) -> Result<VaStoredReport> {
+    let dir = va_reports_dir()?;
+    let path = dir.join(id);
+    let content = fs::read_to_string(path)?;
+    let stored = serde_json::from_str::<VaStoredReport>(&content)?;
+    Ok(stored)
 }
 
 // Handler for batch URL scan
@@ -597,6 +734,9 @@ async fn virtual_adversary(
 
     match report {
         Ok(Ok(result)) => {
+            if let Err(e) = write_va_report(&result) {
+                eprintln!("[virtual_adversary] Failed to persist report: {e}");
+            }
             let response = VaResponse {
                 success: true,
                 result: Some(result),
@@ -675,9 +815,17 @@ async fn virtual_adversary_start(
         if let Some(job) = jobs.get_mut(&job_id_for_task) {
             match result {
                 Ok(report) => {
+                    let report_id = match write_va_report(&report) {
+                        Ok(id) => Some(id),
+                        Err(err) => {
+                            job.error = Some(format!("Report persistence failed: {err}"));
+                            None
+                        }
+                    };
                     job.state = VaJobState::Completed;
                     job.total = report.plan_size;
                     job.completed = report.plan_size;
+                    job.report_id = report_id;
                     job.result = Some(report);
                 }
                 Err(err) => {
@@ -721,9 +869,53 @@ async fn virtual_adversary_status(
     (StatusCode::NOT_FOUND, Json(response))
 }
 
+// Handler to list persisted Virtual Adversary reports
+async fn virtual_adversary_reports() -> impl IntoResponse {
+    match list_va_reports() {
+        Ok(reports) => {
+            let response = VaReportsResponse {
+                success: true,
+                reports,
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Err(e) => {
+            let response = VaReportsResponse {
+                success: false,
+                reports: Vec::new(),
+                error: Some(format!("Failed to list reports: {e}")),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+        }
+    }
+}
+
+// Handler to fetch a persisted Virtual Adversary report
+async fn virtual_adversary_report(Path(report_id): Path<String>) -> impl IntoResponse {
+    match load_va_report(&report_id) {
+        Ok(report) => {
+            let response = VaReportResponse {
+                success: true,
+                report: Some(report),
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Err(e) => {
+            let response = VaReportResponse {
+                success: false,
+                report: None,
+                error: Some(format!("Failed to load report: {e}")),
+            };
+            (StatusCode::NOT_FOUND, Json(response))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{VaJobState, VaRequest};
+    use super::{report_filename, sanitize_report_component, VaJobState, VaRequest};
     use crate::virtual_adversary::VirtualAdversaryConfig;
     use std::time::Duration;
     use serde_json::json;
@@ -772,6 +964,20 @@ mod tests {
     fn va_job_state_serializes_snake_case() {
         let value = serde_json::to_value(VaJobState::Running).unwrap();
         assert_eq!(value, json!("running"));
+    }
+
+    #[test]
+    fn sanitize_report_component_replaces_invalid_chars() {
+        let value = sanitize_report_component("api.example.com/..");
+        assert_eq!(value, "api.example.com_..");
+    }
+
+    #[test]
+    fn report_filename_uses_host() {
+        let now = chrono::Utc::now();
+        let filename = report_filename("https://example.com/test", now);
+        assert!(filename.contains("example.com"));
+        assert!(filename.ends_with(".json"));
     }
 
     #[test]

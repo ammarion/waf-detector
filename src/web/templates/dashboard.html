@@ -163,6 +163,19 @@
                     <p class="consent-note">Run <code>./waf-detect --consent</code> to update.</p>
                 </div>
             </div>
+
+            <div class="card">
+                <h2>📂 Virtual Adversary History</h2>
+                <div class="va-history">
+                    <div class="va-history-header">
+                        <button type="button" class="btn btn-secondary" onclick="loadVaHistory()">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                    <div id="vaHistoryEmpty" class="va-history-empty">No saved reports yet.</div>
+                    <ul id="vaHistoryList" class="va-history-list"></ul>
+                </div>
+            </div>
         </div>
 
         <!-- Results Section -->
@@ -391,6 +404,7 @@
                         status.result.is_virtual_adversary = true;
                         allResults.unshift(status.result);
                         displayResults();
+                        loadVaHistory();
                         showSuccessMessage(`Virtual Adversary completed for ${url}`);
                     } else if (status.state === 'failed') {
                         showErrorMessage(status.error || 'Virtual Adversary failed');
@@ -511,6 +525,75 @@
                 showSuccessMessage(`Removed ${target}`);
             } catch (error) {
                 showErrorMessage(error.message || 'Failed to remove target');
+            }
+        }
+
+        async function loadVaHistory() {
+            const list = document.getElementById('vaHistoryList');
+            const empty = document.getElementById('vaHistoryEmpty');
+            if (!list || !empty) return;
+
+            try {
+                const response = await fetch('/api/virtual-adversary/reports');
+                const data = await response.json();
+                if (!data.success || !Array.isArray(data.reports)) {
+                    throw new Error(data.error || 'Failed to load VA history');
+                }
+
+                list.innerHTML = '';
+                if (data.reports.length === 0) {
+                    empty.style.display = 'block';
+                    return;
+                }
+                empty.style.display = 'none';
+                data.reports.slice(0, 10).forEach(report => {
+                    const li = document.createElement('li');
+                    li.className = 'va-history-item';
+
+                    const meta = document.createElement('div');
+                    meta.className = 'va-history-meta';
+                    const title = document.createElement('div');
+                    title.className = 'va-history-title';
+                    title.textContent = report.target_url || report.id;
+                    const sub = document.createElement('div');
+                    sub.className = 'va-history-sub';
+                    sub.textContent = `${report.created_at} • ${report.risk_label} • ${report.plan_size} payloads`;
+                    meta.appendChild(title);
+                    meta.appendChild(sub);
+
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-secondary va-history-download';
+                    btn.textContent = 'Download';
+                    btn.onclick = () => downloadVaHistoryReport(report.id);
+
+                    li.appendChild(meta);
+                    li.appendChild(btn);
+                    list.appendChild(li);
+                });
+            } catch (error) {
+                empty.style.display = 'block';
+            }
+        }
+
+        async function downloadVaHistoryReport(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
+                const data = await response.json();
+                if (!data.success || !data.report) {
+                    throw new Error(data.error || 'Failed to load VA report');
+                }
+
+                const jsonData = JSON.stringify(data.report, null, 2);
+                const jsonBlob = new Blob([jsonData], { type: 'application/json' });
+                const jsonUrl = URL.createObjectURL(jsonBlob);
+                const link = document.createElement('a');
+                link.href = jsonUrl;
+                link.download = reportId;
+                link.click();
+                URL.revokeObjectURL(jsonUrl);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to download VA report');
             }
         }
 
@@ -1039,6 +1122,7 @@
         document.addEventListener('DOMContentLoaded', function () {
             fixSmokeTestDisplay();
             loadConsentStatus();
+            loadVaHistory();
             console.log("Smoke test display fix applied on page load");
         });
     </script>

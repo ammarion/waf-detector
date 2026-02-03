@@ -309,17 +309,21 @@ impl VaResultSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaRunReport {
     pub target_url: String,
     pub plan_size: usize,
     pub summary: VaResultSummary,
     pub config: VirtualAdversaryConfig,
     pub results: Vec<VaResultRecord>,
-    #[serde(skip, default)]
+    #[serde(skip, default = "default_instant")]
     pub started_at: std::time::Instant,
     #[serde(skip, default)]
     pub finished_at: Option<std::time::Instant>,
+}
+
+fn default_instant() -> std::time::Instant {
+    std::time::Instant::now()
 }
 
 impl VaRunReport {
