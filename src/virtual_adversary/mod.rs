@@ -2,8 +2,11 @@
 //!
 //! Detection-grade adversarial testing configuration with strict safety bounds.
 
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+use crate::effectiveness::consent::ConsentManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VirtualAdversaryConfig {
@@ -46,9 +49,29 @@ impl VirtualAdversaryConfig {
     }
 }
 
+pub fn ensure_consent_and_target(consent_manager: &ConsentManager, target_url: &str) -> Result<()> {
+    if !consent_manager.has_valid_consent()? {
+        return Err(anyhow!(
+            "Consent is required before running Virtual Adversary tests"
+        ));
+    }
+
+    if !consent_manager.is_target_allowed(target_url)? {
+        return Err(anyhow!(
+            "Target is not authorized for Virtual Adversary testing"
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{DateTime, Utc};
+    use serde::Serialize;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn test_default_config_is_safe() {
@@ -75,5 +98,57 @@ mod tests {
         let mut config = VirtualAdversaryConfig::default();
         config.request_budget = 0;
         assert!(config.validate().is_err());
+    }
+
+    #[derive(Serialize)]
+    struct TestConsentRecord {
+        timestamp: DateTime<Utc>,
+        terms_version: String,
+        authorized_targets: Vec<String>,
+        acknowledgment: String,
+    }
+
+    fn write_test_consent(temp_dir: &TempDir, targets: Vec<String>) {
+        let record = TestConsentRecord {
+            timestamp: Utc::now(),
+            terms_version: "1.0.0".to_string(),
+            authorized_targets: targets,
+            acknowledgment: "I AGREE".to_string(),
+        };
+        let path = temp_dir.path().join(".waf-detector-consent.json");
+        let json = serde_json::to_string_pretty(&record).unwrap();
+        fs::write(path, json).unwrap();
+    }
+
+    #[test]
+    fn test_consent_required_for_va() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+
+        let consent_manager = ConsentManager::new();
+        let result = ensure_consent_and_target(&consent_manager, "https://example.com");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_target_must_be_authorized() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+
+        let consent_manager = ConsentManager::new();
+        let result = ensure_consent_and_target(&consent_manager, "https://notallowed.com");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_authorized_target_passes() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+
+        let consent_manager = ConsentManager::new();
+        let result = ensure_consent_and_target(&consent_manager, "https://example.com/path");
+        assert!(result.is_ok());
     }
 }
