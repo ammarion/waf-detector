@@ -288,6 +288,14 @@ impl VaResultSummary {
             VaOutcome::Error => self.error += 1,
         }
     }
+
+    pub fn confidence_score(&self) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        let effective = self.blocked + self.challenge;
+        effective as f64 / self.total as f64
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -846,6 +854,15 @@ mod tests {
         assert_eq!(summary.challenge, 1);
         assert_eq!(summary.allowed, 2);
         assert_eq!(summary.error, 1);
+    }
+
+    #[test]
+    fn test_result_summary_confidence_score() {
+        let mut summary = VaResultSummary::new();
+        summary.record(VaOutcome::Blocked);
+        summary.record(VaOutcome::Challenge);
+        summary.record(VaOutcome::Allowed);
+        assert!((summary.confidence_score() - (2.0 / 3.0)).abs() < 0.001);
     }
 
     #[test]
