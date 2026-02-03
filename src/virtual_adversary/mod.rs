@@ -222,7 +222,7 @@ pub enum VaOutcome {
     Error,
 }
 
-pub fn classify_outcome(status_code: u16, diff: &ResponseDiff) -> VaOutcome {
+pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> VaOutcome {
     if status_code == 0 {
         return VaOutcome::Error;
     }
@@ -237,6 +237,11 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff) -> VaOutcome {
         .iter()
         .any(|h| challenge_headers.contains(&h.as_str()))
     {
+        return VaOutcome::Challenge;
+    }
+
+    let body_lc = body.to_lowercase();
+    if body_lc.contains("captcha") || body_lc.contains("challenge") || body_lc.contains("verify") {
         return VaOutcome::Challenge;
     }
 
@@ -521,7 +526,7 @@ impl VirtualAdversaryRunner {
             &response.headers,
             &response.body,
         );
-        Ok(classify_outcome(response.status, &diff))
+        Ok(classify_outcome(response.status, &diff, &response.body))
     }
 
     pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
@@ -771,7 +776,7 @@ mod tests {
     fn test_classify_outcome_blocked_by_status() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 403, &HashMap::new(), "blocked");
-        assert_eq!(classify_outcome(403, &diff), VaOutcome::Blocked);
+        assert_eq!(classify_outcome(403, &diff, "blocked"), VaOutcome::Blocked);
     }
 
     #[test]
@@ -780,14 +785,24 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("cf-ray".to_string(), "123".to_string());
         let diff = ResponseDiff::compare(&baseline, 200, &headers, "ok");
-        assert_eq!(classify_outcome(200, &diff), VaOutcome::Challenge);
+        assert_eq!(classify_outcome(200, &diff, "ok"), VaOutcome::Challenge);
     }
 
     #[test]
     fn test_classify_outcome_allowed() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
-        assert_eq!(classify_outcome(200, &diff), VaOutcome::Allowed);
+        assert_eq!(classify_outcome(200, &diff, "ok"), VaOutcome::Allowed);
+    }
+
+    #[test]
+    fn test_classify_outcome_challenge_by_body() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
+        let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "captcha required");
+        assert_eq!(
+            classify_outcome(200, &diff, "captcha required"),
+            VaOutcome::Challenge
+        );
     }
 
     #[test]
