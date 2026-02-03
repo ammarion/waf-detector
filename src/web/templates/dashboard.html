@@ -197,6 +197,20 @@
                             📄 CSV
                         </button>
                     </div>
+                    <div class="va-history-filters">
+                        <label for="vaHistoryDate">Date</label>
+                        <select id="vaHistoryDate" class="input-field va-history-select">
+                            <option value="all">All</option>
+                            <option value="7">Last 7 days</option>
+                            <option value="30">Last 30 days</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        <input id="vaHistoryStart" class="input-field va-history-date" type="date" disabled>
+                        <input id="vaHistoryEnd" class="input-field va-history-date" type="date" disabled>
+                        <button type="button" class="btn btn-secondary" onclick="applyVaHistoryFilter()">
+                            Apply
+                        </button>
+                    </div>
                     <div class="va-history-search">
                         <label for="vaHistorySearch">Search</label>
                         <input id="vaHistorySearch" class="input-field va-history-input" type="text"
@@ -707,16 +721,53 @@
             });
         }
 
+        function parseHistoryDate(value) {
+            if (!value) return null;
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? null : date;
+        }
+
         function applyVaHistoryFilter() {
             const input = document.getElementById('vaHistorySearch');
             const term = input ? input.value.trim().toLowerCase() : '';
-            if (!term) {
-                renderVaHistoryList(vaHistoryCache);
-                return;
+            const dateSelect = document.getElementById('vaHistoryDate');
+            const startInput = document.getElementById('vaHistoryStart');
+            const endInput = document.getElementById('vaHistoryEnd');
+
+            const dateFilter = dateSelect ? dateSelect.value : 'all';
+            let startDate = null;
+            let endDate = null;
+
+            if (dateFilter === '7' || dateFilter === '30') {
+                const days = parseInt(dateFilter, 10);
+                const now = new Date();
+                startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+            } else if (dateFilter === 'custom') {
+                startDate = parseHistoryDate(startInput ? startInput.value : '');
+                endDate = parseHistoryDate(endInput ? endInput.value : '');
+                if (endDate) {
+                    endDate.setHours(23, 59, 59, 999);
+                }
             }
+
             const filtered = vaHistoryCache.filter(report => {
                 const target = (report.target_url || '').toLowerCase();
-                return target.includes(term);
+                if (term && !target.includes(term)) {
+                    return false;
+                }
+                if (startDate || endDate) {
+                    const reportDate = new Date(report.created_at);
+                    if (Number.isNaN(reportDate.getTime())) {
+                        return false;
+                    }
+                    if (startDate && reportDate < startDate) {
+                        return false;
+                    }
+                    if (endDate && reportDate > endDate) {
+                        return false;
+                    }
+                }
+                return true;
             });
             renderVaHistoryList(filtered);
         }
@@ -1391,6 +1442,23 @@
             const historySearch = document.getElementById('vaHistorySearch');
             if (historySearch) {
                 historySearch.addEventListener('input', () => applyVaHistoryFilter());
+            }
+            const historyDate = document.getElementById('vaHistoryDate');
+            const historyStart = document.getElementById('vaHistoryStart');
+            const historyEnd = document.getElementById('vaHistoryEnd');
+            if (historyDate) {
+                historyDate.addEventListener('change', (event) => {
+                    const isCustom = event.target.value === 'custom';
+                    if (historyStart) historyStart.disabled = !isCustom;
+                    if (historyEnd) historyEnd.disabled = !isCustom;
+                    applyVaHistoryFilter();
+                });
+            }
+            if (historyStart) {
+                historyStart.addEventListener('change', () => applyVaHistoryFilter());
+            }
+            if (historyEnd) {
+                historyEnd.addEventListener('change', () => applyVaHistoryFilter());
             }
             const filter = document.getElementById('vaActivityFilter');
             if (filter) {
