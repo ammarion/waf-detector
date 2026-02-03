@@ -245,7 +245,7 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> Va
         return VaOutcome::Challenge;
     }
 
-    if diff.significant_length_change || diff.status_changed {
+    if diff.significant_length_change || (diff.status_changed && diff.length_delta > 200) {
         return VaOutcome::Challenge;
     }
 
@@ -801,6 +801,16 @@ mod tests {
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "captcha required");
         assert_eq!(
             classify_outcome(200, &diff, "captcha required"),
+            VaOutcome::Challenge
+        );
+    }
+
+    #[test]
+    fn test_classify_outcome_challenge_on_baseline_deviation() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), &"a".repeat(1000));
+        let diff = ResponseDiff::compare(&baseline, 500, &HashMap::new(), &"b".repeat(10));
+        assert_eq!(
+            classify_outcome(500, &diff, "error"),
             VaOutcome::Challenge
         );
     }
