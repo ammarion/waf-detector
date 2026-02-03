@@ -4,6 +4,7 @@
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -311,6 +312,25 @@ pub struct VaHttpResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
     pub body: String,
+}
+
+pub fn va_report_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["target_url", "plan_size", "summary", "config"],
+        "properties": {
+            "target_url": { "type": "string" },
+            "plan_size": { "type": "integer" },
+            "summary": {
+                "type": "object",
+                "required": ["total", "blocked", "challenge", "allowed", "error"]
+            },
+            "config": {
+                "type": "object",
+                "required": ["tier", "request_budget", "request_timeout", "request_delay", "max_variants_per_payload"]
+            }
+        }
+    })
 }
 
 pub trait VaHttpAdapter {
@@ -941,5 +961,19 @@ mod tests {
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("example.com"));
         assert!(json.contains("plan_size"));
+    }
+
+    #[test]
+    fn test_va_report_schema_has_required_keys() {
+        let schema = va_report_schema();
+        let required = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        let required_keys: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert!(required_keys.contains(&"target_url"));
+        assert!(required_keys.contains(&"plan_size"));
+        assert!(required_keys.contains(&"summary"));
+        assert!(required_keys.contains(&"config"));
     }
 }
