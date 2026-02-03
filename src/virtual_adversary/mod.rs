@@ -315,6 +315,7 @@ pub struct VaRunReport {
     pub plan_size: usize,
     pub summary: VaResultSummary,
     pub config: VirtualAdversaryConfig,
+    pub results: Vec<VaResultRecord>,
     #[serde(skip, default)]
     pub started_at: std::time::Instant,
     #[serde(skip, default)]
@@ -328,6 +329,7 @@ impl VaRunReport {
             plan_size,
             summary: VaResultSummary::new(),
             config,
+            results: Vec::new(),
             started_at: std::time::Instant::now(),
             finished_at: None,
         }
@@ -343,6 +345,14 @@ pub struct VaHttpResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
     pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaResultRecord {
+    pub payload: String,
+    pub category: VaPayloadCategory,
+    pub outcome: VaOutcome,
+    pub reason: String,
 }
 
 pub fn va_report_schema() -> serde_json::Value {
@@ -544,7 +554,7 @@ impl VirtualAdversaryRunner {
         target_url: &str,
         baseline: &BaselineRecord,
         payload: &VaPayloadVariant,
-    ) -> Result<VaOutcome> {
+    ) -> Result<(VaOutcome, String)> {
         let response = self.http.get_with_payload(target_url, payload)?;
         let diff = ResponseDiff::compare(
             baseline,
@@ -552,7 +562,14 @@ impl VirtualAdversaryRunner {
             &response.headers,
             &response.body,
         );
-        Ok(classify_outcome(response.status, &diff, &response.body))
+        let outcome = classify_outcome(response.status, &diff, &response.body);
+        let reason = format!(
+            "status={} len_delta={} header_diff={}",
+            response.status,
+            diff.length_delta,
+            diff.header_differences.len()
+        );
+        Ok((outcome, reason))
     }
 
     pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
@@ -568,8 +585,14 @@ impl VirtualAdversaryRunner {
         let plan = self.plan();
         let mut report = VaRunReport::new(target_url, plan.len(), self.config.clone());
         for item in plan {
-            let outcome = self.evaluate_payload(target_url, &baseline, &item)?;
+            let (outcome, reason) = self.evaluate_payload(target_url, &baseline, &item)?;
             report.summary.record(outcome);
+            report.results.push(VaResultRecord {
+                payload: item.payload,
+                category: item.category,
+                outcome,
+                reason,
+            });
         }
         report.finish();
         Ok(report)
@@ -1003,7 +1026,7 @@ mod tests {
             payload: "' OR '1'='1".to_string(),
         };
 
-        let outcome = runner
+        let (outcome, _reason) = runner
             .evaluate_payload("https://example.com", &baseline, &payload)
             .unwrap();
         assert_eq!(outcome, VaOutcome::Blocked);
@@ -1029,6 +1052,7 @@ mod tests {
         let report = runner.run("https://example.com").unwrap();
         assert_eq!(report.summary.total, report.plan_size);
         assert_eq!(report.summary.blocked, report.plan_size);
+        assert_eq!(report.results.len(), report.plan_size);
     }
 
     #[test]
