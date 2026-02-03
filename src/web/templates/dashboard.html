@@ -749,7 +749,12 @@
                 const data = await response.json();
                 if (data.success && data.report) {
                     const errors = data.report.results.filter(r => r.error).length;
-                    showVa2Result(`VA2 run complete: ${data.report.results.length} steps, ${errors} errors.`);
+                    let summary = `VA2 run complete: ${data.report.results.length} steps, ${errors} errors.`;
+                    if (data.report.pmi && data.report.wbf) {
+                        summary += `\nPMI: ${data.report.pmi.score} (${data.report.pmi.label})`;
+                        summary += `\nWBF: norm=${data.report.wbf.normalization_score.toFixed(2)}, state=${data.report.wbf.statefulness_score.toFixed(2)}, challenge=${data.report.wbf.challenge_score.toFixed(2)}, throttle=${data.report.wbf.throttle_score.toFixed(2)}`;
+                    }
+                    showVa2Result(summary);
                     showSuccessMessage(`VA2 completed for ${data.report.target_url}`);
                 } else {
                     showVa2Result(data.error || 'VA2 run failed', true);

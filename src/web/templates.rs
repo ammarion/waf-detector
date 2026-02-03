@@ -480,7 +480,17 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,S
   "success": true,
   "report": {
     "target_url": "https://example.com",
-    "results": []
+    "results": [],
+    "wbf": {
+      "normalization_score": 0.6,
+      "statefulness_score": 0.4,
+      "challenge_score": 0.5,
+      "throttle_score": 0.2
+    },
+    "pmi": {
+      "score": 62,
+      "label": "moderate"
+    }
   },
   "error": null
 }</code></pre>

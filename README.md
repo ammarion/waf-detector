@@ -197,6 +197,25 @@ Virtual Adversary adds adaptive, consent-gated effectiveness testing with baseli
 
 > ⚠️ **Ethical Use Required:** Virtual Adversary simulates evasive attackers. Only use on systems you own or have explicit permission to test.
 
+## 🧪 Virtual Adversary 2.0 (Experimental)
+
+Virtual Adversary 2.0 focuses on **behavioral profiling** (normalization variance, statefulness, challenge response, throttle curves) and produces a **WBF** (WAF Behavior Fingerprint) and **PMI** (Protection Maturity Index). It does **not** reuse OWASP payloads from the Smoke Test.
+
+```bash
+# Generate a deterministic VA2 plan (no execution)
+./target/release/waf-detect --va2 https://example.com --va2-dry-run
+
+# Run VA2 (consent required)
+./target/release/waf-detect --va2 https://example.com --va2-run
+```
+
+**VA2 options:**
+- `--va2-phases baseline,protocol-variance,state-escalation,behavioral-pressure,challenge-interaction`
+- `--va2-seed N`: Deterministic seed for replayable plans.
+- `--va2-budget N`: Request budget.
+- `--va2-json`: Print the plan JSON.
+- `--va2-output FILE`: Save the plan JSON.
+
 ## 📊 Output Options
 
 ```bash
