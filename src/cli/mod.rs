@@ -126,7 +126,7 @@ impl SimpleCliApp {
                 report.config.request_timeout.as_secs(),
                 report.config.max_variants_per_payload
             );
-            let max_results = 3usize;
+            let max_results = *matches.get_one::<u8>("va-top").unwrap_or(&3) as usize;
             if !report.results.is_empty() {
                 println!("   Top Results:");
                 for result in report.results.iter().take(max_results) {
@@ -808,6 +808,15 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .long("va-dry-run")
                 .help("Print planned VA payloads without executing")
                 .action(clap::ArgAction::SetTrue)
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-top")
+                .long("va-top")
+                .help("Number of VA results to print")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("3")
                 .requires("va"),
         )
         .arg(

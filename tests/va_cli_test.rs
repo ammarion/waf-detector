@@ -57,6 +57,15 @@ fn test_va_dry_run_requires_va() {
 }
 
 #[test]
+fn test_va_top_default_value() {
+    let cmd = build_simple_cli();
+    let matches = cmd
+        .try_get_matches_from(["waf-detect", "--va", "https://example.com"])
+        .expect("VA CLI should parse");
+    assert_eq!(*matches.get_one::<u8>("va-top").unwrap(), 3);
+}
+
+#[test]
 fn test_va_confidence_score_format() {
     let summary = waf_detector::virtual_adversary::VaResultSummary {
         total: 4,
