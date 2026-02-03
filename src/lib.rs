@@ -21,6 +21,7 @@ pub mod tls;
 
 // NEW: WAF Effectiveness Testing module
 pub mod effectiveness;
+pub mod virtual_adversary;
 
 #[derive(Debug, Clone)]
 pub struct DetectionContext {
