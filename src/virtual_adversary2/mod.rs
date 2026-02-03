@@ -114,11 +114,28 @@ pub struct Va2RunResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Va2BaselineSummary {
+    pub status: Option<u16>,
+    pub header_count: usize,
+    pub body_length: usize,
+    pub sample: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Va2NormalizationVariance {
+    pub baseline_status: Option<u16>,
+    pub max_status_delta: u16,
+    pub avg_length_delta: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Va2RunReport {
     pub target_url: String,
     pub plan: Va2CampaignPlan,
     pub results: Vec<Va2RunResult>,
+    pub baseline: Va2BaselineSummary,
+    pub normalization: Option<Va2NormalizationVariance>,
 }
 
 pub struct Va2Runner {
@@ -145,6 +162,8 @@ impl Va2Runner {
         ensure_va2_consent_and_target(&self.consent_manager, &plan.target_url)?;
 
         let mut results = Vec::with_capacity(plan.steps.len());
+        let mut baseline_samples = Vec::new();
+        let mut variance_samples: Vec<(u16, usize)> = Vec::new();
         for step in &plan.steps {
             if step.delay_ms > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(step.delay_ms));
@@ -154,14 +173,22 @@ impl Va2Runner {
             let response = self.http.send(&request);
             let duration = started.elapsed().as_millis();
             match response {
-                Ok(resp) => results.push(Va2RunResult {
-                    step_id: step.id,
-                    phase: step.phase,
-                    kind: step.kind,
-                    status: Some(resp.status),
-                    duration_ms: duration,
-                    error: None,
-                }),
+                Ok(resp) => {
+                    if step.phase == Va2Phase::Baseline {
+                        baseline_samples.push(resp.clone());
+                    }
+                    if step.phase == Va2Phase::ProtocolVariance {
+                        variance_samples.push((resp.status, resp.body.len()));
+                    }
+                    results.push(Va2RunResult {
+                        step_id: step.id,
+                        phase: step.phase,
+                        kind: step.kind,
+                        status: Some(resp.status),
+                        duration_ms: duration,
+                        error: None,
+                    });
+                }
                 Err(err) => results.push(Va2RunResult {
                     step_id: step.id,
                     phase: step.phase,
@@ -173,10 +200,22 @@ impl Va2Runner {
             }
         }
 
+        let baseline = summarize_baseline(&baseline_samples);
+        let normalization = if variance_samples.is_empty() {
+            None
+        } else {
+            Some(compute_normalization_variance(
+                baseline.status,
+                &variance_samples,
+            ))
+        };
+
         Ok(Va2RunReport {
             target_url: plan.target_url.clone(),
             plan,
             results,
+            baseline,
+            normalization,
         })
     }
 }
@@ -219,6 +258,51 @@ fn build_va2_request(target_url: &str, step: &Va2CampaignStep) -> Result<Va2Http
         headers,
         body: step.body.clone(),
     })
+}
+
+fn summarize_baseline(samples: &[Va2HttpResponse]) -> Va2BaselineSummary {
+    if samples.is_empty() {
+        return Va2BaselineSummary::default();
+    }
+    let first = &samples[0];
+    let sample = first.body.chars().take(120).collect::<String>();
+    Va2BaselineSummary {
+        status: Some(first.status),
+        header_count: first.headers.len(),
+        body_length: first.body.len(),
+        sample,
+    }
+}
+
+fn compute_normalization_variance(
+    baseline_status: Option<u16>,
+    samples: &[(u16, usize)],
+) -> Va2NormalizationVariance {
+    let baseline_code = baseline_status.unwrap_or(200);
+    let mut max_delta = 0u16;
+    let mut total_len_delta = 0f64;
+    for (status, len) in samples {
+        let delta = if *status > baseline_code {
+            *status - baseline_code
+        } else {
+            baseline_code - *status
+        };
+        if delta > max_delta {
+            max_delta = delta;
+        }
+        let baseline_len = samples.first().map(|(_, l)| *l).unwrap_or(0);
+        total_len_delta += (len.saturating_sub(baseline_len)) as f64;
+    }
+    let avg_len_delta = if samples.is_empty() {
+        0.0
+    } else {
+        total_len_delta / samples.len() as f64
+    };
+    Va2NormalizationVariance {
+        baseline_status,
+        max_status_delta: max_delta,
+        avg_length_delta: avg_len_delta,
+    }
 }
 
 impl Va2CampaignPlan {
@@ -427,10 +511,17 @@ mod tests {
 
     impl Va2HttpAdapter for StubAdapter {
         fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
+            let (status, body) = if request.url.contains("protocol") {
+                (418, "teapot".to_string())
+            } else if request.url.contains("error") {
+                (500, "server error".to_string())
+            } else {
+                (200, "baseline ok".to_string())
+            };
             Ok(Va2HttpResponse {
-                status: if request.url.contains("error") { 500 } else { 200 },
+                status,
                 headers: HashMap::new(),
-                body: String::new(),
+                body,
             })
         }
     }
@@ -521,11 +612,32 @@ mod tests {
             .unwrap();
             for step in &mut plan.steps {
                 step.delay_ms = 0;
+                if step.phase == Va2Phase::ProtocolVariance {
+                    step.path = "/protocol-variance".to_string();
+                }
             }
             let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
             let report = runner.run_plan(plan).unwrap();
             assert!(!report.results.is_empty());
             assert_eq!(report.results.len(), report.plan.steps.len());
+            assert_eq!(report.baseline.status, Some(200));
+            assert!(report.normalization.is_some());
         });
+    }
+
+    #[test]
+    fn test_va2_baseline_summary_defaults() {
+        let summary = summarize_baseline(&[]);
+        assert!(summary.status.is_none());
+        assert_eq!(summary.header_count, 0);
+        assert_eq!(summary.body_length, 0);
+        assert!(summary.sample.is_empty());
+    }
+
+    #[test]
+    fn test_va2_normalization_variance_calculation() {
+        let variance = compute_normalization_variance(Some(200), &[(200, 10), (418, 30)]);
+        assert!(variance.max_status_delta >= 18);
+        assert!(variance.avg_length_delta >= 0.0);
     }
 }
