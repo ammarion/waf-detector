@@ -8,6 +8,7 @@ use crate::providers::{
 };
 use crate::registry::ProviderRegistry;
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
+use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use clap::{Arg, ArgMatches, Command};
@@ -22,6 +23,25 @@ fn csv_escape(value: &str) -> String {
     } else {
         value.to_string()
     }
+}
+
+fn parse_va2_phases(raw: &str) -> Result<Vec<Va2Phase>> {
+    let mut phases = Vec::new();
+    for item in raw.split(',') {
+        let phase = match item.trim().to_lowercase().as_str() {
+            "baseline" => Va2Phase::Baseline,
+            "protocol-variance" => Va2Phase::ProtocolVariance,
+            "state-escalation" => Va2Phase::StateEscalation,
+            "behavioral-pressure" => Va2Phase::BehavioralPressure,
+            "challenge-interaction" => Va2Phase::ChallengeInteraction,
+            other => return Err(anyhow!("unknown va2 phase: {other}")),
+        };
+        phases.push(phase);
+    }
+    if phases.is_empty() {
+        return Err(anyhow!("va2 phases cannot be empty"));
+    }
+    Ok(phases)
 }
 
 pub struct SimpleCliApp {
@@ -85,6 +105,42 @@ impl SimpleCliApp {
         if matches.get_flag("va-schema") {
             let schema = crate::virtual_adversary::va_report_schema();
             println!("{}", serde_json::to_string_pretty(&schema)?);
+            return Ok(());
+        }
+
+        // Handle virtual adversary 2.0 (VA2) dry run
+        if let Some(url) = matches.get_one::<String>("va2") {
+            let phases_raw = matches
+                .get_one::<String>("va2-phases")
+                .map(String::as_str)
+                .unwrap_or("baseline,protocol-variance");
+            let phases = parse_va2_phases(phases_raw)?;
+            let config = Va2CampaignConfig {
+                seed: *matches.get_one::<u64>("va2-seed").unwrap_or(&1337),
+                budget: *matches.get_one::<u32>("va2-budget").unwrap_or(&60),
+            };
+            let plan = build_va2_campaign_plan(url, &phases, config)?;
+
+            if matches.get_flag("va2-json") {
+                let json = serde_json::to_string_pretty(&plan)?;
+                println!("{json}");
+                return Ok(());
+            }
+
+            if let Some(output) = matches.get_one::<String>("va2-output") {
+                let json = serde_json::to_string_pretty(&plan)?;
+                fs::write(output, json)?;
+                println!("📄 VA2 plan saved to: {output}");
+                return Ok(());
+            }
+
+            println!(
+                "🧭 VA2 Dry Run: {} steps across {} phases (seed={}, budget={})",
+                plan.steps.len(),
+                plan.phases.len(),
+                plan.seed,
+                plan.budget
+            );
             return Ok(());
         }
 
@@ -993,6 +1049,60 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Run comprehensive WAF effectiveness testing (requires consent)")
                 .value_name("URL")
                 .num_args(1),
+        )
+        .arg(
+            Arg::new("va2")
+                .long("va2")
+                .help("Run Virtual Adversary 2.0 dry run (behavioral campaign)")
+                .value_name("URL")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("va2-dry-run")
+                .long("va2-dry-run")
+                .help("Print VA2 plan summary without execution")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-json")
+                .long("va2-json")
+                .help("Print VA2 plan JSON to stdout")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-output")
+                .long("va2-output")
+                .help("Write VA2 plan JSON to file")
+                .value_name("FILE")
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-phases")
+                .long("va2-phases")
+                .help("VA2 phases (comma-separated)")
+                .value_name("LIST")
+                .default_value("baseline,protocol-variance")
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-seed")
+                .long("va2-seed")
+                .help("VA2 deterministic seed")
+                .value_name("SEED")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("1337")
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-budget")
+                .long("va2-budget")
+                .help("VA2 request budget")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(u32))
+                .default_value("60")
+                .requires("va2"),
         )
         .arg(
             Arg::new("va")
