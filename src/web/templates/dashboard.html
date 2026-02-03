@@ -431,6 +431,10 @@
                         <label for="vaPinnedSort">Pinned first</label>
                         <input type="checkbox" id="vaPinnedSort">
                     </div>
+                    <div class="va-explainability-toggle">
+                        <label for="vaPinnedOnly">Pinned only</label>
+                        <input type="checkbox" id="vaPinnedOnly">
+                    </div>
                     <div class="va-explainability-text">Controls evidence depth in the report table.</div>
                 </div>
                 <div class="va-explainability-card">
@@ -476,6 +480,17 @@
                 pinnedSortToggle.checked = vaPinnedSort;
                 pinnedSortToggle.onchange = () => {
                     vaPinnedSort = pinnedSortToggle.checked;
+                    const tableBody = document.getElementById('vaReportTableBody');
+                    if (tableBody) {
+                        renderVaReportTable(tableBody, vaCurrentReportRows);
+                    }
+                };
+            }
+            const pinnedOnlyToggle = document.getElementById('vaPinnedOnly');
+            if (pinnedOnlyToggle) {
+                pinnedOnlyToggle.checked = vaPinnedOnly;
+                pinnedOnlyToggle.onchange = () => {
+                    vaPinnedOnly = pinnedOnlyToggle.checked;
                     const tableBody = document.getElementById('vaReportTableBody');
                     if (tableBody) {
                         renderVaReportTable(tableBody, vaCurrentReportRows);
@@ -618,6 +633,7 @@
         let vaReasonLevel = 'compact';
         let vaReportEvidenceDepth = 'compact';
         let vaPinnedSort = false;
+        let vaPinnedOnly = false;
         let vaAutoScroll = true;
         let currentVaJobId = null;
         let vaPinnedRows = [];
@@ -1300,14 +1316,17 @@
         function renderVaReportTable(tableBody, rows) {
             if (!tableBody) return;
             const decorated = rows.map((row, idx) => ({ row, idx }));
+            const filtered = vaPinnedOnly
+                ? decorated.filter((item) => vaPinnedIndexSet.has(item.idx))
+                : decorated;
             const sorted = vaPinnedSort
-                ? decorated.sort((a, b) => {
+                ? filtered.sort((a, b) => {
                     const aPinned = vaPinnedIndexSet.has(a.idx) ? 1 : 0;
                     const bPinned = vaPinnedIndexSet.has(b.idx) ? 1 : 0;
                     if (aPinned !== bPinned) return bPinned - aPinned;
                     return a.idx - b.idx;
                 })
-                : decorated;
+                : filtered;
             tableBody.innerHTML = sorted.map(({ row, idx }) => `
                 <tr class="${vaPinnedIndexSet.has(idx) ? 'va-row-pinned' : ''}">
                     <td>${idx + 1}</td>
