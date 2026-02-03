@@ -72,7 +72,9 @@ async fn test_all_integration_scenarios() {
 #[tokio::test]
 async fn test_provider_specific_scenarios() {
     if !should_run_integration_tests() {
-        eprintln!("Skipping provider-specific scenarios (set WAF_DETECTOR_RUN_INTEGRATION=1 to enable).");
+        eprintln!(
+            "Skipping provider-specific scenarios (set WAF_DETECTOR_RUN_INTEGRATION=1 to enable)."
+        );
         return;
     }
     let context = TestContext::default();
@@ -108,7 +110,9 @@ mod integration_helpers {
 #[tokio::test]
 async fn test_basic_detection_individually() {
     if !should_run_integration_tests() {
-        eprintln!("Skipping basic detection scenario (set WAF_DETECTOR_RUN_INTEGRATION=1 to enable).");
+        eprintln!(
+            "Skipping basic detection scenario (set WAF_DETECTOR_RUN_INTEGRATION=1 to enable)."
+        );
         return;
     }
     let passed = integration_helpers::run_single_scenario(BasicDetectionScenario::new()).await;
