@@ -109,7 +109,23 @@ impl SimpleCliApp {
             if let Some(output) = matches.get_one::<String>("va-output") {
                 let json = serde_json::to_string_pretty(&report)?;
                 std::fs::write(output, json)?;
+                let summary_path = format!(
+                    "{}.summary.txt",
+                    output.trim_end_matches(".json")
+                );
+                let summary = format!(
+                    "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
+                    report.target_url,
+                    report.summary.confidence_score(),
+                    report.summary.risk_label(),
+                    report.summary.blocked,
+                    report.summary.challenge,
+                    report.summary.allowed,
+                    report.summary.error
+                );
+                std::fs::write(&summary_path, summary)?;
                 println!("📄 VA report saved to: {output}");
+                println!("📄 VA summary saved to: {summary_path}");
                 return Ok(());
             }
             println!(
@@ -859,7 +875,7 @@ The tool automatically adds https:// if needed and supports both domain names an
         .arg(
             Arg::new("va-output")
                 .long("va-output")
-                .help("Write VA report JSON to file")
+                .help("Write VA report JSON and summary to file")
                 .value_name("FILE")
                 .requires("va"),
         )
