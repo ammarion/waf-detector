@@ -381,6 +381,23 @@ body {
     font-size: 0.85rem;
 }
 
+.va-history-search {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.va-history-search label {
+    color: var(--text-secondary);
+}
+
+.va-history-input {
+    flex: 1;
+    min-width: 180px;
+    padding: 0.5rem 0.75rem;
+}
+
 .va-history-retention label {
     color: var(--text-secondary);
 }

@@ -193,6 +193,11 @@
                             📄 CSV
                         </button>
                     </div>
+                    <div class="va-history-search">
+                        <label for="vaHistorySearch">Search</label>
+                        <input id="vaHistorySearch" class="input-field va-history-input" type="text"
+                            placeholder="Filter by target URL">
+                    </div>
                     <div class="va-history-retention">
                         <label for="vaRetentionInput">Keep last</label>
                         <input id="vaRetentionInput" class="input-field va-retention-input" type="number" min="5"
@@ -642,62 +647,83 @@
             }
         }
 
-        async function loadVaHistory() {
+        let vaHistoryCache = [];
+
+        function renderVaHistoryList(reports) {
             const list = document.getElementById('vaHistoryList');
             const empty = document.getElementById('vaHistoryEmpty');
             if (!list || !empty) return;
 
+            list.innerHTML = '';
+            if (!reports || reports.length === 0) {
+                empty.style.display = 'block';
+                return;
+            }
+            empty.style.display = 'none';
+            reports.slice(0, 10).forEach(report => {
+                const li = document.createElement('li');
+                li.className = 'va-history-item';
+
+                const meta = document.createElement('div');
+                meta.className = 'va-history-meta';
+                const title = document.createElement('div');
+                title.className = 'va-history-title';
+                title.textContent = report.target_url || report.id;
+                const sub = document.createElement('div');
+                sub.className = 'va-history-sub';
+                sub.textContent = `${report.created_at} • ${report.risk_label} • ${report.plan_size} payloads`;
+                meta.appendChild(title);
+                meta.appendChild(sub);
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-secondary va-history-download';
+                btn.textContent = 'Download';
+                btn.onclick = () => downloadVaHistoryReport(report.id);
+
+                const csvBtn = document.createElement('button');
+                csvBtn.type = 'button';
+                csvBtn.className = 'btn btn-secondary va-history-download';
+                csvBtn.textContent = 'CSV';
+                csvBtn.onclick = () => downloadVaHistoryReportCsv(report.id);
+
+                const actionGroup = document.createElement('div');
+                actionGroup.className = 'va-history-actions';
+                actionGroup.appendChild(btn);
+                actionGroup.appendChild(csvBtn);
+
+                li.appendChild(meta);
+                li.appendChild(actionGroup);
+                list.appendChild(li);
+            });
+        }
+
+        function applyVaHistoryFilter() {
+            const input = document.getElementById('vaHistorySearch');
+            const term = input ? input.value.trim().toLowerCase() : '';
+            if (!term) {
+                renderVaHistoryList(vaHistoryCache);
+                return;
+            }
+            const filtered = vaHistoryCache.filter(report => {
+                const target = (report.target_url || '').toLowerCase();
+                return target.includes(term);
+            });
+            renderVaHistoryList(filtered);
+        }
+
+        async function loadVaHistory() {
             try {
                 const response = await fetch('/api/virtual-adversary/reports');
                 const data = await response.json();
                 if (!data.success || !Array.isArray(data.reports)) {
                     throw new Error(data.error || 'Failed to load VA history');
                 }
-
-                list.innerHTML = '';
-                if (data.reports.length === 0) {
-                    empty.style.display = 'block';
-                    return;
-                }
-                empty.style.display = 'none';
-                data.reports.slice(0, 10).forEach(report => {
-                    const li = document.createElement('li');
-                    li.className = 'va-history-item';
-
-                    const meta = document.createElement('div');
-                    meta.className = 'va-history-meta';
-                    const title = document.createElement('div');
-                    title.className = 'va-history-title';
-                    title.textContent = report.target_url || report.id;
-                    const sub = document.createElement('div');
-                    sub.className = 'va-history-sub';
-                    sub.textContent = `${report.created_at} • ${report.risk_label} • ${report.plan_size} payloads`;
-                    meta.appendChild(title);
-                    meta.appendChild(sub);
-
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'btn btn-secondary va-history-download';
-                    btn.textContent = 'Download';
-                    btn.onclick = () => downloadVaHistoryReport(report.id);
-
-                    const csvBtn = document.createElement('button');
-                    csvBtn.type = 'button';
-                    csvBtn.className = 'btn btn-secondary va-history-download';
-                    csvBtn.textContent = 'CSV';
-                    csvBtn.onclick = () => downloadVaHistoryReportCsv(report.id);
-
-                    const actionGroup = document.createElement('div');
-                    actionGroup.className = 'va-history-actions';
-                    actionGroup.appendChild(btn);
-                    actionGroup.appendChild(csvBtn);
-
-                    li.appendChild(meta);
-                    li.appendChild(actionGroup);
-                    list.appendChild(li);
-                });
+                vaHistoryCache = data.reports;
+                applyVaHistoryFilter();
             } catch (error) {
-                empty.style.display = 'block';
+                vaHistoryCache = [];
+                renderVaHistoryList([]);
             }
         }
 
@@ -1353,6 +1379,10 @@
             fixSmokeTestDisplay();
             loadConsentStatus();
             loadVaHistory();
+            const historySearch = document.getElementById('vaHistorySearch');
+            if (historySearch) {
+                historySearch.addEventListener('input', () => applyVaHistoryFilter());
+            }
             const filter = document.getElementById('vaActivityFilter');
             if (filter) {
                 filter.addEventListener('change', (event) => {
