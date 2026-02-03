@@ -16,7 +16,7 @@ use std::time::Instant;
 use url::Url;
 
 pub struct SimpleCliApp {
-    engine: DetectionEngine,
+    registry: ProviderRegistry,
 }
 
 impl SimpleCliApp {
@@ -32,22 +32,24 @@ impl SimpleCliApp {
         registry.register_provider(Provider::Azure(AzureProvider::new()))?;
         registry.register_provider(Provider::F5(F5Provider::new()))?;
 
-        let engine = DetectionEngine::new(registry).with_waf_mode_detection();
-
-        Ok(Self { engine })
+        Ok(Self { registry })
     }
 
     pub async fn run(&self) -> Result<()> {
         let matches = build_simple_cli().get_matches();
+        let payload_analysis_enabled = matches.get_flag("payload-analysis");
+        self.registry
+            .set_payload_analysis_enabled(payload_analysis_enabled);
+        let engine = DetectionEngine::new(self.registry.clone()).with_waf_mode_detection();
 
         // Handle special commands first
         if matches.get_flag("web") {
             let port = matches.get_one::<u16>("port").copied().unwrap_or(8080);
-            return self.start_web_server(port).await;
+            return self.start_web_server(&engine, port).await;
         }
 
         if matches.get_flag("list") {
-            return self.list_providers().await;
+            return self.list_providers(&engine).await;
         }
 
         // Handle consent command
@@ -81,9 +83,11 @@ impl SimpleCliApp {
 
         // Scan targets
         if targets.len() == 1 {
-            self.scan_single(&targets[0], &format, debug, verbose).await
+            self.scan_single(&engine, &targets[0], &format, debug, verbose)
+                .await
         } else {
-            self.scan_batch(&targets, &format, debug, verbose).await
+            self.scan_batch(&engine, &targets, &format, debug, verbose)
+                .await
         }
     }
 
@@ -141,13 +145,20 @@ impl SimpleCliApp {
         }
     }
 
-    async fn scan_single(&self, url: &str, format: &str, debug: bool, verbose: bool) -> Result<()> {
+    async fn scan_single(
+        &self,
+        engine: &DetectionEngine,
+        url: &str,
+        format: &str,
+        debug: bool,
+        verbose: bool,
+    ) -> Result<()> {
         if verbose {
             println!("🔍 Scanning: {url}");
         }
 
         let start_time = Instant::now();
-        let detection_result = self.engine.detect(url).await?;
+        let detection_result = engine.detect(url).await?;
         let scan_time = start_time.elapsed();
 
         match format {
@@ -174,6 +185,7 @@ impl SimpleCliApp {
 
     async fn scan_batch(
         &self,
+        engine: &DetectionEngine,
         urls: &[String],
         format: &str,
         debug: bool,
@@ -187,7 +199,7 @@ impl SimpleCliApp {
 
         // Use parallel batch detection with rate limiting (max 3 concurrent requests)
         let url_refs: Vec<&str> = urls.iter().map(|s| s.as_str()).collect();
-        let batch_results = self.engine.detect_batch(&url_refs, 3).await?;
+        let batch_results = engine.detect_batch(&url_refs, 3).await?;
 
         // Convert HashMap results back to Vec in original order for consistent output
         let mut results = Vec::new();
@@ -422,11 +434,11 @@ impl SimpleCliApp {
         println!();
     }
 
-    async fn list_providers(&self) -> Result<()> {
+    async fn list_providers(&self, engine: &DetectionEngine) -> Result<()> {
         println!("📋 Available Detection Providers:");
         println!();
 
-        let providers = self.engine.list_providers();
+        let providers = engine.list_providers();
 
         for provider in &providers {
             let status_icon = if provider.enabled { "✅" } else { "❌" };
@@ -455,10 +467,10 @@ impl SimpleCliApp {
         Ok(())
     }
 
-    async fn start_web_server(&self, port: u16) -> Result<()> {
+    async fn start_web_server(&self, engine: &DetectionEngine, port: u16) -> Result<()> {
         println!("🌐 Starting WAF Detector Web Server...");
 
-        let web_server = crate::web::WebServer::new(self.engine.clone());
+        let web_server = crate::web::WebServer::new(engine.clone());
         web_server.start(port).await?;
 
         Ok(())
@@ -575,6 +587,7 @@ DETECTION USAGE:
   waf-detect cloudflare.com discord.com        # Scan multiple domains  
   waf-detect @urls.txt                         # Scan from file
   waf-detect cloudflare.com --json             # JSON output
+  waf-detect example.com --payload-analysis    # Enable active payload probing (authorized targets only)
 
 SMOKE TESTING:
   waf-detect --smoke-test cloudflare.com       # Test WAF effectiveness
@@ -630,6 +643,14 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .long("verbose")
                 .short('v')
                 .help("Show verbose scanning progress")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("payload-analysis")
+                .long("payload-analysis")
+                .help(
+                    "Enable active payload-based probing during detection (authorized targets only)",
+                )
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(

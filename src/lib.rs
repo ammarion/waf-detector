@@ -17,6 +17,7 @@ pub mod dns;
 pub mod payload;
 pub mod testing;
 pub mod timing;
+pub mod tls;
 
 // NEW: WAF Effectiveness Testing module
 pub mod effectiveness;
@@ -112,6 +113,8 @@ pub struct DetectionResult {
     pub detected_cdn: Option<ProviderDetection>,
     pub provider_scores: HashMap<String, f64>,
     pub evidence_map: HashMap<String, Vec<Evidence>>,
+    #[serde(default)]
+    pub evidence: Vec<Evidence>,
     pub detection_time_ms: u64,
     pub metadata: DetectionMetadata,
 }
@@ -164,7 +167,11 @@ impl DetectionResult {
 
     /// Get all evidence as a flat list for web display
     pub fn evidence(&self) -> Vec<Evidence> {
-        self.evidence_map.values().flatten().cloned().collect()
+        if !self.evidence.is_empty() {
+            self.evidence.clone()
+        } else {
+            self.evidence_map.values().flatten().cloned().collect()
+        }
     }
 
     pub fn format_as_table(&self) -> String {

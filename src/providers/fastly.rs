@@ -63,7 +63,7 @@ impl FastlyProvider {
                     description: "Fastly restart counter header detected (definitive signature)"
                         .to_string(),
                     raw_data: restarts.clone(),
-                    signature_matched: "fastly-restarts-pattern".to_string(),
+                    signature_matched: "fastly-header".to_string(),
                 });
             }
         }
@@ -89,7 +89,7 @@ impl FastlyProvider {
                     confidence: 0.95,
                     description: "Fastly cache node served-by header detected".to_string(),
                     raw_data: served_by.clone(),
-                    signature_matched: "fastly-served-by-pattern".to_string(),
+                    signature_matched: "x-served-by-fastly".to_string(),
                 });
             }
         }

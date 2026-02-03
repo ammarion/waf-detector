@@ -522,10 +522,12 @@ impl AdvancedScoring {
         );
 
         // If we see Akamai headers, it's NOT CloudFlare
-        negative_evidence_patterns.insert(
-            "CloudFlare".to_string(),
-            vec!["akamai-grn".to_string(), "x-akamai-transformed".to_string()],
-        );
+        if let Some(patterns) = negative_evidence_patterns.get_mut("CloudFlare") {
+            patterns.extend(vec![
+                "akamai-grn".to_string(),
+                "x-akamai-transformed".to_string(),
+            ]);
+        }
 
         Self {
             evidence_weights,
@@ -794,5 +796,63 @@ impl AdvancedScoring {
 impl Default for AdvancedScoring {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Evidence, MethodType};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_known_signature_scores_higher_than_fallback() {
+        let scoring = AdvancedScoring::new();
+        let headers = HashMap::new();
+
+        let cf_ray = Evidence {
+            method_type: MethodType::Header("cf-ray".to_string()),
+            confidence: 0.95,
+            description: "CF-Ray header detected".to_string(),
+            raw_data: "abcd1234-SEA".to_string(),
+            signature_matched: "cf-ray-header".to_string(),
+        };
+
+        let unknown_header = Evidence {
+            method_type: MethodType::Header("x-unknown".to_string()),
+            confidence: 0.95,
+            description: "Unknown header".to_string(),
+            raw_data: "value".to_string(),
+            signature_matched: "unknown-header".to_string(),
+        };
+
+        let cf_score = scoring
+            .calculate_confidence("CloudFlare", &[cf_ray], &headers)
+            .score;
+        let unknown_score = scoring
+            .calculate_confidence("CloudFlare", &[unknown_header], &headers)
+            .score;
+
+        assert!(cf_score > unknown_score);
+    }
+
+    #[test]
+    fn test_dns_signature_contributes_to_confidence() {
+        let scoring = AdvancedScoring::new();
+        let headers = HashMap::new();
+
+        let dns_evidence = Evidence {
+            method_type: MethodType::DNS("cname".to_string()),
+            confidence: 0.98,
+            description: "CloudFlare CDN CNAME record".to_string(),
+            raw_data: "CNAME -> example.cloudflare.net".to_string(),
+            signature_matched: "dns-cname-cloudflare".to_string(),
+        };
+
+        let score = scoring
+            .calculate_confidence("CloudFlare", &[dns_evidence], &headers)
+            .score;
+
+        assert!(score >= 0.6);
     }
 }
