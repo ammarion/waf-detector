@@ -26,15 +26,22 @@ pub struct HttpResponse {
 
 impl HttpClient {
     pub fn new() -> Result<Self> {
-        let client = Client::builder()
+        let mut builder = Client::builder()
             .timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(10)
             .tcp_keepalive(Duration::from_secs(60))
-            .no_proxy()
             // Use a realistic browser User-Agent to avoid immediate blocking
-            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            .danger_accept_invalid_certs(true) // For testing purposes
-            .build()?;
+            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+        let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
+        if disable_proxy {
+            builder = builder.no_proxy();
+        }
+        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+
+        let client = builder.build()?;
 
         Ok(Self { client })
     }

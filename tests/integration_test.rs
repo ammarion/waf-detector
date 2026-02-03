@@ -77,6 +77,7 @@ fn test_detection_types() {
 
 #[tokio::test]
 async fn test_http_client() {
+    std::env::set_var("WAF_DETECTOR_NO_PROXY", "1");
     let client = http::HttpClient::new();
     assert!(client.is_ok());
 

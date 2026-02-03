@@ -117,8 +117,11 @@ impl EffectivenessTest {
         baseline: Option<&BaselineSignature>,
     ) -> (bool, Vec<String>) {
         let mut reasons = Vec::new();
+        // Body similarity threshold for detecting abnormal block pages.
         const SIMILARITY_THRESHOLD: f64 = 0.65;
+        // Minimum reduction ratio relative to baseline to flag an unusual response.
         const REDUCTION_RATIO: f64 = 0.70;
+        // Avoid flagging small responses; require meaningful absolute length change.
         const MIN_LENGTH_DIFF: usize = 1200;
 
         // Check common block status codes
@@ -216,7 +219,7 @@ impl EffectivenessTest {
         }
 
         // Auth challenge allowlist: don't flag as blocked if it's likely auth and no other signals
-        if let Some(value) = response_headers.get("www-authenticate") {
+        if let Some(_value) = response_headers.get("www-authenticate") {
             if status_code == 401 {
                 if reasons.len() == 1
                     && reasons
@@ -240,7 +243,6 @@ impl EffectivenessTest {
                     .first()
                     .is_some_and(|r| r.contains("Blocking status code"))
             {
-                let _ = value;
                 return (false, Vec::new());
             }
         }
@@ -506,11 +508,15 @@ impl EffectivenessTest {
         sleep(self.config.request_delay).await;
 
         // Build client with timeout
-        let client = reqwest::Client::builder()
-            .timeout(self.config.request_timeout)
-            .danger_accept_invalid_certs(true) // Allow testing sites with invalid certs (common in testing)
-            .no_proxy()
-            .build()?;
+        let mut client_builder = reqwest::Client::builder().timeout(self.config.request_timeout);
+        let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
+        if disable_proxy {
+            client_builder = client_builder.no_proxy();
+        }
+        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+            client_builder = client_builder.danger_accept_invalid_certs(true);
+        }
+        let client = client_builder.build()?;
 
         let mut request_builder = match method {
             "POST" => client.post(url).body(body.to_string()),
@@ -525,7 +531,10 @@ impl EffectivenessTest {
 
         // Add User-Agent if not present (to look more like a browser or scanner)
         // We check the input map since checking the builder is tricky
-        if !headers.keys().any(|k| k.eq_ignore_ascii_case("user-agent")) {
+        let has_valid_user_agent = headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("user-agent") && !v.trim().is_empty());
+        if !has_valid_user_agent {
             request_builder = request_builder.header("User-Agent", "WAF-Detector/1.0");
         }
 
@@ -570,7 +579,7 @@ impl EffectivenessTest {
             }
             Err(e) => {
                 Ok(TestResult {
-                    blocked: true, // Treat network failure as potential block (fail-open vs fail-close discussion)
+                    blocked: false,
                     status_code: 0,
                     evidence: format!("Connection failed: {e}"),
                     response_time: duration,

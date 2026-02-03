@@ -65,11 +65,15 @@ pub struct TimingAnalyzer {
 
 impl TimingAnalyzer {
     pub fn new(config: TimingConfig) -> Self {
-        let http_client = reqwest::Client::builder()
-            .timeout(config.request_timeout)
-            .no_proxy()
-            .build()
-            .unwrap();
+        let mut builder = reqwest::Client::builder().timeout(config.request_timeout);
+        let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
+        if disable_proxy {
+            builder = builder.no_proxy();
+        }
+        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+        let http_client = builder.build().unwrap();
 
         Self {
             config,
