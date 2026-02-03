@@ -30,3 +30,14 @@ fn test_va_report_config_fields() {
     assert_eq!(report.config.tier, config.tier);
     assert_eq!(report.config.request_budget, config.request_budget);
 }
+
+#[test]
+fn test_va_cli_output_requires_va() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from([
+        "waf-detect",
+        "--va-output",
+        "report.json",
+    ]);
+    assert!(result.is_err());
+}

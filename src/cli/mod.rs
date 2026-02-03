@@ -86,6 +86,12 @@ impl SimpleCliApp {
             };
             let mut runner = VirtualAdversaryRunner::new(config)?;
             let report = runner.run(url)?;
+            if let Some(output) = matches.get_one::<String>("va-output") {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(output, json)?;
+                println!("📄 VA report saved to: {output}");
+                return Ok(());
+            }
             println!(
                 "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {}",
                 report.target_url,
@@ -763,6 +769,13 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Run Virtual Adversary effectiveness validation (requires consent)")
                 .value_name("URL")
                 .num_args(1),
+        )
+        .arg(
+            Arg::new("va-output")
+                .long("va-output")
+                .help("Write VA report JSON to file")
+                .value_name("FILE")
+                .requires("va"),
         )
         .arg(
             Arg::new("va-tier")
