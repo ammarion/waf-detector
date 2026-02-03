@@ -432,6 +432,9 @@
                 <div class="va-explainability-card">
                     <div class="va-explainability-title">Pinned Probes</div>
                     <div class="va-pinned-actions">
+                        <button class="va-evidence-button" id="vaPinBlocked">Pin Blocked</button>
+                        <button class="va-evidence-button" id="vaPinChallenge">Pin Challenge</button>
+                        <button class="va-evidence-button" id="vaPinClear">Clear Pins</button>
                         <button class="va-evidence-button" id="vaPinnedExportJson">Export JSON</button>
                         <button class="va-evidence-button" id="vaPinnedExportCsv">Export CSV</button>
                     </div>
@@ -446,6 +449,18 @@
             const pinnedCsvBtn = document.getElementById('vaPinnedExportCsv');
             if (pinnedCsvBtn) {
                 pinnedCsvBtn.onclick = () => exportPinnedCsv();
+            }
+            const pinBlockedBtn = document.getElementById('vaPinBlocked');
+            if (pinBlockedBtn) {
+                pinBlockedBtn.onclick = () => pinByOutcome('Blocked');
+            }
+            const pinChallengeBtn = document.getElementById('vaPinChallenge');
+            if (pinChallengeBtn) {
+                pinChallengeBtn.onclick = () => pinByOutcome('Challenge');
+            }
+            const pinClearBtn = document.getElementById('vaPinClear');
+            if (pinClearBtn) {
+                pinClearBtn.onclick = () => clearPins();
             }
         }
 
@@ -1329,6 +1344,33 @@
                     toggleVaPin({ category: '', outcome: '', reason: '' }, index);
                 });
             });
+        }
+
+        function pinByOutcome(outcome) {
+            const modal = document.getElementById('vaReportModal');
+            if (!modal || !modal.classList.contains('modal-open')) return;
+            const tableBody = document.getElementById('vaReportTableBody');
+            if (!tableBody) return;
+            const rows = Array.from(tableBody.querySelectorAll('tr'));
+            rows.forEach((row, idx) => {
+                const outcomeCell = row.querySelector('td:nth-child(4)');
+                if (outcomeCell && outcomeCell.textContent.trim() === outcome) {
+                    if (!vaPinnedIndexSet.has(idx)) {
+                        const rowData = {
+                            category: row.querySelector('td:nth-child(2)')?.textContent || 'Unknown',
+                            outcome,
+                            reason: row.querySelector('td:nth-child(5)')?.textContent || '',
+                        };
+                        toggleVaPin(rowData, idx);
+                    }
+                }
+            });
+        }
+
+        function clearPins() {
+            vaPinnedIndexSet = new Set();
+            vaPinnedRows = [];
+            renderVaPinnedList();
         }
 
         function exportPinnedJson() {
