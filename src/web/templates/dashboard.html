@@ -280,6 +280,15 @@
             <div id="vaReportMeta" class="modal-meta"></div>
             <div id="vaPinnedSummary" class="va-pinned-summary"></div>
             <div id="vaReportSummary" class="modal-summary"></div>
+            <div id="vaReplayPlanPanel" class="va-replay-panel">
+                <div class="va-replay-header">
+                    <div class="va-replay-title">Replay Plan</div>
+                    <div class="va-replay-actions">
+                        <button class="va-evidence-button" id="vaReplayToggle">Show all</button>
+                    </div>
+                </div>
+                <div id="vaReplayPlanList" class="va-replay-list">No replay plan loaded.</div>
+            </div>
             <div id="vaReportExplainability" class="va-explainability" aria-live="polite"></div>
             <div class="payload-table-wrapper">
                 <table class="payload-table">
@@ -643,6 +652,7 @@
         let vaCurrentReportId = null;
         let vaCurrentReportTarget = null;
         let vaCurrentReplayPlan = [];
+        let vaReplayExpanded = false;
 
         function formatReason(reason) {
             if (!reason) return '';
@@ -1344,6 +1354,7 @@
             renderVaPinnedList();
             vaCurrentReplayPlan = Array.isArray(report.replay_plan) ? report.replay_plan : [];
             bindReplayExportActions();
+            renderReplayPlanList();
 
             const evidenceDepthSelect = document.getElementById('vaReportEvidenceDepth');
             if (evidenceDepthSelect) {
@@ -1541,6 +1552,7 @@
         function bindReplayExportActions() {
             const jsonBtn = document.getElementById('vaReplayExportJson');
             const csvBtn = document.getElementById('vaReplayExportCsv');
+            const toggleBtn = document.getElementById('vaReplayToggle');
             const disabled = !vaCurrentReplayPlan.length;
             if (jsonBtn) {
                 jsonBtn.disabled = disabled;
@@ -1550,6 +1562,35 @@
                 csvBtn.disabled = disabled;
                 csvBtn.onclick = () => exportReplayPlanCsv();
             }
+            if (toggleBtn) {
+                toggleBtn.disabled = disabled;
+                toggleBtn.textContent = vaReplayExpanded ? 'Show less' : 'Show all';
+                toggleBtn.onclick = () => {
+                    vaReplayExpanded = !vaReplayExpanded;
+                    renderReplayPlanList();
+                };
+            }
+        }
+
+        function renderReplayPlanList() {
+            const container = document.getElementById('vaReplayPlanList');
+            if (!container) return;
+            const plan = Array.isArray(vaCurrentReplayPlan) ? vaCurrentReplayPlan : [];
+            if (!plan.length) {
+                container.textContent = 'No replay plan loaded.';
+                return;
+            }
+            const visible = vaReplayExpanded ? plan : plan.slice(0, 5);
+            container.innerHTML = visible.map(item => `
+                <div class="va-replay-item">
+                    <div class="va-replay-index">#${item.index ?? ''}</div>
+                    <div class="va-replay-class">${escapeHtml(item.class || '')}</div>
+                    <div class="va-replay-channel">${escapeHtml(item.channel || '')}</div>
+                    <div class="va-replay-method">${escapeHtml(item.method || '')}</div>
+                    <div class="va-replay-url">${escapeHtml(item.url || '')}</div>
+                </div>
+            `).join('');
+            bindReplayExportActions();
         }
 
         function exportReplayPlanJson() {
