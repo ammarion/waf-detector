@@ -282,16 +282,18 @@ pub struct VaRunReport {
     pub target_url: String,
     pub plan_size: usize,
     pub summary: VaResultSummary,
+    pub config: VirtualAdversaryConfig,
     pub started_at: std::time::Instant,
     pub finished_at: Option<std::time::Instant>,
 }
 
 impl VaRunReport {
-    pub fn new(target_url: &str, plan_size: usize) -> Self {
+    pub fn new(target_url: &str, plan_size: usize, config: VirtualAdversaryConfig) -> Self {
         Self {
             target_url: target_url.to_string(),
             plan_size,
             summary: VaResultSummary::new(),
+            config,
             started_at: std::time::Instant::now(),
             finished_at: None,
         }
@@ -511,7 +513,7 @@ impl VirtualAdversaryRunner {
 
         let baseline = self.collect_baseline(target_url)?;
         let plan = self.plan();
-        let mut report = VaRunReport::new(target_url, plan.len());
+        let mut report = VaRunReport::new(target_url, plan.len(), self.config.clone());
         for item in plan {
             let outcome = self.evaluate_payload(target_url, &baseline, &item)?;
             report.summary.record(outcome);
@@ -784,7 +786,11 @@ mod tests {
 
     #[test]
     fn test_run_report_tracks_plan_and_timing() {
-        let mut report = VaRunReport::new("https://example.com", 5);
+        let mut report = VaRunReport::new(
+            "https://example.com",
+            5,
+            VirtualAdversaryConfig::default(),
+        );
         assert_eq!(report.target_url, "https://example.com");
         assert_eq!(report.plan_size, 5);
         assert!(report.finished_at.is_none());

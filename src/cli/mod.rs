@@ -95,6 +95,14 @@ impl SimpleCliApp {
                 report.summary.allowed,
                 report.summary.error
             );
+            println!(
+                "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",
+                report.config.tier,
+                report.config.request_budget,
+                report.config.request_delay.as_millis(),
+                report.config.request_timeout.as_secs(),
+                report.config.max_variants_per_payload
+            );
             return Ok(());
         }
 

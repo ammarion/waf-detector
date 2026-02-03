@@ -18,3 +18,15 @@ fn test_va_cli_defaults() {
 fn test_cli_builds() {
     build_simple_cli().debug_assert();
 }
+
+#[test]
+fn test_va_report_config_fields() {
+    let config = waf_detector::virtual_adversary::VirtualAdversaryConfig::default();
+    let report = waf_detector::virtual_adversary::VaRunReport::new(
+        "https://example.com",
+        3,
+        config.clone(),
+    );
+    assert_eq!(report.config.tier, config.tier);
+    assert_eq!(report.config.request_budget, config.request_budget);
+}
