@@ -228,3 +228,13 @@ pub const API_DOCS_HTML: &str = r#"
 </body>
 </html>
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::DASHBOARD_HTML;
+
+    #[test]
+    fn dashboard_html_contains_va_placeholder() {
+        assert!(DASHBOARD_HTML.contains("Virtual Adversary"));
+    }
+}
