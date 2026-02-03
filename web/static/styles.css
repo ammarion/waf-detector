@@ -446,11 +446,32 @@ body {
     padding: 0.75rem;
 }
 
+.va-activity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
 .va-activity-title {
     font-size: 0.85rem;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 0.5rem;
+}
+
+.va-activity-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.va-activity-select {
+    width: auto;
+    min-width: 180px;
 }
 
 .va-activity-empty {

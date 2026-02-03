@@ -124,7 +124,20 @@
                     </button>
                 </form>
                 <div class="va-activity">
-                    <div class="va-activity-title">Live Activity</div>
+                    <div class="va-activity-header">
+                        <div class="va-activity-title">Live Activity</div>
+                        <div class="va-activity-controls">
+                            <label for="vaActivityFilter">Filter</label>
+                            <select id="vaActivityFilter" class="input-field va-activity-select">
+                                <option value="all">All</option>
+                                <option value="blocked_challenge">Blocked + Challenge</option>
+                                <option value="blocked">Blocked</option>
+                                <option value="challenge">Challenge</option>
+                                <option value="allowed">Allowed</option>
+                                <option value="error">Error</option>
+                            </select>
+                        </div>
+                    </div>
                     <div id="vaActivityEmpty" class="va-activity-empty">No activity yet.</div>
                     <ul id="vaActivityLog" class="va-activity-log"></ul>
                 </div>
@@ -353,6 +366,8 @@
         }
 
         let vaEventCursor = {};
+        let vaEventCache = {};
+        let vaActivityFilter = 'all';
         let currentVaJobId = null;
 
         function resetVaActivity() {
@@ -360,22 +375,35 @@
             const empty = document.getElementById('vaActivityEmpty');
             if (log) log.innerHTML = '';
             if (empty) empty.style.display = 'block';
+            if (currentVaJobId) {
+                vaEventCache[currentVaJobId] = [];
+                vaEventCursor[currentVaJobId] = 0;
+            }
         }
 
-        function appendVaEvents(jobId, events) {
+        function shouldShowVaEvent(event) {
+            if (vaActivityFilter === 'all') return true;
+            if (vaActivityFilter === 'blocked_challenge') {
+                return event.outcome === 'Blocked' || event.outcome === 'Challenge';
+            }
+            return event.outcome && event.outcome.toLowerCase() === vaActivityFilter;
+        }
+
+        function renderVaActivity(jobId) {
             const log = document.getElementById('vaActivityLog');
             const empty = document.getElementById('vaActivityEmpty');
-            if (!log || !events) return;
+            if (!log) return;
 
-            const lastIndex = vaEventCursor[jobId] || 0;
-            const sorted = events.slice().sort((a, b) => a.index - b.index);
-            const newEvents = sorted.filter(event => event.index > lastIndex);
-            if (newEvents.length === 0) {
+            const events = vaEventCache[jobId] || [];
+            const filtered = events.filter(shouldShowVaEvent);
+            log.innerHTML = '';
+            if (filtered.length === 0) {
+                if (empty) empty.style.display = 'block';
                 return;
             }
             if (empty) empty.style.display = 'none';
 
-            newEvents.forEach(event => {
+            filtered.forEach(event => {
                 const li = document.createElement('li');
                 li.className = 'va-activity-item';
                 const outcomeClass = event.outcome === 'Blocked' ? 'va-outcome-blocked' :
@@ -389,8 +417,26 @@
                 `;
                 log.appendChild(li);
             });
+        }
 
+        function appendVaEvents(jobId, events) {
+            if (!events) return;
+
+            const lastIndex = vaEventCursor[jobId] || 0;
+            const sorted = events.slice().sort((a, b) => a.index - b.index);
+            const newEvents = sorted.filter(event => event.index > lastIndex);
+            if (newEvents.length === 0) {
+                return;
+            }
+
+            const cache = vaEventCache[jobId] || [];
+            newEvents.forEach(event => cache.push(event));
+            if (cache.length > 200) {
+                cache.splice(0, cache.length - 200);
+            }
+            vaEventCache[jobId] = cache;
             vaEventCursor[jobId] = newEvents[newEvents.length - 1].index;
+            renderVaActivity(jobId);
         }
 
         async function runVirtualAdversary() {
@@ -427,6 +473,7 @@
                     showSuccessMessage(`Virtual Adversary started for ${url}`);
                     currentVaJobId = data.job_id;
                     vaEventCursor[currentVaJobId] = 0;
+                    vaEventCache[currentVaJobId] = [];
                     resetVaActivity();
                     pollVirtualAdversary(data.job_id, url, btn, icon, text);
                 } else {
@@ -1228,6 +1275,15 @@
             fixSmokeTestDisplay();
             loadConsentStatus();
             loadVaHistory();
+            const filter = document.getElementById('vaActivityFilter');
+            if (filter) {
+                filter.addEventListener('change', (event) => {
+                    vaActivityFilter = event.target.value;
+                    if (currentVaJobId) {
+                        renderVaActivity(currentVaJobId);
+                    }
+                });
+            }
             console.log("Smoke test display fix applied on page load");
         });
     </script>

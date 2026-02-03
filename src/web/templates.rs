@@ -491,5 +491,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaActivityLog"));
         assert!(DASHBOARD_HTML.contains("reports.csv"));
         assert!(DASHBOARD_HTML.contains("vaRetentionInput"));
+        assert!(DASHBOARD_HTML.contains("vaActivityFilter"));
     }
 }
