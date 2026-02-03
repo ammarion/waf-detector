@@ -97,10 +97,13 @@ impl SimpleCliApp {
             };
             let mut runner = VirtualAdversaryRunner::new(config)?;
             if matches.get_flag("va-dry-run") {
-                let plan = runner.plan();
-                println!("🧪 VA Dry Run: {} planned payloads", plan.len());
-                for payload in plan {
-                    println!(" - {:?}: {}", payload.category, payload.payload);
+                let plan = runner.plan(url);
+                println!("🧪 VA Dry Run: {} planned probes", plan.len());
+                for probe in plan {
+                    println!(
+                        " - {:?}::{:?}: {}",
+                        probe.probe.class, probe.probe.channel, probe.display
+                    );
                 }
                 return Ok(());
             }

@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::time::Duration;
+use url::Url;
 
 use crate::effectiveness::consent::ConsentManager;
 use crate::http::HttpClient;
+use crate::virtual_adversary::dae::{probe_catalog_for_tier, Probe};
 
 pub mod dae;
 
@@ -394,6 +396,7 @@ pub trait VaHttpAdapter {
     fn get(&self, url: &str) -> anyhow::Result<VaHttpResponse>;
     fn get_with_payload(&self, url: &str, payload: &VaPayloadVariant)
         -> anyhow::Result<VaHttpResponse>;
+    fn send(&self, request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse>;
 }
 
 pub struct RealVaHttpAdapter {
@@ -425,6 +428,20 @@ impl VaHttpAdapter for RealVaHttpAdapter {
     ) -> anyhow::Result<VaHttpResponse> {
         self.get(url)
     }
+
+    fn send(&self, request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse> {
+        let response = futures::executor::block_on(self.client.request(
+            request.method,
+            &request.url,
+            &request.headers,
+            request.body.as_deref(),
+        ))?;
+        Ok(VaHttpResponse {
+            status: response.status,
+            headers: response.headers,
+            body: response.body,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -432,6 +449,7 @@ pub enum VaPayloadCategory {
     SqlInjection,
     Xss,
     PathTraversal,
+    AdversaryProbe,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -446,6 +464,21 @@ pub struct VaPayloadVariant {
     pub category: VaPayloadCategory,
     pub template_name: &'static str,
     pub payload: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct VaHttpRequest {
+    pub method: &'static str,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VaProbePlanItem {
+    pub probe: Probe,
+    pub request: VaHttpRequest,
+    pub display: String,
 }
 
 pub fn base_payloads_for_tier(tier: u8) -> Vec<VaPayloadTemplate> {
@@ -542,13 +575,22 @@ impl VirtualAdversaryRunner {
         self
     }
 
-    pub fn plan(&self) -> Vec<VaPayloadVariant> {
-        let templates = base_payloads_for_tier(self.config.tier);
+    pub fn plan(&self, target_url: &str) -> Vec<VaProbePlanItem> {
+        let probes = probe_catalog_for_tier(self.config.tier).unwrap_or_default();
         let mut plan = Vec::new();
 
-        for template in &templates {
-            let mut variants = generate_variants(template, self.config.max_variants_per_payload);
-            plan.append(&mut variants);
+        for probe in probes {
+            if let Ok(request) = build_probe_request(&probe, target_url) {
+                let display = format!(
+                    "{:?}::{:?} {}",
+                    probe.class, probe.channel, probe.description
+                );
+                plan.push(VaProbePlanItem {
+                    probe,
+                    request,
+                    display,
+                });
+            }
         }
 
         let max_plan = self.config.request_budget.saturating_sub(1);
@@ -565,13 +607,12 @@ impl VirtualAdversaryRunner {
         ))
     }
 
-    fn evaluate_payload(
+    fn evaluate_probe(
         &self,
-        target_url: &str,
         baseline: &BaselineRecord,
-        payload: &VaPayloadVariant,
+        item: &VaProbePlanItem,
     ) -> Result<(VaOutcome, String)> {
-        let response = self.http.get_with_payload(target_url, payload)?;
+        let response = self.http.send(&item.request)?;
         let diff = ResponseDiff::compare(
             baseline,
             response.status,
@@ -587,7 +628,6 @@ impl VirtualAdversaryRunner {
         ));
         Ok((outcome, reason))
     }
-
     pub fn run_with_events<F, G>(
         &mut self,
         target_url: &str,
@@ -607,14 +647,14 @@ impl VirtualAdversaryRunner {
         let _attack_wait = self.rate_limiter.record_request();
 
         let baseline = self.collect_baseline(target_url)?;
-        let plan = self.plan();
+        let plan = self.plan(target_url);
         let total = plan.len();
         on_progress(0, total);
         let mut report = VaRunReport::new(target_url, plan.len(), self.config.clone());
         for (idx, item) in plan.into_iter().enumerate() {
-            let payload_value = item.payload.clone();
-            let category = item.category;
-            let (outcome, reason) = self.evaluate_payload(target_url, &baseline, &item)?;
+            let payload_value = item.display.clone();
+            let category = VaPayloadCategory::AdversaryProbe;
+            let (outcome, reason) = self.evaluate_probe(&baseline, &item)?;
             report.summary.record(outcome);
             report.results.push(VaResultRecord {
                 payload: payload_value.clone(),
@@ -646,6 +686,38 @@ impl VirtualAdversaryRunner {
     pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
         self.run_with_events(target_url, |_, _| {}, |_| {})
     }
+}
+
+fn build_probe_request(probe: &Probe, target_url: &str) -> Result<VaHttpRequest> {
+    let mut url = Url::parse(target_url)
+        .or_else(|_| Url::parse(&format!("https://{target_url}")))?;
+
+    match probe.channel {
+        dae::ProbeChannel::Path => {
+            let path = if probe.payload.starts_with('/') {
+                probe.payload.clone()
+            } else {
+                format!("/{}", probe.payload)
+            };
+            url.set_path(&path);
+        }
+        dae::ProbeChannel::Query => {
+            url.set_query(Some(&probe.payload));
+        }
+        _ => {}
+    }
+
+    let mut headers = probe.headers.clone();
+    if probe.channel == dae::ProbeChannel::Cookie {
+        headers.push(("Cookie".to_string(), probe.payload.clone()));
+    }
+
+    Ok(VaHttpRequest {
+        method: probe.method,
+        url: url.to_string(),
+        headers,
+        body: probe.body.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -691,6 +763,14 @@ mod tests {
             _url: &str,
             _payload: &VaPayloadVariant,
         ) -> anyhow::Result<VaHttpResponse> {
+            Ok(VaHttpResponse {
+                status: 403,
+                headers: HashMap::new(),
+                body: "blocked".to_string(),
+            })
+        }
+
+        fn send(&self, _request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse> {
             Ok(VaHttpResponse {
                 status: 403,
                 headers: HashMap::new(),
@@ -1090,7 +1170,7 @@ mod tests {
             ..Default::default()
         };
         let runner = VirtualAdversaryRunner::new(config).unwrap();
-        let plan = runner.plan();
+        let plan = runner.plan("https://example.com");
         assert!(plan.len() <= 1);
     }
 
@@ -1105,9 +1185,9 @@ mod tests {
         let runner = VirtualAdversaryRunner::new(config)
             .unwrap()
             .with_http_adapter(Box::new(StubHttpAdapter::default()));
-        let plan = runner.plan();
+        let plan = runner.plan("https://example.com");
         assert!(!plan.is_empty());
-        assert!(plan.len() >= 3);
+        assert!(plan.len() >= 4);
     }
 
     #[test]
@@ -1154,15 +1234,23 @@ mod tests {
             .with_http_adapter(Box::new(StubHttpAdapter::default()));
 
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
-        let payload = VaPayloadVariant {
-            category: VaPayloadCategory::SqlInjection,
-            template_name: "sqli_basic_or",
-            payload: "' OR '1'='1".to_string(),
+        let probe = dae::Probe {
+            class: dae::ProbeClass::SemanticDrift,
+            channel: dae::ProbeChannel::Query,
+            description: "probe",
+            payload: "q=drift".to_string(),
+            headers: Vec::new(),
+            method: "GET",
+            body: None,
+        };
+        let request = build_probe_request(&probe, "https://example.com").unwrap();
+        let item = VaProbePlanItem {
+            probe,
+            request,
+            display: "SemanticDrift::Query probe".to_string(),
         };
 
-        let (outcome, _reason) = runner
-            .evaluate_payload("https://example.com", &baseline, &payload)
-            .unwrap();
+        let (outcome, _reason) = runner.evaluate_probe(&baseline, &item).unwrap();
         assert_eq!(outcome, VaOutcome::Blocked);
     }
 

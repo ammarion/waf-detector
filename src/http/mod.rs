@@ -86,6 +86,25 @@ impl HttpClient {
         self.response_to_http_response(response, url).await
     }
 
+    pub async fn request(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &[(String, String)],
+        body: Option<&str>,
+    ) -> Result<HttpResponse> {
+        let method = reqwest::Method::from_bytes(method.as_bytes())?;
+        let mut request = self.client.request(method, url);
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        if let Some(body) = body {
+            request = request.body(body.to_string());
+        }
+        let response = request.send().await?;
+        self.response_to_http_response(response, url).await
+    }
+
     pub async fn head(&self, url: &str) -> Result<HttpResponse> {
         let response = self.client.head(url).send().await?;
         self.response_to_http_response(response, url).await
