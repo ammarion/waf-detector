@@ -338,6 +338,22 @@
             `).join('');
         }
 
+        function renderEvidenceChipsInline(evidence, maxItems = 3) {
+            if (!Array.isArray(evidence) || evidence.length === 0) {
+                return '<span class="va-evidence-empty">None</span>';
+            }
+            const items = evidence.slice(0, maxItems);
+            const chips = items.map(entry => {
+                const kind = escapeHtml(entry.kind || '');
+                const detail = escapeHtml(entry.detail || '');
+                return `<span class="va-evidence-chip-inline" title="${kind}: ${detail}">${kind}</span>`;
+            }).join('');
+            const overflow = evidence.length > maxItems
+                ? `<span class="va-evidence-chip-inline va-evidence-chip-more">+${evidence.length - maxItems}</span>`
+                : '';
+            return `${chips}${overflow}`;
+        }
+
         function describeEnforcement(enforcement) {
             const key = String(enforcement || '').toLowerCase();
             if (key === 'hardblock') return 'Consistent hard blocks observed across probes.';
@@ -1188,7 +1204,7 @@
                     <td>${escapeHtml(row.payload || '')}</td>
                     <td>${escapeHtml(row.outcome || '')}</td>
                     <td>${escapeHtml(row.reason || '')}</td>
-                    <td>${escapeHtml(formatVaEvidence(row.evidence, vaReportEvidenceDepth === 'full' ? 10 : 3))}</td>
+                    <td>${renderEvidenceChipsInline(row.evidence, vaReportEvidenceDepth === 'full' ? 10 : 3)}</td>
                 </tr>
             `).join('');
         }

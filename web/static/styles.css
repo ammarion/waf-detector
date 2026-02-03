@@ -786,6 +786,27 @@ body {
     font-family: var(--font-mono);
 }
 
+.va-evidence-chip-inline {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.12rem 0.45rem;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.16);
+    color: #c7d2fe;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    margin-right: 0.2rem;
+    cursor: help;
+    border: 1px solid rgba(99, 102, 241, 0.35);
+}
+
+.va-evidence-chip-inline.va-evidence-chip-more {
+    background: rgba(15, 23, 42, 0.45);
+    color: #94a3b8;
+    border: 1px dashed rgba(148, 163, 184, 0.4);
+    cursor: default;
+}
+
 .va-evidence-kind {
     font-weight: 600;
 }
