@@ -245,6 +245,96 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff) -> VaOutcome {
     VaOutcome::Allowed
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VaPayloadCategory {
+    SqlInjection,
+    Xss,
+    PathTraversal,
+}
+
+#[derive(Debug, Clone)]
+pub struct VaPayloadTemplate {
+    pub category: VaPayloadCategory,
+    pub name: &'static str,
+    pub payload: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct VaPayloadVariant {
+    pub category: VaPayloadCategory,
+    pub template_name: &'static str,
+    pub payload: String,
+}
+
+pub fn base_payloads_for_tier(tier: u8) -> Vec<VaPayloadTemplate> {
+    let mut templates = vec![
+        VaPayloadTemplate {
+            category: VaPayloadCategory::SqlInjection,
+            name: "sqli_basic_or",
+            payload: "' OR '1'='1",
+        },
+        VaPayloadTemplate {
+            category: VaPayloadCategory::Xss,
+            name: "xss_basic_script",
+            payload: "<script>alert('XSS')</script>",
+        },
+        VaPayloadTemplate {
+            category: VaPayloadCategory::PathTraversal,
+            name: "path_traversal_basic",
+            payload: "../etc/passwd",
+        },
+    ];
+
+    if tier >= 2 {
+        templates.push(VaPayloadTemplate {
+            category: VaPayloadCategory::SqlInjection,
+            name: "sqli_union_select",
+            payload: "1' UNION SELECT NULL,NULL--",
+        });
+    }
+
+    if tier >= 3 {
+        templates.push(VaPayloadTemplate {
+            category: VaPayloadCategory::Xss,
+            name: "xss_svg",
+            payload: "<svg onload=alert('XSS')>",
+        });
+    }
+
+    templates
+}
+
+pub fn generate_variants(
+    template: &VaPayloadTemplate,
+    max_variants: u8,
+) -> Vec<VaPayloadVariant> {
+    let mut variants = Vec::new();
+    variants.push(VaPayloadVariant {
+        category: template.category,
+        template_name: template.name,
+        payload: template.payload.to_string(),
+    });
+
+    if max_variants > 1 {
+        variants.push(VaPayloadVariant {
+            category: template.category,
+            template_name: template.name,
+            payload: format!("{}{}", template.payload, " "),
+        });
+    }
+
+    if max_variants > 2 {
+        variants.push(VaPayloadVariant {
+            category: template.category,
+            template_name: template.name,
+            payload: template.payload.to_uppercase(),
+        });
+    }
+
+    variants.truncate(max_variants as usize);
+    variants
+}
+
 impl VirtualAdversaryRunner {
     pub fn new(config: VirtualAdversaryConfig) -> Result<Self> {
         config
@@ -486,5 +576,29 @@ mod tests {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
         assert_eq!(classify_outcome(200, &diff), VaOutcome::Allowed);
+    }
+
+    #[test]
+    fn test_base_payloads_by_tier() {
+        let tier1 = base_payloads_for_tier(1);
+        assert!(tier1.len() >= 3);
+
+        let tier2 = base_payloads_for_tier(2);
+        assert!(tier2.len() > tier1.len());
+
+        let tier3 = base_payloads_for_tier(3);
+        assert!(tier3.len() > tier2.len());
+    }
+
+    #[test]
+    fn test_generate_variants_respects_limit() {
+        let template = VaPayloadTemplate {
+            category: VaPayloadCategory::SqlInjection,
+            name: "sqli_basic_or",
+            payload: "' OR '1'='1",
+        };
+        let variants = generate_variants(&template, 2);
+        assert_eq!(variants.len(), 2);
+        assert_eq!(variants[0].payload, template.payload);
     }
 }
