@@ -55,3 +55,15 @@ fn test_va_dry_run_requires_va() {
     let result = cmd.try_get_matches_from(["waf-detect", "--va-dry-run"]);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_va_confidence_score_format() {
+    let summary = waf_detector::virtual_adversary::VaResultSummary {
+        total: 4,
+        blocked: 2,
+        challenge: 1,
+        allowed: 1,
+        error: 0,
+    };
+    assert!((summary.confidence_score() - 0.75).abs() < 0.001);
+}

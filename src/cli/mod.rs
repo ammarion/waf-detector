@@ -108,13 +108,14 @@ impl SimpleCliApp {
                 return Ok(());
             }
             println!(
-                "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {}",
+                "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2}",
                 report.target_url,
                 report.summary.total,
                 report.summary.blocked,
                 report.summary.challenge,
                 report.summary.allowed,
-                report.summary.error
+                report.summary.error,
+                report.summary.confidence_score()
             );
             println!(
                 "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",
