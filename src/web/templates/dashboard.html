@@ -302,7 +302,10 @@
         <div class="modal-content modal-content-narrow" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <h3 id="vaEvidenceTitle">Probe Evidence</h3>
-                <button class="modal-close" onclick="closeVaEvidenceModal()">✕</button>
+                <div class="va-modal-actions">
+                    <button class="va-evidence-button" id="vaEvidenceCopy">Copy Evidence</button>
+                    <button class="modal-close" onclick="closeVaEvidenceModal()">✕</button>
+                </div>
             </div>
             <div id="vaEvidenceMeta" class="modal-meta"></div>
             <div id="vaEvidenceBody" class="va-evidence-body"></div>
@@ -1167,6 +1170,23 @@
             }
             if (meta) {
                 meta.textContent = `${stored.created_at || ''} • ${stored.id || ''}`;
+                const copyButton = document.createElement('button');
+                copyButton.className = 'va-evidence-button';
+                copyButton.textContent = 'Copy Summary';
+                copyButton.onclick = () => {
+                    const summaryText = [
+                        `VA Report: ${report.target_url || 'Unknown'}`,
+                        `Enforcement: ${report.enforcement || 'Inconclusive'}`,
+                        `Evidence Score: ${typeof report.evidence_score === 'number' ? report.evidence_score.toFixed(2) : 'N/A'}`,
+                        `Blocked: ${blocked} | Challenge: ${challenge} | Allowed: ${allowed} | Error: ${errorCount}`,
+                    ].join('\n');
+                    navigator.clipboard.writeText(summaryText).then(() => {
+                        showSuccessMessage('Report summary copied');
+                    }).catch(() => {
+                        showErrorMessage('Copy failed');
+                    });
+                };
+                meta.appendChild(copyButton);
             }
             if (summaryEl) {
                 summaryEl.innerHTML = `
@@ -1236,6 +1256,7 @@
             const title = document.getElementById('vaEvidenceTitle');
             const meta = document.getElementById('vaEvidenceMeta');
             const body = document.getElementById('vaEvidenceBody');
+            const copyBtn = document.getElementById('vaEvidenceCopy');
             if (!modal || !row) return;
 
             if (title) {
@@ -1265,6 +1286,27 @@
                         ${evidenceList}
                     </div>
                 `;
+            }
+
+            if (copyBtn) {
+                copyBtn.onclick = () => {
+                    const evidenceLines = Array.isArray(row.evidence)
+                        ? row.evidence.map(entry => `- ${entry.kind}: ${entry.detail}`).join('\n')
+                        : 'No evidence';
+                    const text = [
+                        `Probe: ${row.category || 'Unknown'}`,
+                        `Outcome: ${row.outcome || 'Unknown'}`,
+                        `Reason: ${row.reason || ''}`,
+                        `Payload: ${row.payload || ''}`,
+                        `Evidence:`,
+                        evidenceLines
+                    ].join('\n');
+                    navigator.clipboard.writeText(text).then(() => {
+                        showSuccessMessage('Evidence copied');
+                    }).catch(() => {
+                        showErrorMessage('Copy failed');
+                    });
+                };
             }
 
             modal.classList.add('modal-open');
