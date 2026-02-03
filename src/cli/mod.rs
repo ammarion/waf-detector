@@ -130,16 +130,22 @@ impl SimpleCliApp {
             if !report.results.is_empty() {
                 println!("   Top Results:");
                 let reason_level = *matches.get_one::<u8>("va-reason-level").unwrap_or(&1);
+                let max_len = *matches.get_one::<u16>("va-max-len").unwrap_or(&80) as usize;
                 for result in report.results.iter().take(max_results) {
+                    let payload = if result.payload.len() > max_len {
+                        format!("{}...", &result.payload[..max_len.saturating_sub(3)])
+                    } else {
+                        result.payload.clone()
+                    };
                     if reason_level == 0 {
                         println!(
                             "   - {:?} | {} | {:?}",
-                            result.category, result.payload, result.outcome
+                            result.category, payload, result.outcome
                         );
                     } else {
                         println!(
                             "   - {:?} | {} | {:?} | {}",
-                            result.category, result.payload, result.outcome, result.reason
+                            result.category, payload, result.outcome, result.reason
                         );
                     }
                 }
@@ -834,6 +840,15 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .value_name("LEVEL")
                 .value_parser(clap::value_parser!(u8))
                 .default_value("1")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-max-len")
+                .long("va-max-len")
+                .help("Max payload length to print in VA output")
+                .value_name("LEN")
+                .value_parser(clap::value_parser!(u16))
+                .default_value("80")
                 .requires("va"),
         )
         .arg(
