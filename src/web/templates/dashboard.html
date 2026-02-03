@@ -150,6 +150,13 @@
                     </div>
                     <div class="consent-targets">
                         <div class="consent-targets-title">Authorized Targets</div>
+                        <div class="consent-actions">
+                            <input id="consentTargetInput" class="input-field consent-input" type="text"
+                                placeholder="example.com">
+                            <button type="button" class="btn btn-secondary consent-add" onclick="addAuthorizedTarget()">
+                                ➕ Add
+                            </button>
+                        </div>
                         <ul id="consentTargetsList" class="consent-targets-list"></ul>
                         <div id="consentTargetsEmpty" class="consent-targets-empty">No authorized targets.</div>
                     </div>
@@ -402,7 +409,7 @@
             poll();
         }
 
-        async function loadConsentStatus() {
+        function applyConsentStatus(status) {
             const badge = document.getElementById('consentStatusBadge');
             const terms = document.getElementById('consentTerms');
             const expires = document.getElementById('consentExpires');
@@ -413,6 +420,41 @@
                 return;
             }
 
+            const hasConsent = status && status.has_consent === true;
+            badge.textContent = hasConsent ? 'Valid' : 'Not Granted';
+            badge.classList.remove('consent-badge-pending');
+            badge.classList.toggle('consent-badge-valid', hasConsent);
+            badge.classList.toggle('consent-badge-invalid', !hasConsent);
+
+            terms.textContent = status && status.terms_version ? status.terms_version : '-';
+            expires.textContent = status && status.expires_in_days !== null && status.expires_in_days !== undefined
+                ? status.expires_in_days
+                : '-';
+
+            const targets = status && Array.isArray(status.authorized_targets) ? status.authorized_targets : [];
+            targetsList.innerHTML = '';
+            if (targets.length === 0) {
+                targetsEmpty.style.display = 'block';
+            } else {
+                targetsEmpty.style.display = 'none';
+                targets.forEach(target => {
+                    const li = document.createElement('li');
+                    li.className = 'consent-target-item';
+                    const span = document.createElement('span');
+                    span.textContent = target;
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'consent-remove';
+                    btn.textContent = 'Remove';
+                    btn.onclick = () => removeAuthorizedTarget(target);
+                    li.appendChild(span);
+                    li.appendChild(btn);
+                    targetsList.appendChild(li);
+                });
+            }
+        }
+
+        async function loadConsentStatus() {
             try {
                 const response = await fetch('/api/consent-status');
                 const data = await response.json();
@@ -421,44 +463,54 @@
                     throw new Error(data.error || 'Consent status unavailable');
                 }
 
-                const status = data.status;
-                const hasConsent = status.has_consent === true;
-
-                badge.textContent = hasConsent ? 'Valid' : 'Not Granted';
-                badge.classList.remove('consent-badge-pending');
-                badge.classList.toggle('consent-badge-valid', hasConsent);
-                badge.classList.toggle('consent-badge-invalid', !hasConsent);
-
-                terms.textContent = status.terms_version || '-';
-                expires.textContent = status.expires_in_days !== null && status.expires_in_days !== undefined
-                    ? status.expires_in_days
-                    : '-';
-
-                const targets = Array.isArray(status.authorized_targets) ? status.authorized_targets : [];
-                targetsList.innerHTML = '';
-                if (targets.length === 0) {
-                    targetsEmpty.style.display = 'block';
-                } else {
-                    targetsEmpty.style.display = 'none';
-                    targets.slice(0, 5).forEach(target => {
-                        const li = document.createElement('li');
-                        li.textContent = target;
-                        targetsList.appendChild(li);
-                    });
-                    if (targets.length > 5) {
-                        const li = document.createElement('li');
-                        li.textContent = `+${targets.length - 5} more...`;
-                        targetsList.appendChild(li);
-                    }
-                }
+                applyConsentStatus(data.status);
             } catch (error) {
-                badge.textContent = 'Unavailable';
-                badge.classList.remove('consent-badge-pending');
-                badge.classList.add('consent-badge-invalid');
-                terms.textContent = '-';
-                expires.textContent = '-';
-                targetsList.innerHTML = '';
-                targetsEmpty.style.display = 'block';
+                applyConsentStatus(null);
+            }
+        }
+
+        async function addAuthorizedTarget() {
+            const input = document.getElementById('consentTargetInput');
+            if (!input) return;
+            const target = input.value.trim();
+            if (!target) {
+                showErrorMessage('Enter a target to add');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/consent/add-target', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await response.json();
+                if (!data.success || !data.status) {
+                    throw new Error(data.error || 'Failed to add target');
+                }
+                input.value = '';
+                applyConsentStatus(data.status);
+                showSuccessMessage(`Authorized ${target}`);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to add target');
+            }
+        }
+
+        async function removeAuthorizedTarget(target) {
+            try {
+                const response = await fetch('/api/consent/remove-target', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+                const data = await response.json();
+                if (!data.success || !data.status) {
+                    throw new Error(data.error || 'Failed to remove target');
+                }
+                applyConsentStatus(data.status);
+                showSuccessMessage(`Removed ${target}`);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to remove target');
             }
         }
 

@@ -286,6 +286,52 @@ pub const API_DOCS_HTML: &str = r#"
   "error": null
 }</code></pre>
         </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/consent/add-target</h3>
+            <p>Add an authorized target to the consent list.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target": "example.com"
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "status": {
+    "has_consent": true,
+    "terms_version": "1.0.0",
+    "expires_in_days": 23,
+    "authorized_targets": ["example.com"],
+    "consent_timestamp": "2026-02-03T10:00:00Z"
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/consent/remove-target</h3>
+            <p>Remove an authorized target from the consent list.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target": "example.com"
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "status": {
+    "has_consent": true,
+    "terms_version": "1.0.0",
+    "expires_in_days": 23,
+    "authorized_targets": [],
+    "consent_timestamp": "2026-02-03T10:00:00Z"
+  },
+  "error": null
+}</code></pre>
+        </div>
         
         <div class="endpoint">
             <h3><span class="method get">GET</span> /api/providers</h3>
@@ -344,5 +390,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("Virtual Adversary"));
         assert!(DASHBOARD_HTML.contains("vaTestForm"));
         assert!(DASHBOARD_HTML.contains("Download VA Report"));
+        assert!(DASHBOARD_HTML.contains("consentTargetInput"));
     }
 }

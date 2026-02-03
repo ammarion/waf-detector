@@ -181,6 +181,54 @@ mod effectiveness_tests {
     }
 
     #[test]
+    fn test_remove_authorized_target() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+
+        let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+        let record = serde_json::json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "terms_version": "1.0.0",
+            "authorized_targets": ["example.com", "api.example.com"],
+            "acknowledgment": "I AGREE"
+        });
+        std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+
+        let consent_manager = consent::ConsentManager::new();
+        let removed = consent_manager
+            .remove_authorized_target("api.example.com")
+            .unwrap();
+        assert!(removed);
+
+        let status = consent_manager.status().unwrap();
+        assert_eq!(status.authorized_targets, vec!["example.com".to_string()]);
+    }
+
+    #[test]
+    fn test_remove_missing_authorized_target() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+
+        let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+        let record = serde_json::json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "terms_version": "1.0.0",
+            "authorized_targets": ["example.com"],
+            "acknowledgment": "I AGREE"
+        });
+        std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+
+        let consent_manager = consent::ConsentManager::new();
+        let removed = consent_manager
+            .remove_authorized_target("missing.example.com")
+            .unwrap();
+        assert!(!removed);
+
+        let status = consent_manager.status().unwrap();
+        assert_eq!(status.authorized_targets, vec!["example.com".to_string()]);
+    }
+
+    #[test]
     fn test_techniques_by_level() {
         // Level 1 should have basic techniques
         let level1 = techniques::get_techniques_for_level(1);

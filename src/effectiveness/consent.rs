@@ -192,6 +192,20 @@ impl ConsentManager {
         Ok(())
     }
 
+    /// Remove an authorized target
+    pub fn remove_authorized_target(&self, target: &str) -> Result<bool> {
+        let mut consent = self.load_consent()?;
+        let before = consent.authorized_targets.len();
+        consent
+            .authorized_targets
+            .retain(|entry| entry != target);
+        let removed = consent.authorized_targets.len() != before;
+        if removed {
+            self.save_consent(&consent)?;
+        }
+        Ok(removed)
+    }
+
     /// Load consent from file
     fn load_consent(&self) -> Result<ConsentRecord> {
         let content = fs::read_to_string(&self.consent_file_path)?;

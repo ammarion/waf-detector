@@ -78,6 +78,11 @@ pub struct VaRequest {
     variants: Option<u8>,
 }
 
+#[derive(Deserialize)]
+pub struct ConsentTargetRequest {
+    target: String,
+}
+
 impl VaRequest {
     fn to_config(&self) -> Result<VirtualAdversaryConfig> {
         let mut config = VirtualAdversaryConfig::default();
@@ -216,6 +221,8 @@ impl WebServer {
                 get(virtual_adversary_status),
             )
             .route("/api/consent-status", get(consent_status))
+            .route("/api/consent/add-target", post(consent_add_target))
+            .route("/api/consent/remove-target", post(consent_remove_target))
             .route("/api/providers", get(list_providers))
             .route("/api/status", get(server_status))
             // Web pages
@@ -349,6 +356,101 @@ async fn server_status() -> impl IntoResponse {
 // Handler for consent status
 async fn consent_status() -> impl IntoResponse {
     let consent_manager = ConsentManager::new();
+    match consent_manager.status() {
+        Ok(status) => {
+            let response = ConsentStatusResponse {
+                success: true,
+                status: Some(status),
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Err(e) => {
+            let response = ConsentStatusResponse {
+                success: false,
+                status: None,
+                error: Some(format!("Failed to load consent status: {e}")),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+        }
+    }
+}
+
+// Handler for adding authorized targets
+async fn consent_add_target(Json(payload): Json<ConsentTargetRequest>) -> impl IntoResponse {
+    let target = payload.target.trim();
+    if target.is_empty() {
+        let response = ConsentStatusResponse {
+            success: false,
+            status: None,
+            error: Some("Target cannot be empty".to_string()),
+        };
+        return (StatusCode::BAD_REQUEST, Json(response));
+    }
+
+    let consent_manager = ConsentManager::new();
+    if let Err(e) = consent_manager.add_authorized_target(target) {
+        let response = ConsentStatusResponse {
+            success: false,
+            status: None,
+            error: Some(format!("Failed to add target: {e}")),
+        };
+        return (StatusCode::BAD_REQUEST, Json(response));
+    }
+
+    match consent_manager.status() {
+        Ok(status) => {
+            let response = ConsentStatusResponse {
+                success: true,
+                status: Some(status),
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Err(e) => {
+            let response = ConsentStatusResponse {
+                success: false,
+                status: None,
+                error: Some(format!("Failed to load consent status: {e}")),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+        }
+    }
+}
+
+// Handler for removing authorized targets
+async fn consent_remove_target(Json(payload): Json<ConsentTargetRequest>) -> impl IntoResponse {
+    let target = payload.target.trim();
+    if target.is_empty() {
+        let response = ConsentStatusResponse {
+            success: false,
+            status: None,
+            error: Some("Target cannot be empty".to_string()),
+        };
+        return (StatusCode::BAD_REQUEST, Json(response));
+    }
+
+    let consent_manager = ConsentManager::new();
+    match consent_manager.remove_authorized_target(target) {
+        Ok(true) => {}
+        Ok(false) => {
+            let response = ConsentStatusResponse {
+                success: false,
+                status: None,
+                error: Some("Target not found".to_string()),
+            };
+            return (StatusCode::BAD_REQUEST, Json(response));
+        }
+        Err(e) => {
+            let response = ConsentStatusResponse {
+                success: false,
+                status: None,
+                error: Some(format!("Failed to remove target: {e}")),
+            };
+            return (StatusCode::BAD_REQUEST, Json(response));
+        }
+    }
+
     match consent_manager.status() {
         Ok(status) => {
             let response = ConsentStatusResponse {

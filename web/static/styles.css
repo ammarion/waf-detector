@@ -302,6 +302,23 @@ body {
     margin-bottom: 0.5rem;
 }
 
+.consent-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.consent-input {
+    flex: 1;
+    min-width: 180px;
+}
+
+.consent-add {
+    width: auto;
+    padding: 0.65rem 1rem;
+}
+
 .consent-targets-list {
     list-style: none;
     padding: 0;
@@ -311,7 +328,28 @@ body {
 }
 
 .consent-targets-list li {
-    padding: 0.15rem 0;
+    padding: 0.35rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.consent-target-item span {
+    word-break: break-word;
+}
+
+.consent-remove {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+    border-radius: 999px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.consent-remove:hover {
+    background: rgba(239, 68, 68, 0.25);
 }
 
 .consent-targets-empty {
