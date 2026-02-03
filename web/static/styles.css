@@ -457,6 +457,7 @@ body {
 .va-history-actions {
     display: flex;
     gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
 .va-history-meta {

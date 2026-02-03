@@ -979,6 +979,18 @@
                 csvBtn.textContent = 'CSV';
                 csvBtn.onclick = () => downloadVaHistoryReportCsv(report.id);
 
+                const replayJsonBtn = document.createElement('button');
+                replayJsonBtn.type = 'button';
+                replayJsonBtn.className = 'btn btn-secondary va-history-download';
+                replayJsonBtn.textContent = 'Replay JSON';
+                replayJsonBtn.onclick = () => downloadVaHistoryReplayJson(report.id);
+
+                const replayCsvBtn = document.createElement('button');
+                replayCsvBtn.type = 'button';
+                replayCsvBtn.className = 'btn btn-secondary va-history-download';
+                replayCsvBtn.textContent = 'Replay CSV';
+                replayCsvBtn.onclick = () => downloadVaHistoryReplayCsv(report.id);
+
                 const viewBtn = document.createElement('button');
                 viewBtn.type = 'button';
                 viewBtn.className = 'btn btn-secondary va-history-download';
@@ -989,6 +1001,8 @@
                 actionGroup.className = 'va-history-actions';
                 actionGroup.appendChild(btn);
                 actionGroup.appendChild(csvBtn);
+                actionGroup.appendChild(replayJsonBtn);
+                actionGroup.appendChild(replayCsvBtn);
                 actionGroup.appendChild(viewBtn);
 
                 li.appendChild(meta);
@@ -1132,6 +1146,37 @@
                 URL.revokeObjectURL(url);
             } catch (error) {
                 showErrorMessage(error.message || 'Failed to download VA CSV');
+            }
+        }
+
+        async function downloadVaHistoryReplayJson(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
+                const data = await response.json();
+                if (!data.success || !data.report) {
+                    throw new Error(data.error || 'Failed to load VA report');
+                }
+                const plan = Array.isArray(data.report.replay_plan) ? data.report.replay_plan : [];
+                const filename = reportId.replace('.json', '') + '-replay.json';
+                downloadJsonFile(filename, plan);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to download replay plan');
+            }
+        }
+
+        async function downloadVaHistoryReplayCsv(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
+                const data = await response.json();
+                if (!data.success || !data.report) {
+                    throw new Error(data.error || 'Failed to load VA report');
+                }
+                const plan = Array.isArray(data.report.replay_plan) ? data.report.replay_plan : [];
+                const csv = buildReplayPlanCsv(plan);
+                const filename = reportId.replace('.json', '') + '-replay.csv';
+                downloadCsvFile(filename, csv);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to download replay plan');
             }
         }
 
@@ -1511,20 +1556,17 @@
 
         function exportReplayPlanJson() {
             const payload = vaCurrentReplayPlan || [];
-            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `va-replay-plan-${Date.now()}.json`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
+            downloadJsonFile(`va-replay-plan-${Date.now()}.json`, payload);
         }
 
         function exportReplayPlanCsv() {
+            const csv = buildReplayPlanCsv(vaCurrentReplayPlan || []);
+            downloadCsvFile(`va-replay-plan-${Date.now()}.csv`, csv);
+        }
+
+        function buildReplayPlanCsv(plan) {
             const header = 'index,class,channel,description,method,url,headers,body';
-            const lines = (vaCurrentReplayPlan || []).map(item => {
+            const lines = (plan || []).map(item => {
                 const headers = csvEscape(JSON.stringify(item.headers || []));
                 const body = csvEscape(item.body || '');
                 return [
@@ -1538,12 +1580,27 @@
                     body,
                 ].join(',');
             });
-            const csv = [header].concat(lines).join('\n');
+            return [header].concat(lines).join('\n');
+        }
+
+        function downloadJsonFile(filename, payload) {
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadCsvFile(filename, csv) {
             const blob = new Blob([csv], { type: 'text/csv' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = `va-replay-plan-${Date.now()}.csv`;
+            link.download = filename;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);

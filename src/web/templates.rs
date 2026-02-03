@@ -528,5 +528,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaHistorySort"));
         assert!(DASHBOARD_HTML.contains("vaActivitySearch"));
         assert!(DASHBOARD_HTML.contains("deleteVaHistoryRange"));
+        assert!(DASHBOARD_HTML.contains("Replay Plan"));
     }
 }
