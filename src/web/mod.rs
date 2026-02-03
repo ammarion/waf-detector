@@ -28,6 +28,7 @@ use tower_http::{cors::CorsLayer, services::ServeDir};
 pub mod templates;
 
 const VA_REPORTS_DIR: &str = ".waf-detector/va-reports";
+const VA_REPORT_RETENTION_DEFAULT: usize = 50;
 
 #[derive(Clone)]
 pub struct WebServer {
@@ -258,6 +259,14 @@ pub struct VaReportResponse {
 }
 
 #[derive(Serialize)]
+pub struct VaRetentionResponse {
+    success: bool,
+    kept: usize,
+    deleted: usize,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct ConsentStatusResponse {
     success: bool,
     status: Option<ConsentStatus>,
@@ -300,6 +309,10 @@ impl WebServer {
             .route(
                 "/api/virtual-adversary/reports.csv",
                 get(virtual_adversary_reports_csv),
+            )
+            .route(
+                "/api/virtual-adversary/reports/cleanup",
+                post(virtual_adversary_reports_cleanup),
             )
             .route("/api/consent-status", get(consent_status))
             .route("/api/consent/add-target", post(consent_add_target))
@@ -445,6 +458,26 @@ fn load_va_report(id: &str) -> Result<VaStoredReport> {
     let content = fs::read_to_string(path)?;
     let stored = serde_json::from_str::<VaStoredReport>(&content)?;
     Ok(stored)
+}
+
+fn enforce_va_report_retention(max_reports: usize) -> Result<(usize, usize)> {
+    let mut reports = list_va_reports()?;
+    if reports.len() <= max_reports {
+        return Ok((reports.len(), 0));
+    }
+
+    let dir = va_reports_dir()?;
+    let mut deleted = 0;
+    reports.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    let to_remove = reports.split_off(max_reports);
+    for report in to_remove {
+        let path = dir.join(&report.id);
+        if fs::remove_file(path).is_ok() {
+            deleted += 1;
+        }
+    }
+    let kept = max_reports.min(reports.len());
+    Ok((kept, deleted))
 }
 
 fn csv_escape(value: &str) -> String {
@@ -1008,13 +1041,49 @@ async fn virtual_adversary_reports_csv() -> impl IntoResponse {
     }
 }
 
+#[derive(Deserialize)]
+struct VaRetentionRequest {
+    max_reports: Option<usize>,
+}
+
+// Handler to cleanup Virtual Adversary reports based on retention policy
+async fn virtual_adversary_reports_cleanup(
+    Json(payload): Json<VaRetentionRequest>,
+) -> impl IntoResponse {
+    let max_reports = payload
+        .max_reports
+        .filter(|value| *value > 0)
+        .unwrap_or(VA_REPORT_RETENTION_DEFAULT);
+
+    match enforce_va_report_retention(max_reports) {
+        Ok((kept, deleted)) => {
+            let response = VaRetentionResponse {
+                success: true,
+                kept,
+                deleted,
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Err(e) => {
+            let response = VaRetentionResponse {
+                success: false,
+                kept: 0,
+                deleted: 0,
+                error: Some(format!("Failed to cleanup reports: {e}")),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_va_reports_csv, csv_escape, report_filename, sanitize_report_component, VaJobState,
-        VaReportSummary, VaRequest,
+        VaReportSummary, VaRequest, VaStoredReport,
     };
-    use crate::virtual_adversary::VirtualAdversaryConfig;
+    use crate::virtual_adversary::{VaRunReport, VirtualAdversaryConfig};
     use std::time::Duration;
     use serde_json::json;
 
@@ -1121,6 +1190,44 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("target_url"));
         assert!(lines[1].contains("https://example.com"));
+    }
+
+    #[test]
+    fn enforce_retention_keeps_latest() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+        std::fs::create_dir_all(temp_dir.path().join(".waf-detector/va-reports")).unwrap();
+
+        let mut reports = Vec::new();
+        for idx in 0..3 {
+            let created_at = chrono::Utc::now() - chrono::Duration::seconds(idx as i64);
+            let report = VaReportSummary {
+                id: format!("va-{idx}.json"),
+                target_url: "https://example.com".to_string(),
+                created_at,
+                plan_size: 10,
+                blocked: 5,
+                challenge: 2,
+                allowed: 3,
+                error: 0,
+                risk_label: "MEDIUM".to_string(),
+            };
+            let stored = VaStoredReport {
+                id: report.id.clone(),
+                created_at,
+                report: VaRunReport::new("https://example.com", 0, VirtualAdversaryConfig::default()),
+            };
+            let path = temp_dir
+                .path()
+                .join(".waf-detector/va-reports")
+                .join(&report.id);
+            std::fs::write(path, serde_json::to_string_pretty(&stored).unwrap()).unwrap();
+            reports.push(report);
+        }
+
+        let (kept, deleted) = super::enforce_va_report_retention(2).unwrap();
+        assert_eq!(kept, 2);
+        assert_eq!(deleted, 1);
     }
 
     #[test]

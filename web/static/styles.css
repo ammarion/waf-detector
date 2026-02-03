@@ -374,6 +374,22 @@ body {
     gap: 0.5rem;
 }
 
+.va-history-retention {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.va-history-retention label {
+    color: var(--text-secondary);
+}
+
+.va-retention-input {
+    max-width: 110px;
+    padding: 0.5rem 0.75rem;
+}
+
 .va-history-empty {
     font-size: 0.9rem;
     color: var(--text-secondary);

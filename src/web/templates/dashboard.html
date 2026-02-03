@@ -180,6 +180,14 @@
                             📄 CSV
                         </button>
                     </div>
+                    <div class="va-history-retention">
+                        <label for="vaRetentionInput">Keep last</label>
+                        <input id="vaRetentionInput" class="input-field va-retention-input" type="number" min="5"
+                            value="50">
+                        <button type="button" class="btn btn-secondary" onclick="cleanupVaHistory()">
+                            🧹 Cleanup
+                        </button>
+                    </div>
                     <div id="vaHistoryEmpty" class="va-history-empty">No saved reports yet.</div>
                     <ul id="vaHistoryList" class="va-history-list"></ul>
                 </div>
@@ -669,6 +677,28 @@
                 URL.revokeObjectURL(url);
             } catch (error) {
                 showErrorMessage(error.message || 'Failed to download CSV');
+            }
+        }
+
+        async function cleanupVaHistory() {
+            const input = document.getElementById('vaRetentionInput');
+            const value = input ? parseInt(input.value, 10) : 0;
+            const maxReports = Number.isFinite(value) && value > 0 ? value : 50;
+
+            try {
+                const response = await fetch('/api/virtual-adversary/reports/cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ max_reports: maxReports })
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.error || 'Failed to cleanup reports');
+                }
+                showSuccessMessage(`Kept ${data.kept}, deleted ${data.deleted}`);
+                loadVaHistory();
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to cleanup reports');
             }
         }
 

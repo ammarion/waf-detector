@@ -314,6 +314,24 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,
         </div>
 
         <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary/reports/cleanup</h3>
+            <p>Apply retention to saved Virtual Adversary reports.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "max_reports": 50
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "kept": 50,
+  "deleted": 12,
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
             <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id</h3>
             <p>Fetch a saved Virtual Adversary report by id.</p>
 
@@ -472,5 +490,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaHistoryList"));
         assert!(DASHBOARD_HTML.contains("vaActivityLog"));
         assert!(DASHBOARD_HTML.contains("reports.csv"));
+        assert!(DASHBOARD_HTML.contains("vaRetentionInput"));
     }
 }
