@@ -563,9 +563,22 @@ fn build_va_reports_csv(reports: &[VaReportSummary]) -> String {
     lines.join("\n")
 }
 
+fn format_va_evidence(evidence: &[crate::virtual_adversary::VaEvidence]) -> String {
+    if evidence.is_empty() {
+        return String::new();
+    }
+    evidence
+        .iter()
+        .map(|entry| format!("{:?}:{}", entry.kind, entry.detail))
+        .collect::<Vec<String>>()
+        .join("|")
+}
+
 fn build_va_report_csv(stored: &VaStoredReport) -> String {
     let mut lines = Vec::new();
-    lines.push("report_id,target_url,created_at,index,category,payload,outcome,reason".to_string());
+    lines.push(
+        "report_id,target_url,created_at,index,category,payload,outcome,reason,evidence".to_string(),
+    );
     for (idx, record) in stored.report.results.iter().enumerate() {
         let row = vec![
             csv_escape(&stored.id),
@@ -576,6 +589,7 @@ fn build_va_report_csv(stored: &VaStoredReport) -> String {
             csv_escape(&record.payload),
             csv_escape(&format!("{:?}", record.outcome)),
             csv_escape(&record.reason),
+            csv_escape(&format_va_evidence(&record.evidence)),
         ]
         .join(",");
         lines.push(row);
@@ -1334,6 +1348,7 @@ mod tests {
             category: crate::virtual_adversary::VaPayloadCategory::SqlInjection,
             outcome: crate::virtual_adversary::VaOutcome::Blocked,
             reason: "status=403".to_string(),
+            evidence: Vec::new(),
         });
         let stored = VaStoredReport {
             id: "va-1.json".to_string(),

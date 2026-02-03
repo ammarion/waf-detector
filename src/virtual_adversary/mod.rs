@@ -226,13 +226,73 @@ pub enum VaOutcome {
     Error,
 }
 
-pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> (VaOutcome, String) {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VaEvidenceKind {
+    StatusCode,
+    ChallengeHeader,
+    BlockedKeyword,
+    ChallengeKeyword,
+    BaselineDeviation,
+    StatusChange,
+    HeaderDiff,
+    LengthDelta,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VaEvidence {
+    pub kind: VaEvidenceKind,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaProbeEvaluation {
+    pub outcome: VaOutcome,
+    pub reason: String,
+    pub evidence: Vec<VaEvidence>,
+}
+
+pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> VaProbeEvaluation {
+    let mut evidence = Vec::new();
+
+    if diff.status_changed {
+        evidence.push(VaEvidence {
+            kind: VaEvidenceKind::StatusChange,
+            detail: format!("status_changed baseline_delta={}", diff.status_changed),
+        });
+    }
+
+    if diff.length_delta > 0 {
+        evidence.push(VaEvidence {
+            kind: VaEvidenceKind::LengthDelta,
+            detail: format!("length_delta={}", diff.length_delta),
+        });
+    }
+
+    if !diff.header_differences.is_empty() {
+        evidence.push(VaEvidence {
+            kind: VaEvidenceKind::HeaderDiff,
+            detail: format!("header_diff={}", diff.header_differences.join(",")),
+        });
+    }
+
     if status_code == 0 {
-        return (VaOutcome::Error, "status=0".to_string());
+        return VaProbeEvaluation {
+            outcome: VaOutcome::Error,
+            reason: "status=0".to_string(),
+            evidence,
+        };
     }
 
     if status_code == 429 || status_code == 403 || status_code == 406 {
-        return (VaOutcome::Blocked, format!("status={status_code}"));
+        evidence.push(VaEvidence {
+            kind: VaEvidenceKind::StatusCode,
+            detail: format!("status={status_code}"),
+        });
+        return VaProbeEvaluation {
+            outcome: VaOutcome::Blocked,
+            reason: format!("status={status_code}"),
+            evidence,
+        };
     }
 
     let challenge_headers = ["cf-ray", "cf-chl-bypass", "x-akamai-transformed"];
@@ -241,7 +301,15 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> (V
         .iter()
         .any(|h| challenge_headers.contains(&h.as_str()))
     {
-        return (VaOutcome::Challenge, "challenge-header".to_string());
+        evidence.push(VaEvidence {
+            kind: VaEvidenceKind::ChallengeHeader,
+            detail: "challenge-header".to_string(),
+        });
+        return VaProbeEvaluation {
+            outcome: VaOutcome::Challenge,
+            reason: "challenge-header".to_string(),
+            evidence,
+        };
     }
 
     let body_lc = body.to_lowercase();
@@ -249,18 +317,49 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> (V
         || body_lc.contains("request blocked")
         || body_lc.contains("forbidden")
     {
-        return (VaOutcome::Blocked, "blocked-keyword".to_string());
+        evidence.push(VaEvidence {
+            kind: VaEvidenceKind::BlockedKeyword,
+            detail: "blocked-keyword".to_string(),
+        });
+        return VaProbeEvaluation {
+            outcome: VaOutcome::Blocked,
+            reason: "blocked-keyword".to_string(),
+            evidence,
+        };
     }
 
     if body_lc.contains("captcha") || body_lc.contains("challenge") || body_lc.contains("verify") {
-        return (VaOutcome::Challenge, "challenge-keyword".to_string());
+        evidence.push(VaEvidence {
+            kind: VaEvidenceKind::ChallengeKeyword,
+            detail: "challenge-keyword".to_string(),
+        });
+        return VaProbeEvaluation {
+            outcome: VaOutcome::Challenge,
+            reason: "challenge-keyword".to_string(),
+            evidence,
+        };
     }
 
     if diff.significant_length_change || (diff.status_changed && diff.length_delta > 200) {
-        return (VaOutcome::Challenge, "baseline-deviation".to_string());
+        evidence.push(VaEvidence {
+            kind: VaEvidenceKind::BaselineDeviation,
+            detail: format!(
+                "baseline-deviation length_delta={} status_changed={}",
+                diff.length_delta, diff.status_changed
+            ),
+        });
+        return VaProbeEvaluation {
+            outcome: VaOutcome::Challenge,
+            reason: "baseline-deviation".to_string(),
+            evidence,
+        };
     }
 
-    (VaOutcome::Allowed, "no-anomaly".to_string())
+    VaProbeEvaluation {
+        outcome: VaOutcome::Allowed,
+        reason: "no-anomaly".to_string(),
+        evidence,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,6 +460,7 @@ pub struct VaResultRecord {
     pub category: VaPayloadCategory,
     pub outcome: VaOutcome,
     pub reason: String,
+    pub evidence: Vec<VaEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -371,6 +471,7 @@ pub struct VaPayloadEvent {
     pub payload: String,
     pub outcome: VaOutcome,
     pub reason: String,
+    pub evidence: Vec<VaEvidence>,
 }
 
 pub fn va_report_schema() -> serde_json::Value {
@@ -611,7 +712,7 @@ impl VirtualAdversaryRunner {
         &self,
         baseline: &BaselineRecord,
         item: &VaProbePlanItem,
-    ) -> Result<(VaOutcome, String)> {
+    ) -> Result<VaProbeEvaluation> {
         let response = self.http.send(&item.request)?;
         let diff = ResponseDiff::compare(
             baseline,
@@ -619,14 +720,14 @@ impl VirtualAdversaryRunner {
             &response.headers,
             &response.body,
         );
-        let (outcome, mut reason) = classify_outcome(response.status, &diff, &response.body);
-        reason.push_str(&format!(
+        let mut evaluation = classify_outcome(response.status, &diff, &response.body);
+        evaluation.reason.push_str(&format!(
             " status={} len_delta={} header_diff={}",
             response.status,
             diff.length_delta,
             diff.header_differences.len()
         ));
-        Ok((outcome, reason))
+        Ok(evaluation)
     }
     pub fn run_with_events<F, G>(
         &mut self,
@@ -654,21 +755,23 @@ impl VirtualAdversaryRunner {
         for (idx, item) in plan.into_iter().enumerate() {
             let payload_value = item.display.clone();
             let category = VaPayloadCategory::AdversaryProbe;
-            let (outcome, reason) = self.evaluate_probe(&baseline, &item)?;
-            report.summary.record(outcome);
+            let evaluation = self.evaluate_probe(&baseline, &item)?;
+            report.summary.record(evaluation.outcome);
             report.results.push(VaResultRecord {
                 payload: payload_value.clone(),
                 category,
-                outcome,
-                reason: reason.clone(),
+                outcome: evaluation.outcome,
+                reason: evaluation.reason.clone(),
+                evidence: evaluation.evidence.clone(),
             });
             on_event(VaPayloadEvent {
                 index: idx + 1,
                 total,
                 category,
                 payload: payload_value,
-                outcome,
-                reason,
+                outcome: evaluation.outcome,
+                reason: evaluation.reason,
+                evidence: evaluation.evidence,
             });
             on_progress(idx + 1, total);
         }
@@ -1030,10 +1133,12 @@ mod tests {
     fn test_classify_outcome_blocked_by_status() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 403, &HashMap::new(), "blocked");
-        assert_eq!(
-            classify_outcome(403, &diff, "blocked").0,
-            VaOutcome::Blocked
-        );
+        let evaluation = classify_outcome(403, &diff, "blocked");
+        assert_eq!(evaluation.outcome, VaOutcome::Blocked);
+        assert!(evaluation
+            .evidence
+            .iter()
+            .any(|e| e.kind == VaEvidenceKind::StatusCode));
     }
 
     #[test]
@@ -1042,50 +1147,56 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("cf-ray".to_string(), "123".to_string());
         let diff = ResponseDiff::compare(&baseline, 200, &headers, "ok");
-        assert_eq!(
-            classify_outcome(200, &diff, "ok").0,
-            VaOutcome::Challenge
-        );
+        let evaluation = classify_outcome(200, &diff, "ok");
+        assert_eq!(evaluation.outcome, VaOutcome::Challenge);
+        assert!(evaluation
+            .evidence
+            .iter()
+            .any(|e| e.kind == VaEvidenceKind::ChallengeHeader));
     }
 
     #[test]
     fn test_classify_outcome_allowed() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
-        assert_eq!(
-            classify_outcome(200, &diff, "ok").0,
-            VaOutcome::Allowed
-        );
+        let evaluation = classify_outcome(200, &diff, "ok");
+        assert_eq!(evaluation.outcome, VaOutcome::Allowed);
     }
 
     #[test]
     fn test_classify_outcome_challenge_by_body() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "captcha required");
-        assert_eq!(
-            classify_outcome(200, &diff, "captcha required").0,
-            VaOutcome::Challenge
-        );
+        let evaluation = classify_outcome(200, &diff, "captcha required");
+        assert_eq!(evaluation.outcome, VaOutcome::Challenge);
+        assert!(evaluation
+            .evidence
+            .iter()
+            .any(|e| e.kind == VaEvidenceKind::ChallengeKeyword));
     }
 
     #[test]
     fn test_classify_outcome_challenge_on_baseline_deviation() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), &"a".repeat(1000));
         let diff = ResponseDiff::compare(&baseline, 500, &HashMap::new(), &"b".repeat(10));
-        assert_eq!(
-            classify_outcome(500, &diff, "error").0,
-            VaOutcome::Challenge
-        );
+        let evaluation = classify_outcome(500, &diff, "error");
+        assert_eq!(evaluation.outcome, VaOutcome::Challenge);
+        assert!(evaluation
+            .evidence
+            .iter()
+            .any(|e| e.kind == VaEvidenceKind::BaselineDeviation));
     }
 
     #[test]
     fn test_classify_outcome_blocked_by_body_keywords() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "Access Denied");
-        assert_eq!(
-            classify_outcome(200, &diff, "Access Denied").0,
-            VaOutcome::Blocked
-        );
+        let evaluation = classify_outcome(200, &diff, "Access Denied");
+        assert_eq!(evaluation.outcome, VaOutcome::Blocked);
+        assert!(evaluation
+            .evidence
+            .iter()
+            .any(|e| e.kind == VaEvidenceKind::BlockedKeyword));
     }
 
     #[test]
@@ -1250,8 +1361,8 @@ mod tests {
             display: "SemanticDrift::Query probe".to_string(),
         };
 
-        let (outcome, _reason) = runner.evaluate_probe(&baseline, &item).unwrap();
-        assert_eq!(outcome, VaOutcome::Blocked);
+        let evaluation = runner.evaluate_probe(&baseline, &item).unwrap();
+        assert_eq!(evaluation.outcome, VaOutcome::Blocked);
     }
 
     #[test]

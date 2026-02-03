@@ -618,7 +618,7 @@ body {
 
 .va-activity-item {
     display: grid;
-    grid-template-columns: auto auto auto 1fr;
+    grid-template-columns: auto auto auto 1fr 1fr;
     gap: 0.5rem;
     align-items: center;
     padding: 0.35rem 0.5rem;
@@ -667,6 +667,13 @@ body {
     color: var(--text-secondary);
     font-family: var(--font-mono);
     word-break: break-word;
+}
+
+.va-activity-evidence {
+    color: #cbd5f5;
+    font-family: var(--font-mono);
+    word-break: break-word;
+    opacity: 0.85;
 }
 /* Results Section */
 .results-section {

@@ -271,6 +271,7 @@
                             <th>Payload</th>
                             <th>Outcome</th>
                             <th>Reason</th>
+                            <th>Evidence</th>
                         </tr>
                     </thead>
                     <tbody id="vaReportTableBody"></tbody>
@@ -297,6 +298,13 @@
                     '/': '&#47;'
                 })[s];
             });
+        }
+
+        function formatVaEvidence(evidence, maxItems = 2) {
+            if (!Array.isArray(evidence) || evidence.length === 0) return '';
+            const items = evidence.slice(0, maxItems).map(entry => `${entry.kind}:${entry.detail}`);
+            const suffix = evidence.length > maxItems ? ` +${evidence.length - maxItems}` : '';
+            return `${items.join(' | ')}${suffix}`;
         }
 
         // Helper function to display status codes safely
@@ -445,7 +453,8 @@
 
         function shouldShowVaEvent(event) {
             if (vaActivitySearchTerm) {
-                const haystack = `${event.category || ''} ${event.payload || ''} ${event.reason || ''} ${event.outcome || ''}`.toLowerCase();
+                const evidenceText = formatVaEvidence(event.evidence || [], 6);
+                const haystack = `${event.category || ''} ${event.payload || ''} ${event.reason || ''} ${event.outcome || ''} ${evidenceText}`.toLowerCase();
                 if (!haystack.includes(vaActivitySearchTerm)) {
                     return false;
                 }
@@ -482,6 +491,7 @@
                     <span class="va-activity-category">${escapeHtml(event.category)}</span>
                     <span class="va-activity-outcome ${outcomeClass}">${escapeHtml(event.outcome)}</span>
                     <span class="va-activity-reason">${escapeHtml(event.reason)}</span>
+                    <span class="va-activity-evidence">${escapeHtml(formatVaEvidence(event.evidence))}</span>
                 `;
                 log.appendChild(li);
             });
@@ -1045,6 +1055,7 @@
                         <td>${escapeHtml(row.payload || '')}</td>
                         <td>${escapeHtml(row.outcome || '')}</td>
                         <td>${escapeHtml(row.reason || '')}</td>
+                        <td>${escapeHtml(formatVaEvidence(row.evidence, 3))}</td>
                     </tr>
                 `).join('');
             }

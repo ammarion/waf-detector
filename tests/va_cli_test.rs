@@ -121,6 +121,7 @@ fn test_va_report_top_results_has_reason() {
         category: waf_detector::virtual_adversary::VaPayloadCategory::SqlInjection,
         outcome: waf_detector::virtual_adversary::VaOutcome::Blocked,
         reason: "status=403".to_string(),
+        evidence: Vec::new(),
     });
     assert_eq!(report.results[0].reason, "status=403");
 }
