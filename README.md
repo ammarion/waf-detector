@@ -62,6 +62,11 @@ echo "https://example.com" >> urls.txt
 # Then open http://localhost:8080 in your browser
 ```
 
+**Include payload-based analysis (optional but recommended for full detection coverage):**
+```bash
+./target/release/waf-detect example.com --payload-analysis
+```
+
 ## 🛡️ Features
 
 - **WAF & CDN Detection**: Identifies protection systems with high accuracy
@@ -82,6 +87,11 @@ Test how well a WAF blocks common attack patterns:
 # Using the command line
 ./target/release/waf-detect --smoke-test example.com
 ```
+
+**Status meanings:**
+- `BLOCKED`: Request was blocked by WAF or edge controls.
+- `CHALLENGE`: Challenge or bot protection triggered (e.g., JavaScript/CAPTCHA).
+- `ERROR`: Non-blocking failure (e.g., 404/500/timeout) that is not treated as a WAF block.
 
 ### Attack Categories Tested
 
@@ -183,6 +193,9 @@ The effectiveness testing module includes a robust consent management system:
 
 # Aggressive testing mode
 ./target/release/waf-detect --smoke-test example.com --aggressive
+
+# Enable payload-based analysis (adds additional detection signals)
+./target/release/waf-detect example.com --payload-analysis
 
 # Custom headers for testing
 ./target/release/waf-detect --smoke-test example.com -H "Authorization: Bearer token"
