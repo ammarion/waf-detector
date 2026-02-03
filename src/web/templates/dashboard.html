@@ -257,6 +257,48 @@
                     <ul id="vaHistoryList" class="va-history-list"></ul>
                 </div>
             </div>
+
+            <div class="card">
+                <h2>🧪 VA2 Behavioral Campaign</h2>
+                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
+                    Research-grade behavioral profiling with deterministic, replayable campaigns (no OWASP payload overlap).
+                </p>
+                <form id="va2TestForm">
+                    <div class="input-group">
+                        <label for="va2Url">Enter URL to test:</label>
+                        <input type="url" id="va2Url" class="input-field" placeholder="https://example.com" required>
+                    </div>
+                    <div class="va-grid">
+                        <div class="input-group">
+                            <label for="va2Phases">Phases</label>
+                            <input type="text" id="va2Phases" class="input-field"
+                                value="baseline,protocol-variance">
+                        </div>
+                        <div class="input-group">
+                            <label for="va2Seed">Seed</label>
+                            <input type="number" id="va2Seed" class="input-field" min="1" value="1337">
+                        </div>
+                        <div class="input-group">
+                            <label for="va2Budget">Budget</label>
+                            <input type="number" id="va2Budget" class="input-field" min="5" value="60">
+                        </div>
+                    </div>
+                    <p style="margin-bottom: 1rem; color: #94a3b8; font-size: 0.85rem;">
+                        Consent required. Use <code>./waf-detect --consent request</code> before running.
+                    </p>
+                    <div class="va-action-row">
+                        <button type="button" class="btn btn-secondary" id="va2PlanBtn">
+                            <span>🧭</span>
+                            <span>Generate Plan</span>
+                        </button>
+                        <button type="submit" class="btn" id="va2RunBtn">
+                            <span id="va2RunIcon">🧪</span>
+                            <span id="va2RunText">Run VA2</span>
+                        </button>
+                    </div>
+                </form>
+                <div class="va2-result" id="va2Result" style="display:none;"></div>
+            </div>
         </div>
 
         <!-- Results Section -->
@@ -550,6 +592,15 @@
             await runVirtualAdversary();
         });
 
+        document.getElementById('va2TestForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await runVa2Campaign();
+        });
+
+        document.getElementById('va2PlanBtn').addEventListener('click', async () => {
+            await generateVa2Plan();
+        });
+
         async function scanSingleUrl(url) {
             const btn = document.querySelector('#singleScanForm button');
             const icon = document.getElementById('singleScanIcon');
@@ -639,6 +690,74 @@
                 showErrorMessage(`Error: ${error.message}`);
             } finally {
                 setButtonLoading(btn, icon, text, false, 'Run Smoke Test');
+            }
+        }
+
+        function buildVa2Payload() {
+            return {
+                target_url: document.getElementById('va2Url').value,
+                phases: document.getElementById('va2Phases').value,
+                seed: Number(document.getElementById('va2Seed').value || 1337),
+                budget: Number(document.getElementById('va2Budget').value || 60)
+            };
+        }
+
+        function showVa2Result(message, isError = false) {
+            const box = document.getElementById('va2Result');
+            box.style.display = 'block';
+            box.textContent = message;
+            box.style.borderColor = isError ? 'rgba(248,113,113,0.5)' : 'rgba(34,197,94,0.4)';
+        }
+
+        async function generateVa2Plan() {
+            const btn = document.getElementById('va2PlanBtn');
+            btn.disabled = true;
+            btn.textContent = 'Generating...';
+            try {
+                const response = await fetch('/api/virtual-adversary2/plan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(buildVa2Payload())
+                });
+                const data = await response.json();
+                if (data.success && data.plan) {
+                    const steps = data.plan.steps ? data.plan.steps.length : 0;
+                    showVa2Result(`Plan ready: ${steps} steps across ${data.plan.phases.length} phases.`);
+                } else {
+                    showVa2Result(data.error || 'Failed to generate VA2 plan', true);
+                }
+            } catch (error) {
+                showVa2Result(`Error: ${error.message}`, true);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>🧭</span><span>Generate Plan</span>';
+            }
+        }
+
+        async function runVa2Campaign() {
+            const btn = document.getElementById('va2RunBtn');
+            const icon = document.getElementById('va2RunIcon');
+            const text = document.getElementById('va2RunText');
+            setButtonLoading(btn, icon, text, true, 'Running VA2...');
+
+            try {
+                const response = await fetch('/api/virtual-adversary2/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(buildVa2Payload())
+                });
+                const data = await response.json();
+                if (data.success && data.report) {
+                    const errors = data.report.results.filter(r => r.error).length;
+                    showVa2Result(`VA2 run complete: ${data.report.results.length} steps, ${errors} errors.`);
+                    showSuccessMessage(`VA2 completed for ${data.report.target_url}`);
+                } else {
+                    showVa2Result(data.error || 'VA2 run failed', true);
+                }
+            } catch (error) {
+                showVa2Result(`Error: ${error.message}`, true);
+            } finally {
+                setButtonLoading(btn, icon, text, false, 'Run VA2');
             }
         }
 
@@ -2036,6 +2155,9 @@
                 } else if (buttonId === 'vaTestForm') {
                     icon.innerHTML = '🧠';
                     text.textContent = customText || 'Run Virtual Adversary';
+                } else if (buttonId === 'va2TestForm') {
+                    icon.innerHTML = '🧪';
+                    text.textContent = customText || 'Run VA2';
                 } else {
                     icon.innerHTML = '🚀';
                     text.textContent = 'Scan URL';

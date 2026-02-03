@@ -5,6 +5,9 @@ use crate::script_executor::{CombinedResult, ScriptExecutor};
 use crate::virtual_adversary::{
     VaOutcome, VaPayloadCategory, VaRunReport, VirtualAdversaryConfig, VirtualAdversaryRunner,
 };
+use crate::virtual_adversary2::{
+    build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2RunReport, Va2Runner,
+};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -29,6 +32,7 @@ pub mod templates;
 
 const VA_REPORTS_DIR: &str = ".waf-detector/va-reports";
 const VA_REPORT_RETENTION_DEFAULT: usize = 50;
+const VA2_PHASE_DEFAULT: &str = "baseline,protocol-variance";
 
 #[derive(Clone)]
 pub struct WebServer {
@@ -87,6 +91,14 @@ pub struct VaRequest {
 }
 
 #[derive(Deserialize)]
+pub struct Va2Request {
+    target_url: String,
+    phases: Option<String>,
+    seed: Option<u64>,
+    budget: Option<u32>,
+}
+
+#[derive(Deserialize)]
 pub struct ConsentTargetRequest {
     target: String,
 }
@@ -122,10 +134,43 @@ impl VaRequest {
     }
 }
 
+fn parse_va2_phases(raw: &str) -> Result<Vec<Va2Phase>> {
+    let mut phases = Vec::new();
+    for item in raw.split(',') {
+        let phase = match item.trim().to_lowercase().as_str() {
+            "baseline" => Va2Phase::Baseline,
+            "protocol-variance" => Va2Phase::ProtocolVariance,
+            "state-escalation" => Va2Phase::StateEscalation,
+            "behavioral-pressure" => Va2Phase::BehavioralPressure,
+            "challenge-interaction" => Va2Phase::ChallengeInteraction,
+            other => return Err(anyhow!("unknown va2 phase: {other}")),
+        };
+        phases.push(phase);
+    }
+    if phases.is_empty() {
+        return Err(anyhow!("va2 phases cannot be empty"));
+    }
+    Ok(phases)
+}
+
 #[derive(Serialize)]
 pub struct VaResponse {
     success: bool,
     result: Option<VaRunReport>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Va2PlanResponse {
+    success: bool,
+    plan: Option<serde_json::Value>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Va2RunResponse {
+    success: bool,
+    report: Option<Va2RunReport>,
     error: Option<String>,
 }
 
@@ -344,6 +389,8 @@ impl WebServer {
                 "/api/virtual-adversary/reports/delete-range",
                 post(virtual_adversary_reports_delete_range),
             )
+            .route("/api/virtual-adversary2/plan", post(virtual_adversary2_plan))
+            .route("/api/virtual-adversary2/run", post(virtual_adversary2_run))
             .route("/api/consent-status", get(consent_status))
             .route("/api/consent/add-target", post(consent_add_target))
             .route("/api/consent/remove-target", post(consent_remove_target))
@@ -1311,6 +1358,81 @@ async fn virtual_adversary_reports_delete_range(
             };
             (StatusCode::BAD_REQUEST, Json(response))
         }
+    }
+}
+
+async fn virtual_adversary2_plan(Json(payload): Json<Va2Request>) -> impl IntoResponse {
+    let phases_raw = payload.phases.as_deref().unwrap_or(VA2_PHASE_DEFAULT);
+    let phases = match parse_va2_phases(phases_raw) {
+        Ok(phases) => phases,
+        Err(err) => {
+            return Json(Va2PlanResponse {
+                success: false,
+                plan: None,
+                error: Some(err.to_string()),
+            });
+        }
+    };
+
+    let config = Va2CampaignConfig {
+        seed: payload.seed.unwrap_or(1337),
+        budget: payload.budget.unwrap_or(60),
+    };
+
+    match build_va2_campaign_plan(&payload.target_url, &phases, config) {
+        Ok(plan) => Json(Va2PlanResponse {
+            success: true,
+            plan: Some(serde_json::to_value(plan).unwrap_or_else(|_| serde_json::json!({}))),
+            error: None,
+        }),
+        Err(err) => Json(Va2PlanResponse {
+            success: false,
+            plan: None,
+            error: Some(err.to_string()),
+        }),
+    }
+}
+
+async fn virtual_adversary2_run(Json(payload): Json<Va2Request>) -> impl IntoResponse {
+    let phases_raw = payload.phases.as_deref().unwrap_or(VA2_PHASE_DEFAULT);
+    let phases = match parse_va2_phases(phases_raw) {
+        Ok(phases) => phases,
+        Err(err) => {
+            return Json(Va2RunResponse {
+                success: false,
+                report: None,
+                error: Some(err.to_string()),
+            });
+        }
+    };
+
+    let config = Va2CampaignConfig {
+        seed: payload.seed.unwrap_or(1337),
+        budget: payload.budget.unwrap_or(60),
+    };
+
+    let plan = match build_va2_campaign_plan(&payload.target_url, &phases, config) {
+        Ok(plan) => plan,
+        Err(err) => {
+            return Json(Va2RunResponse {
+                success: false,
+                report: None,
+                error: Some(err.to_string()),
+            });
+        }
+    };
+
+    match Va2Runner::new().and_then(|runner| runner.run_plan(plan)) {
+        Ok(report) => Json(Va2RunResponse {
+            success: true,
+            report: Some(report),
+            error: None,
+        }),
+        Err(err) => Json(Va2RunResponse {
+            success: false,
+            report: None,
+            error: Some(err.to_string()),
+        }),
     }
 }
 

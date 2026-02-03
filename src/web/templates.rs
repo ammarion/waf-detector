@@ -436,6 +436,56 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,S
 1,SemanticDrift,Query,Duplicate key ordering drift,GET,https://example.com/?a=1&a=2,[],</code></pre>
         </div>
 
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary2/plan</h3>
+            <p>Generate a VA2 campaign plan (behavioral profiling) without executing.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target_url": "https://example.com",
+  "phases": "baseline,protocol-variance",
+  "seed": 1337,
+  "budget": 60
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "plan": {
+    "version": "va2-0.1",
+    "seed": 1337,
+    "target_url": "https://example.com",
+    "phases": ["baseline", "protocol_variance"],
+    "budget": 60,
+    "steps": []
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary2/run</h3>
+            <p>Execute a VA2 campaign plan with consent enforcement.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target_url": "https://example.com",
+  "phases": "baseline,protocol-variance",
+  "seed": 1337,
+  "budget": 60
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "report": {
+    "target_url": "https://example.com",
+    "results": []
+  },
+  "error": null
+}</code></pre>
+        </div>
+
 
         <div class="endpoint">
             <h3><span class="method get">GET</span> /api/consent-status</h3>
