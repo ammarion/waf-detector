@@ -92,6 +92,14 @@ impl SimpleCliApp {
                     .unwrap_or(&4),
             };
             let mut runner = VirtualAdversaryRunner::new(config)?;
+            if matches.get_flag("va-dry-run") {
+                let plan = runner.plan();
+                println!("🧪 VA Dry Run: {} planned payloads", plan.len());
+                for payload in plan {
+                    println!(" - {:?}: {}", payload.category, payload.payload);
+                }
+                return Ok(());
+            }
             let report = runner.run(url)?;
             if let Some(output) = matches.get_one::<String>("va-output") {
                 let json = serde_json::to_string_pretty(&report)?;
@@ -782,6 +790,13 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .long("va-schema")
                 .help("Print VA report JSON schema")
                 .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("va-dry-run")
+                .long("va-dry-run")
+                .help("Print planned VA payloads without executing")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va"),
         )
         .arg(
             Arg::new("va-output")
