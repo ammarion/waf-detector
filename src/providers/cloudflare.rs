@@ -269,34 +269,6 @@ impl DetectionProvider for CloudFlareProvider {
             all_evidence.extend(status_evidence);
         }
 
-        // NEW: Check DNS
-        if let Some(dns_info) = &context.dns_info {
-            // We use the central analyzer to get ALL matches, then filter for "CloudFlare"
-            // efficiently we could just do the check here, but using the central analyzer is cleaner
-            // for sharing the pattern logic.
-            // However, since we are inside "CloudFlareProvider", we should filter for only "CloudFlare"
-            // or we can implement the specific checks here.
-
-            // Actually, the best design is to just let the provider registry run "DNS detection"
-            // over all providers. SHOULD THE REGISTRY DO IT?
-            // The `detect` method is per-provider.
-
-            // Let's rely on the central DnsAnalyzer to have been initialized somewhere
-            // OR simpler: Instantiate a temporary analyzer/regex here? No, that's heavy.
-
-            // A pattern I've seen in the `dns/mod.rs` is that it holds ALL patterns.
-            // Let's implement a check using the DnsAnalyzer logic but specifically for this provider.
-
-            let analyzer = crate::dns::DnsAnalyzer::new();
-            let matches = analyzer.analyze_from_info(dns_info);
-            // Filter for Cloudflare matches
-            let cf_matches: Vec<_> = matches
-                .into_iter()
-                .filter(|e| e.description.contains("CloudFlare"))
-                .collect();
-            all_evidence.extend(cf_matches);
-        }
-
         Ok(all_evidence)
     }
 

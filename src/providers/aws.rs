@@ -124,7 +124,7 @@ impl AwsProvider {
                     confidence: 0.95,
                     description: "CloudFront request ID header detected".to_string(),
                     raw_data: cf_id.clone(),
-                    signature_matched: "cloudfront-id-pattern".to_string(),
+                    signature_matched: "x-amz-cf-id-header".to_string(),
                 });
             }
         }
@@ -137,7 +137,7 @@ impl AwsProvider {
                     confidence: 0.90,
                     description: "CloudFront Point of Presence header detected".to_string(),
                     raw_data: cf_pop.clone(),
-                    signature_matched: "cloudfront-pop-pattern".to_string(),
+                    signature_matched: "x-amz-cf-pop-header".to_string(),
                 });
             }
         }
@@ -150,7 +150,7 @@ impl AwsProvider {
                     confidence: 0.85,
                     description: "CloudFront via header detected".to_string(),
                     raw_data: via.clone(),
-                    signature_matched: "cloudfront-via-pattern".to_string(),
+                    signature_matched: "cloudfront-via-header".to_string(),
                 });
             }
         }
@@ -176,7 +176,7 @@ impl AwsProvider {
                     confidence: 0.85,
                     description: "CloudFront server header detected".to_string(),
                     raw_data: server.clone(),
-                    signature_matched: "cloudfront-server-pattern".to_string(),
+                    signature_matched: "cloudfront-server-header".to_string(),
                 });
             }
         }

@@ -74,6 +74,8 @@ mime = "0.3"
 percent-encoding = "2.3"
 tempfile = "3.20.0"
 hickory-resolver = "0.24"
+tokio-rustls = { version = "0.26", features = ["ring"] }
+x509-parser = "0.16"
 
 [dev-dependencies]
 tokio-test = "0.4"

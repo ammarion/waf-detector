@@ -265,14 +265,16 @@ async fn handle_request(
         Arc<Mutex<HashMap<String, MockResponse>>>,
         Arc<Mutex<Vec<RecordedRequest>>>,
     )>,
+    axum::extract::Path(path): axum::extract::Path<String>,
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
     body: String,
 ) -> Response {
-    let path = headers
-        .get("x-original-uri")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("/");
+    let path = if path.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{path}")
+    };
 
     // Record the request
     let mut recorded_headers = HashMap::new();
@@ -284,7 +286,7 @@ async fn handle_request(
 
     let recorded = RecordedRequest {
         method: "GET".to_string(), // Simplified for now
-        path: path.to_string(),
+        path: path.clone(),
         headers: recorded_headers,
         query_params: params,
         body: body.clone(),
@@ -295,7 +297,7 @@ async fn handle_request(
     // Get configured response
     let response = {
         let responses = responses.lock().unwrap();
-        responses.get(path).cloned().unwrap_or_default()
+        responses.get(&path).cloned().unwrap_or_default()
     };
 
     // Apply delay if configured

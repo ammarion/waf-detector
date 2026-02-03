@@ -99,7 +99,7 @@ impl AkamaiProvider {
                     confidence,
                     description: format!("Akamai {header_name} header detected"),
                     raw_data: header_value.clone(),
-                    signature_matched: "akamai-x-header-pattern".to_string(),
+                    signature_matched: "x-akamai-header".to_string(),
                 });
             }
         }

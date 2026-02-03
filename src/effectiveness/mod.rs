@@ -64,17 +64,36 @@ pub struct EffectivenessTest {
     consent_manager: ConsentManager,
     start_time: Instant,
     request_count: u32,
+    baseline_signature: Option<BaselineSignature>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BaselineSignature {
+    status_code: u16,
+    body_sample: String,
+    body_length: usize,
+    headers: HashMap<String, String>,
 }
 
 impl EffectivenessTest {
     /// Check if a response indicates blocking
-    pub fn is_blocked(status_code: u16, body: &str) -> bool {
+    pub(crate) fn is_blocked(
+        status_code: u16,
+        body: &str,
+        response_headers: &HashMap<String, String>,
+        baseline: Option<&BaselineSignature>,
+    ) -> (bool, Vec<String>) {
+        let mut reasons = Vec::new();
+        const SIMILARITY_THRESHOLD: f64 = 0.65;
+        const REDUCTION_RATIO: f64 = 0.70;
+        const MIN_LENGTH_DIFF: usize = 1200;
+
         // Check common block status codes
         if status_code == 403 || status_code == 406 || status_code == 429 || status_code == 503 {
-            return true;
+            reasons.push(format!("Blocking status code: {status_code}"));
         }
 
-        // Check for block patterns in response body
+        // Check for block patterns in response body (baseline-aware)
         let body_lower = body.to_lowercase();
         let block_indicators = [
             "access denied",
@@ -91,9 +110,117 @@ impl EffectivenessTest {
             "waf protection",
         ];
 
-        block_indicators
-            .iter()
-            .any(|indicator| body_lower.contains(indicator))
+        for indicator in block_indicators {
+            if body_lower.contains(indicator) {
+                let baseline_has_indicator = baseline
+                    .map(|b| b.body_sample.to_lowercase().contains(indicator))
+                    .unwrap_or(false);
+
+                if !baseline_has_indicator {
+                    reasons.push(format!("Blocking keyword detected: {indicator}"));
+                }
+            }
+        }
+
+        // Baseline-aware body delta: large reduction or low similarity can indicate blocking
+        if let Some(baseline_sig) = baseline {
+            // Header diffs: detect WAF/block indicators that appear only after the test
+            let header_indicators = [
+                "waf",
+                "blocked",
+                "denied",
+                "forbidden",
+                "cf-ray",
+                "x-amz-cf-id",
+                "x-amz-cf-pop",
+                "x-akamai",
+                "x-sucuri",
+                "x-waf",
+                "x-denied",
+                "x-blocked",
+                "x-azure",
+            ];
+
+            for (name, value) in response_headers {
+                let name_lower = name.to_lowercase();
+                let value_lower = value.to_lowercase();
+                let baseline_has_header = baseline_sig.headers.contains_key(&name_lower);
+                let baseline_header_value = baseline_sig
+                    .headers
+                    .get(&name_lower)
+                    .map(|v| v.to_lowercase());
+
+                let indicator_match = header_indicators.iter().any(|indicator| {
+                    name_lower.contains(indicator) || value_lower.contains(indicator)
+                });
+
+                if indicator_match {
+                    let is_new_or_changed = !baseline_has_header
+                        || baseline_header_value
+                            .map(|v| v != value_lower)
+                            .unwrap_or(true);
+                    if is_new_or_changed {
+                        reasons.push(format!("Blocking header detected: {name}"));
+                    }
+                }
+            }
+
+            let similarity =
+                static_detection::calculate_similarity(body, &baseline_sig.body_sample);
+            let length_diff =
+                (baseline_sig.body_length as i64 - body.len() as i64).abs() as usize;
+            let significant_reduction = body.len()
+                < (baseline_sig.body_length as f64 * REDUCTION_RATIO) as usize
+                && length_diff > MIN_LENGTH_DIFF;
+
+            if similarity < SIMILARITY_THRESHOLD && significant_reduction {
+                reasons.push("Response body deviates significantly from baseline".to_string());
+            }
+        }
+
+        // Auth challenge allowlist: don't flag as blocked if it's likely auth and no other signals
+        if let Some(value) = response_headers.get("www-authenticate") {
+            if status_code == 401 {
+                if reasons.len() == 1
+                    && reasons
+                        .first()
+                        .is_some_and(|r| r.contains("Blocking status code"))
+                {
+                    return (false, Vec::new());
+                }
+
+                if body.to_lowercase().contains("login")
+                    || body.to_lowercase().contains("sign in")
+                {
+                    return (false, Vec::new());
+                }
+            }
+
+            // In rare cases a 403 with WWW-Authenticate is still an auth gate
+            if status_code == 403
+                && reasons.len() == 1
+                && reasons
+                    .first()
+                    .is_some_and(|r| r.contains("Blocking status code"))
+            {
+                let _ = value;
+                return (false, Vec::new());
+            }
+        }
+
+        // If baseline status matches and only status triggered, treat as not blocked
+        if let Some(baseline_sig) = baseline {
+            if status_code == baseline_sig.status_code
+                && reasons.len() == 1
+                && reasons
+                    .first()
+                    .is_some_and(|r| r.contains("Blocking status code"))
+            {
+                return (false, Vec::new());
+            }
+        }
+
+        (!reasons.is_empty(), reasons)
     }
 
     /// Create a new effectiveness test instance
@@ -111,6 +238,7 @@ impl EffectivenessTest {
             consent_manager,
             start_time: Instant::now(),
             request_count: 0,
+            baseline_signature: None,
         })
     }
 
@@ -188,6 +316,7 @@ impl EffectivenessTest {
         ];
 
         let mut response_bodies = Vec::new();
+        let mut baseline_results = Vec::new();
 
         for (test_name, method, body) in baseline_tests {
             self.rate_limit().await?;
@@ -205,7 +334,8 @@ impl EffectivenessTest {
             let result = self.perform_request(url, method, body, headers).await?;
 
             // Store response for similarity check
-            response_bodies.push(result.evidence.clone());
+            response_bodies.push(result.response_body_sample.clone());
+            baseline_results.push(result.clone());
 
             report.add_baseline_result(test_name, result);
         }
@@ -229,6 +359,10 @@ impl EffectivenessTest {
                         .to_string(),
                 });
             }
+        }
+
+        if self.baseline_signature.is_none() {
+            self.baseline_signature = Self::build_baseline_signature(&baseline_results);
         }
 
         Ok(())
@@ -364,23 +498,36 @@ impl EffectivenessTest {
         match response_result {
             Ok(response) => {
                 let status_code = response.status().as_u16();
+                let mut headers = HashMap::new();
+                for (name, value) in response.headers() {
+                    if let Ok(value_str) = value.to_str() {
+                        headers.insert(name.to_string().to_lowercase(), value_str.to_string());
+                    }
+                }
                 let response_text = response.text().await.unwrap_or_default();
-
-                let blocked = Self::is_blocked(status_code, &response_text);
+                let (blocked, reasons) = Self::is_blocked(
+                    status_code,
+                    &response_text,
+                    &headers,
+                    self.baseline_signature.as_ref(),
+                );
 
                 Ok(TestResult {
                     blocked,
                     status_code,
                     evidence: if blocked {
                         format!(
-                            "Blocked with status {}: {}",
-                            status_code,
+                            "Blocked: {} | Sample: {}",
+                            reasons.join("; "),
                             &response_text.chars().take(200).collect::<String>()
                         )
                     } else {
                         "Request allowed".to_string()
                     },
                     response_time: duration,
+                    response_body_sample: response_text.chars().take(2000).collect(),
+                    response_body_length: response_text.len(),
+                    response_headers: headers,
                 })
             }
             Err(e) => {
@@ -389,6 +536,9 @@ impl EffectivenessTest {
                     status_code: 0,
                     evidence: format!("Connection failed: {e}"),
                     response_time: duration,
+                    response_body_sample: String::new(),
+                    response_body_length: 0,
+                    response_headers: HashMap::new(),
                 })
             }
         }
@@ -468,6 +618,37 @@ impl EffectivenessTest {
 
         Ok(())
     }
+
+    fn build_baseline_signature(baseline_results: &[TestResult]) -> Option<BaselineSignature> {
+        if baseline_results.is_empty() {
+            return None;
+        }
+
+        let mut status_counts: HashMap<u16, usize> = HashMap::new();
+        for result in baseline_results {
+            *status_counts.entry(result.status_code).or_insert(0) += 1;
+        }
+
+        let mut most_common_status = baseline_results[0].status_code;
+        let mut best_count = 0;
+        for (status, count) in status_counts {
+            if count > best_count {
+                most_common_status = status;
+                best_count = count;
+            }
+        }
+
+        baseline_results
+            .iter()
+            .filter(|r| r.status_code == most_common_status)
+            .max_by_key(|r| r.response_body_length)
+            .map(|r| BaselineSignature {
+                status_code: r.status_code,
+                body_sample: r.response_body_sample.clone(),
+                body_length: r.response_body_length,
+                headers: r.response_headers.clone(),
+            })
+    }
 }
 
 /// Result of a single test
@@ -477,4 +658,7 @@ pub struct TestResult {
     pub status_code: u16,
     pub evidence: String,
     pub response_time: Duration,
+    pub response_body_sample: String,
+    pub response_body_length: usize,
+    pub response_headers: HashMap<String, String>,
 }

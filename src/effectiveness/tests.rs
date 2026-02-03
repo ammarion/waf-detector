@@ -18,37 +18,115 @@ mod effectiveness_tests {
     #[test]
     fn test_is_blocked_detection() {
         // Test various blocked responses
-        assert!(EffectivenessTest::is_blocked(403, "Forbidden"));
-        assert!(EffectivenessTest::is_blocked(406, "Not Acceptable"));
-        assert!(EffectivenessTest::is_blocked(429, "Too Many Requests"));
-        assert!(EffectivenessTest::is_blocked(503, "Service Unavailable"));
+        assert!(EffectivenessTest::is_blocked(403, "Forbidden", &std::collections::HashMap::new(), None).0);
+        assert!(EffectivenessTest::is_blocked(406, "Not Acceptable", &std::collections::HashMap::new(), None).0);
+        assert!(EffectivenessTest::is_blocked(429, "Too Many Requests", &std::collections::HashMap::new(), None).0);
+        assert!(EffectivenessTest::is_blocked(503, "Service Unavailable", &std::collections::HashMap::new(), None).0);
 
         // Test 200 OK with block indicators
-        assert!(EffectivenessTest::is_blocked(200, "Access Denied"));
+        assert!(EffectivenessTest::is_blocked(200, "Access Denied", &std::collections::HashMap::new(), None).0);
         assert!(EffectivenessTest::is_blocked(
             200,
-            "Request blocked by security policy"
-        ));
-        assert!(EffectivenessTest::is_blocked(200, "WAF Protection"));
+            "Request blocked by security policy",
+            &std::collections::HashMap::new(),
+            None
+        )
+        .0);
+        assert!(EffectivenessTest::is_blocked(200, "WAF Protection", &std::collections::HashMap::new(), None).0);
         assert!(EffectivenessTest::is_blocked(
             200,
-            "Firewall blocked your request"
-        ));
+            "Firewall blocked your request",
+            &std::collections::HashMap::new(),
+            None
+        )
+        .0);
 
         // Test Akamai Bot Manager response
-        assert!(EffectivenessTest::is_blocked(200, "OK Bot."));
-        assert!(EffectivenessTest::is_blocked(200, "ok bot"));
+        assert!(EffectivenessTest::is_blocked(200, "OK Bot.", &std::collections::HashMap::new(), None).0);
+        assert!(EffectivenessTest::is_blocked(200, "ok bot", &std::collections::HashMap::new(), None).0);
 
         // Test blocked keyword in short responses
-        assert!(EffectivenessTest::is_blocked(200, "Blocked"));
+        assert!(EffectivenessTest::is_blocked(200, "Blocked", &std::collections::HashMap::new(), None).0);
         // "No" alone is not a block indicator - it needs context
-        assert!(!EffectivenessTest::is_blocked(200, "No"));
-        assert!(EffectivenessTest::is_blocked(200, "Access Denied"));
+        assert!(!EffectivenessTest::is_blocked(200, "No", &std::collections::HashMap::new(), None).0);
+        assert!(EffectivenessTest::is_blocked(200, "Access Denied", &std::collections::HashMap::new(), None).0);
 
         // Test normal responses that should NOT be blocked
-        assert!(!EffectivenessTest::is_blocked(200, "<!DOCTYPE html><html><body>Welcome to our website! Here is some normal content that is definitely longer than 100 characters.</body></html>"));
-        assert!(!EffectivenessTest::is_blocked(200, "")); // Empty response should not be blocked
-        assert!(!EffectivenessTest::is_blocked(404, "Not Found"));
+        assert!(!EffectivenessTest::is_blocked(200, "<!DOCTYPE html><html><body>Welcome to our website! Here is some normal content that is definitely longer than 100 characters.</body></html>", &std::collections::HashMap::new(), None).0);
+        assert!(!EffectivenessTest::is_blocked(200, "", &std::collections::HashMap::new(), None).0); // Empty response should not be blocked
+        assert!(!EffectivenessTest::is_blocked(404, "Not Found", &std::collections::HashMap::new(), None).0);
+    }
+
+    #[test]
+    fn test_is_blocked_header_diff_baseline() {
+        use std::collections::HashMap;
+
+        let baseline = BaselineSignature {
+            status_code: 200,
+            body_sample: "Welcome to the site".to_string(),
+            body_length: 21,
+            headers: HashMap::new(),
+        };
+
+        let mut response_headers = HashMap::new();
+        response_headers.insert("x-waf".to_string(), "blocked".to_string());
+
+        let (blocked, reasons) = EffectivenessTest::is_blocked(
+            200,
+            "Welcome to the site",
+            &response_headers,
+            Some(&baseline),
+        );
+
+        assert!(blocked);
+        assert!(reasons.iter().any(|r| r.contains("Blocking header")));
+
+        // If the baseline already has the same header/value, it should not be treated as a block
+        let mut baseline_headers = HashMap::new();
+        baseline_headers.insert("x-waf".to_string(), "blocked".to_string());
+        let baseline_with_header = BaselineSignature {
+            status_code: 200,
+            body_sample: "Welcome to the site".to_string(),
+            body_length: 21,
+            headers: baseline_headers,
+        };
+
+        let (blocked_same, reasons_same) = EffectivenessTest::is_blocked(
+            200,
+            "Welcome to the site",
+            &response_headers,
+            Some(&baseline_with_header),
+        );
+
+        assert!(!blocked_same);
+        assert!(reasons_same.is_empty());
+    }
+
+    #[test]
+    fn test_is_blocked_header_value_change() {
+        use std::collections::HashMap;
+
+        let mut baseline_headers = HashMap::new();
+        baseline_headers.insert("x-waf".to_string(), "monitoring".to_string());
+        let baseline = BaselineSignature {
+            status_code: 200,
+            body_sample: "Welcome".to_string(),
+            body_length: 7,
+            headers: baseline_headers,
+        };
+
+        let mut response_headers = HashMap::new();
+        response_headers.insert("x-waf".to_string(), "blocked".to_string());
+
+        let (blocked, reasons) = EffectivenessTest::is_blocked(
+            200,
+            "Welcome",
+            &response_headers,
+            Some(&baseline),
+        );
+
+        assert!(blocked);
+        assert!(reasons.iter().any(|r| r.contains("Blocking header")));
     }
 
     #[test]
@@ -133,6 +211,9 @@ mod effectiveness_tests {
                     status_code: 403,
                     response_time: std::time::Duration::from_millis(100),
                     evidence: "Blocked by WAF".to_string(),
+                    response_body_sample: String::new(),
+                    response_body_length: 0,
+                    response_headers: std::collections::HashMap::new(),
                 },
             );
         }
@@ -144,6 +225,9 @@ mod effectiveness_tests {
                 status_code: 200,
                 response_time: std::time::Duration::from_millis(100),
                 evidence: "Request allowed".to_string(),
+                response_body_sample: String::new(),
+                response_body_length: 0,
+                response_headers: std::collections::HashMap::new(),
             },
         );
 
@@ -187,6 +271,9 @@ mod effectiveness_tests {
                     status_code: 403,
                     response_time: std::time::Duration::from_millis(100),
                     evidence: "Blocked by WAF".to_string(),
+                    response_body_sample: String::new(),
+                    response_body_length: 0,
+                    response_headers: std::collections::HashMap::new(),
                 },
             );
         }
@@ -199,6 +286,9 @@ mod effectiveness_tests {
                     status_code: 200,
                     response_time: std::time::Duration::from_millis(100),
                     evidence: "Request allowed".to_string(),
+                    response_body_sample: String::new(),
+                    response_body_length: 0,
+                    response_headers: std::collections::HashMap::new(),
                 },
             );
         }
@@ -224,6 +314,9 @@ mod effectiveness_tests {
                 status_code: 403,
                 evidence: "Blocked".to_string(),
                 response_time: std::time::Duration::from_millis(100),
+                response_body_sample: String::new(),
+                response_body_length: 0,
+                response_headers: std::collections::HashMap::new(),
             },
         );
 
@@ -234,6 +327,9 @@ mod effectiveness_tests {
                 status_code: 200,
                 evidence: "Allowed".to_string(),
                 response_time: std::time::Duration::from_millis(200),
+                response_body_sample: String::new(),
+                response_body_length: 0,
+                response_headers: std::collections::HashMap::new(),
             },
         );
 
@@ -295,6 +391,7 @@ mod effectiveness_tests {
             consent_manager: consent::ConsentManager::new(),
             start_time: start,
             request_count: 100, // Start with high count to trigger rate limiting
+            baseline_signature: None,
         };
 
         // This should trigger rate limiting and introduce a delay

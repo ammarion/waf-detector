@@ -25,7 +25,7 @@ impl DetectionEngine {
         let dns_resolver = DnsResolver::new().expect("Failed to initialize DNS resolver");
         Self {
             registry,
-            http_client: Arc::new(HttpClient::default()),
+            http_client: Arc::new(HttpClient::new().expect("Failed to initialize HTTP client")),
             dns_resolver: Arc::new(dns_resolver),
             waf_mode_detector: None,
         }
@@ -102,6 +102,7 @@ impl DetectionEngine {
                             detected_cdn: None,
                             provider_scores: std::collections::HashMap::new(),
                             evidence_map: std::collections::HashMap::new(),
+                            evidence: Vec::new(),
                             detection_time_ms: 0,
                             metadata: crate::DetectionMetadata {
                                 timestamp: chrono::Utc::now(),

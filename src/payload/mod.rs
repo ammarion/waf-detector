@@ -97,7 +97,7 @@ impl Default for PayloadConfig {
 impl PayloadAnalyzer {
     pub fn new() -> Self {
         Self {
-            http_client: Arc::new(HttpClient::default()),
+            http_client: Arc::new(HttpClient::new().expect("Failed to create HTTP client")),
             config: PayloadConfig::default(),
         }
     }

@@ -46,7 +46,7 @@ impl VercelProvider {
                     confidence: 0.98,
                     description: "Vercel server header detected".to_string(),
                     raw_data: server.clone(),
-                    signature_matched: "vercel-server-pattern".to_string(),
+                    signature_matched: "vercel-server-header".to_string(),
                 });
             }
         }
@@ -59,7 +59,7 @@ impl VercelProvider {
                     confidence: 0.95,
                     description: "Vercel request ID header detected".to_string(),
                     raw_data: vercel_id.clone(),
-                    signature_matched: "vercel-id-pattern".to_string(),
+                    signature_matched: "x-vercel-id-header".to_string(),
                 });
             }
         }

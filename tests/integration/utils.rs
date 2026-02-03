@@ -134,12 +134,17 @@ fn parse_detection_info(value: &Value) -> Result<DetectionInfo> {
 }
 
 fn parse_evidence(value: &Value) -> Result<EvidenceInfo> {
+    let method_type = match value.get("method_type") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Object(map)) => {
+            // Enum serialization: {"Header":"cf-ray"} or similar
+            map.keys().next().cloned().unwrap_or_else(|| "unknown".to_string())
+        }
+        _ => "unknown".to_string(),
+    };
+
     Ok(EvidenceInfo {
-        method_type: value
-            .get("method_type")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing method_type"))?
-            .to_string(),
+        method_type,
         confidence: value
             .get("confidence")
             .and_then(|v| v.as_f64())
