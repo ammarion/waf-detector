@@ -1151,12 +1151,12 @@
 
         async function downloadVaHistoryReplayJson(reportId) {
             try {
-                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}/replay.json`);
                 const data = await response.json();
-                if (!data.success || !data.report) {
-                    throw new Error(data.error || 'Failed to load VA report');
+                if (!data.success || !data.replay_plan) {
+                    throw new Error(data.error || 'Failed to load replay plan');
                 }
-                const plan = Array.isArray(data.report.replay_plan) ? data.report.replay_plan : [];
+                const plan = Array.isArray(data.replay_plan) ? data.replay_plan : [];
                 const filename = reportId.replace('.json', '') + '-replay.json';
                 downloadJsonFile(filename, plan);
             } catch (error) {
@@ -1166,13 +1166,11 @@
 
         async function downloadVaHistoryReplayCsv(reportId) {
             try {
-                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
-                const data = await response.json();
-                if (!data.success || !data.report) {
-                    throw new Error(data.error || 'Failed to load VA report');
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}/replay.csv`);
+                if (!response.ok) {
+                    throw new Error('Failed to download replay plan');
                 }
-                const plan = Array.isArray(data.report.replay_plan) ? data.report.replay_plan : [];
-                const csv = buildReplayPlanCsv(plan);
+                const csv = await response.text();
                 const filename = reportId.replace('.json', '') + '-replay.csv';
                 downloadCsvFile(filename, csv);
             } catch (error) {

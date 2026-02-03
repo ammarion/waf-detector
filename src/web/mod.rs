@@ -259,6 +259,13 @@ pub struct VaReportResponse {
 }
 
 #[derive(Serialize)]
+pub struct VaReplayPlanResponse {
+    success: bool,
+    replay_plan: Option<Vec<crate::virtual_adversary::VaReplayPlanItem>>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct VaRetentionResponse {
     success: bool,
     kept: usize,
@@ -309,14 +316,22 @@ impl WebServer {
                 "/api/virtual-adversary/reports",
                 get(virtual_adversary_reports),
             )
-            .route(
-                "/api/virtual-adversary/reports/:id",
-                get(virtual_adversary_report),
-            )
-            .route(
-                "/api/virtual-adversary/reports/:id/csv",
-                get(virtual_adversary_report_csv),
-            )
+        .route(
+            "/api/virtual-adversary/reports/:id",
+            get(virtual_adversary_report),
+        )
+        .route(
+            "/api/virtual-adversary/reports/:id/replay.json",
+            get(virtual_adversary_report_replay_json),
+        )
+        .route(
+            "/api/virtual-adversary/reports/:id/csv",
+            get(virtual_adversary_report_csv),
+        )
+        .route(
+            "/api/virtual-adversary/reports/:id/replay.csv",
+            get(virtual_adversary_report_replay_csv),
+        )
             .route(
                 "/api/virtual-adversary/reports.csv",
                 get(virtual_adversary_reports_csv),
@@ -596,6 +611,30 @@ fn build_va_report_csv(stored: &VaStoredReport) -> String {
             csv_escape(&replay.map(|item| item.description.as_str()).unwrap_or("")),
             csv_escape(&replay.map(|item| item.method.as_str()).unwrap_or("")),
             csv_escape(&replay.map(|item| item.url.as_str()).unwrap_or("")),
+        ]
+        .join(",");
+        lines.push(row);
+    }
+    lines.join("\n")
+}
+
+fn build_va_replay_plan_csv(
+    replay_plan: &[crate::virtual_adversary::VaReplayPlanItem],
+) -> String {
+    let mut lines = Vec::new();
+    lines.push(
+        "index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string(),
+    );
+    for item in replay_plan {
+        let row = vec![
+            item.index.to_string(),
+            csv_escape(&item.class),
+            csv_escape(&item.channel),
+            csv_escape(&item.description),
+            csv_escape(&item.method),
+            csv_escape(&item.url),
+            csv_escape(&serde_json::to_string(&item.headers).unwrap_or_default()),
+            csv_escape(&item.body.clone().unwrap_or_default()),
         ]
         .join(",");
         lines.push(row);
@@ -1116,6 +1155,30 @@ async fn virtual_adversary_report(Path(report_id): Path<String>) -> impl IntoRes
     }
 }
 
+// Handler to fetch a Virtual Adversary replay plan as JSON
+async fn virtual_adversary_report_replay_json(
+    Path(report_id): Path<String>,
+) -> impl IntoResponse {
+    match load_va_report(&report_id) {
+        Ok(report) => {
+            let response = VaReplayPlanResponse {
+                success: true,
+                replay_plan: Some(report.report.replay_plan),
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Err(e) => {
+            let response = VaReplayPlanResponse {
+                success: false,
+                replay_plan: None,
+                error: Some(format!("Failed to load report: {e}")),
+            };
+            (StatusCode::NOT_FOUND, Json(response))
+        }
+    }
+}
+
 // Handler to export Virtual Adversary reports as CSV
 async fn virtual_adversary_reports_csv() -> impl IntoResponse {
     match list_va_reports() {
@@ -1140,6 +1203,27 @@ async fn virtual_adversary_report_csv(Path(report_id): Path<String>) -> impl Int
     match load_va_report(&report_id) {
         Ok(report) => {
             let body = build_va_report_csv(&report);
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/csv")],
+                body,
+            )
+        }
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("Failed to load report: {e}"),
+        ),
+    }
+}
+
+// Handler to export a Virtual Adversary replay plan as CSV
+async fn virtual_adversary_report_replay_csv(
+    Path(report_id): Path<String>,
+) -> impl IntoResponse {
+    match load_va_report(&report_id) {
+        Ok(report) => {
+            let body = build_va_replay_plan_csv(&report.report.replay_plan);
             (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "text/csv")],
@@ -1377,6 +1461,24 @@ mod tests {
         assert!(csv.contains("probe_class"));
         assert!(csv.contains("SemanticDrift"));
         assert!(csv.contains("https://example.com/?a=1&a=2"));
+    }
+
+    #[test]
+    fn build_va_replay_plan_csv_includes_rows() {
+        let replay_plan = vec![crate::virtual_adversary::VaReplayPlanItem {
+            index: 1,
+            class: "ProtocolMutation".to_string(),
+            channel: "Header".to_string(),
+            description: "Case and whitespace header mutation".to_string(),
+            method: "GET".to_string(),
+            url: "https://example.com".to_string(),
+            headers: vec![("X-Test".to_string(), "1".to_string())],
+            body: None,
+        }];
+        let csv = super::build_va_replay_plan_csv(&replay_plan);
+        assert!(csv.contains("probe_class"));
+        assert!(csv.contains("ProtocolMutation"));
+        assert!(csv.contains("X-Test"));
     }
 
     #[test]
