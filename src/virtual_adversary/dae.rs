@@ -50,6 +50,15 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
         body: None,
     });
     probes.push(Probe {
+        class: ProbeClass::SemanticDrift,
+        channel: ProbeChannel::Query,
+        description: "Duplicate key ordering drift",
+        payload: "a=1&a=2&b=1".to_string(),
+        headers: Vec::new(),
+        method: "GET",
+        body: None,
+    });
+    probes.push(Probe {
         class: ProbeClass::ProtocolMutation,
         channel: ProbeChannel::Header,
         description: "Case and whitespace header mutation",
@@ -57,6 +66,18 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
         headers: vec![
             ("X-FORWARDED-HOST".to_string(), "example.invalid".to_string()),
             ("x-forwarded-host".to_string(), "example.invalid".to_string()),
+        ],
+        method: "GET",
+        body: None,
+    });
+    probes.push(Probe {
+        class: ProbeClass::ProtocolMutation,
+        channel: ProbeChannel::Header,
+        description: "Mixed-case hop header probe",
+        payload: "connection-keep-alive".to_string(),
+        headers: vec![
+            ("CoNnEcTiOn".to_string(), "keep-alive".to_string()),
+            ("Keep-Alive".to_string(), "timeout=5".to_string()),
         ],
         method: "GET",
         body: None,
@@ -71,11 +92,29 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
         body: None,
     });
     probes.push(Probe {
+        class: ProbeClass::EncodingBoundary,
+        channel: ProbeChannel::Cookie,
+        description: "Cookie encoding boundary probe",
+        payload: "sess=%2575%2573%2572".to_string(),
+        headers: Vec::new(),
+        method: "GET",
+        body: None,
+    });
+    probes.push(Probe {
         class: ProbeClass::ResponseFingerprint,
         channel: ProbeChannel::Header,
         description: "Content negotiation fingerprint",
         payload: "accept=application/xml".to_string(),
         headers: vec![("Accept".to_string(), "application/xml".to_string())],
+        method: "GET",
+        body: None,
+    });
+    probes.push(Probe {
+        class: ProbeClass::ResponseFingerprint,
+        channel: ProbeChannel::Header,
+        description: "Language fingerprint",
+        payload: "accept-language=tr-TR".to_string(),
+        headers: vec![("Accept-Language".to_string(), "tr-TR,tr;q=0.9".to_string())],
         method: "GET",
         body: None,
     });
@@ -102,6 +141,24 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
             method: "GET",
             body: None,
         });
+        probes.push(Probe {
+            class: ProbeClass::ParserAmbiguity,
+            channel: ProbeChannel::Header,
+            description: "Whitespace header fold probe",
+            payload: "folded-header".to_string(),
+            headers: vec![("X-WAF-Note".to_string(), "line1\r\n line2".to_string())],
+            method: "GET",
+            body: None,
+        });
+        probes.push(Probe {
+            class: ProbeClass::EncodingBoundary,
+            channel: ProbeChannel::Query,
+            description: "Unicode normalization boundary",
+            payload: "q=%E2%85%A0".to_string(), // Roman numeral one
+            headers: Vec::new(),
+            method: "GET",
+            body: None,
+        });
     }
 
     if tier >= 3 {
@@ -122,6 +179,27 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
             headers: vec![("Transfer-Encoding".to_string(), "chunked".to_string())],
             method: "POST",
             body: Some("0\r\n\r\n".to_string()),
+        });
+        probes.push(Probe {
+            class: ProbeClass::ParserAmbiguity,
+            channel: ProbeChannel::Header,
+            description: "Content-Type boundary probe",
+            payload: "multipart-boundary".to_string(),
+            headers: vec![(
+                "Content-Type".to_string(),
+                "multipart/form-data; boundary=--wafprobe".to_string(),
+            )],
+            method: "POST",
+            body: Some("--wafprobe\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--wafprobe--\r\n".to_string()),
+        });
+        probes.push(Probe {
+            class: ProbeClass::BehavioralThrottle,
+            channel: ProbeChannel::Header,
+            description: "Rate control hint probe",
+            payload: "rate-hint".to_string(),
+            headers: vec![("X-Rate-Hint".to_string(), "1".to_string())],
+            method: "GET",
+            body: None,
         });
     }
 
@@ -185,6 +263,15 @@ mod tests {
     fn tier3_catalog_adds_behavioral_throttle() {
         let probes = probe_catalog_for_tier(3).unwrap();
         assert!(probes.iter().any(|probe| probe.class == ProbeClass::BehavioralThrottle));
+    }
+
+    #[test]
+    fn all_probes_have_unique_payloads() {
+        let probes = probe_catalog_for_tier(3).unwrap();
+        let mut seen = HashSet::new();
+        for probe in probes {
+            assert!(seen.insert(probe.payload.clone()));
+        }
     }
 
     #[test]
