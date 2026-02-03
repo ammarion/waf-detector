@@ -7,6 +7,7 @@ use crate::providers::{
     f5::F5Provider, fastly::FastlyProvider, vercel::VercelProvider, Provider,
 };
 use crate::registry::ProviderRegistry;
+use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use clap::{Arg, ArgMatches, Command};
@@ -66,6 +67,23 @@ impl SimpleCliApp {
         // Handle smoke test command
         if matches.get_flag("smoke-test") {
             return self.run_smoke_test(&matches).await;
+        }
+
+        // Handle virtual adversary (VA) mode
+        if let Some(url) = matches.get_one::<String>("va") {
+            let config = VirtualAdversaryConfig::default();
+            let mut runner = VirtualAdversaryRunner::new(config)?;
+            let report = runner.run(url)?;
+            println!(
+                "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {}",
+                report.target_url,
+                report.summary.total,
+                report.summary.blocked,
+                report.summary.challenge,
+                report.summary.allowed,
+                report.summary.error
+            );
+            return Ok(());
         }
 
         // Get targets to scan
@@ -716,6 +734,13 @@ The tool automatically adds https:// if needed and supports both domain names an
             Arg::new("effectiveness")
                 .long("effectiveness")
                 .help("Run comprehensive WAF effectiveness testing (requires consent)")
+                .value_name("URL")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("va")
+                .long("va")
+                .help("Run Virtual Adversary effectiveness validation (requires consent)")
                 .value_name("URL")
                 .num_args(1),
         )
