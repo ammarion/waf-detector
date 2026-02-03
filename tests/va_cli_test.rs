@@ -98,6 +98,13 @@ fn test_va_output_requires_va() {
 }
 
 #[test]
+fn test_va_replay_requires_va() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va-replay"]);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_va_confidence_score_format() {
     let summary = waf_detector::virtual_adversary::VaResultSummary {
         total: 4,
