@@ -129,6 +129,43 @@ pub struct Va2NormalizationVariance {
     pub avg_length_delta: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Va2StateSummary {
+    pub deviations: usize,
+    pub set_cookie: usize,
+    pub status_change: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Va2ChallengeKind {
+    HardBlock,
+    Captcha,
+    JsChallenge,
+    CookieGate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Va2ChallengeProfile {
+    pub total: usize,
+    pub hard_blocks: usize,
+    pub captcha: usize,
+    pub js_challenge: usize,
+    pub cookie_gate: usize,
+}
+
+impl Default for Va2ChallengeProfile {
+    fn default() -> Self {
+        Self {
+            total: 0,
+            hard_blocks: 0,
+            captcha: 0,
+            js_challenge: 0,
+            cookie_gate: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Va2RunReport {
     pub target_url: String,
@@ -136,6 +173,8 @@ pub struct Va2RunReport {
     pub results: Vec<Va2RunResult>,
     pub baseline: Va2BaselineSummary,
     pub normalization: Option<Va2NormalizationVariance>,
+    pub statefulness: Option<Va2StateSummary>,
+    pub challenge: Option<Va2ChallengeProfile>,
 }
 
 pub struct Va2Runner {
@@ -164,6 +203,8 @@ impl Va2Runner {
         let mut results = Vec::with_capacity(plan.steps.len());
         let mut baseline_samples = Vec::new();
         let mut variance_samples: Vec<(u16, usize)> = Vec::new();
+        let mut state_summary = Va2StateSummary::default();
+        let mut challenge_profile = Va2ChallengeProfile::default();
         for step in &plan.steps {
             if step.delay_ms > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(step.delay_ms));
@@ -179,6 +220,12 @@ impl Va2Runner {
                     }
                     if step.phase == Va2Phase::ProtocolVariance {
                         variance_samples.push((resp.status, resp.body.len()));
+                    }
+                    if step.phase == Va2Phase::StateEscalation {
+                        update_statefulness(&mut state_summary, &resp, baseline_samples.first());
+                    }
+                    if step.phase == Va2Phase::ChallengeInteraction {
+                        update_challenge_profile(&mut challenge_profile, &resp);
                     }
                     results.push(Va2RunResult {
                         step_id: step.id,
@@ -216,6 +263,16 @@ impl Va2Runner {
             results,
             baseline,
             normalization,
+            statefulness: if state_summary.deviations == 0 {
+                None
+            } else {
+                Some(state_summary)
+            },
+            challenge: if challenge_profile.total == 0 {
+                None
+            } else {
+                Some(challenge_profile)
+            },
         })
     }
 }
@@ -302,6 +359,51 @@ fn compute_normalization_variance(
         baseline_status,
         max_status_delta: max_delta,
         avg_length_delta: avg_len_delta,
+    }
+}
+
+fn update_statefulness(
+    summary: &mut Va2StateSummary,
+    response: &Va2HttpResponse,
+    baseline: Option<&Va2HttpResponse>,
+) {
+    let mut deviated = false;
+    if response.headers.contains_key("set-cookie") {
+        summary.set_cookie += 1;
+        deviated = true;
+    }
+    if let Some(base) = baseline {
+        if response.status != base.status {
+            summary.status_change += 1;
+            deviated = true;
+        }
+    }
+    if deviated {
+        summary.deviations += 1;
+    }
+}
+
+fn update_challenge_profile(profile: &mut Va2ChallengeProfile, response: &Va2HttpResponse) {
+    let mut matched = false;
+    let body_lower = response.body.to_lowercase();
+    if response.status == 401 || response.status == 403 || response.status == 429 {
+        profile.hard_blocks += 1;
+        matched = true;
+    }
+    if body_lower.contains("captcha") {
+        profile.captcha += 1;
+        matched = true;
+    }
+    if body_lower.contains("javascript") && body_lower.contains("challenge") {
+        profile.js_challenge += 1;
+        matched = true;
+    }
+    if response.headers.contains_key("set-cookie") && body_lower.contains("challenge") {
+        profile.cookie_gate += 1;
+        matched = true;
+    }
+    if matched {
+        profile.total += 1;
     }
 }
 
@@ -513,14 +615,22 @@ mod tests {
         fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
             let (status, body) = if request.url.contains("protocol") {
                 (418, "teapot".to_string())
+            } else if request.url.contains("state") {
+                (401, "state escalation".to_string())
+            } else if request.url.contains("challenge") {
+                (403, "javascript challenge captcha".to_string())
             } else if request.url.contains("error") {
                 (500, "server error".to_string())
             } else {
                 (200, "baseline ok".to_string())
             };
+            let mut headers = HashMap::new();
+            if request.url.contains("state") || request.url.contains("challenge") {
+                headers.insert("set-cookie".to_string(), "va2=1".to_string());
+            }
             Ok(Va2HttpResponse {
                 status,
-                headers: HashMap::new(),
+                headers,
                 body,
             })
         }
@@ -603,17 +713,26 @@ mod tests {
     fn test_va2_runner_executes_plan() {
         with_temp_home(|temp| {
             write_consent(temp, &["example.com"]);
-            let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
+            let phases = vec![
+                Va2Phase::Baseline,
+                Va2Phase::ProtocolVariance,
+                Va2Phase::StateEscalation,
+                Va2Phase::ChallengeInteraction,
+            ];
             let mut plan = build_va2_campaign_plan(
                 "https://example.com",
                 &phases,
-                Va2CampaignConfig { seed: 1, budget: 5 },
+                Va2CampaignConfig { seed: 1, budget: 10 },
             )
             .unwrap();
             for step in &mut plan.steps {
                 step.delay_ms = 0;
                 if step.phase == Va2Phase::ProtocolVariance {
                     step.path = "/protocol-variance".to_string();
+                } else if step.phase == Va2Phase::StateEscalation {
+                    step.path = "/state".to_string();
+                } else if step.phase == Va2Phase::ChallengeInteraction {
+                    step.path = "/challenge".to_string();
                 }
             }
             let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
@@ -622,6 +741,8 @@ mod tests {
             assert_eq!(report.results.len(), report.plan.steps.len());
             assert_eq!(report.baseline.status, Some(200));
             assert!(report.normalization.is_some());
+            assert!(report.statefulness.is_some());
+            assert!(report.challenge.is_some());
         });
     }
 
@@ -639,5 +760,24 @@ mod tests {
         let variance = compute_normalization_variance(Some(200), &[(200, 10), (418, 30)]);
         assert!(variance.max_status_delta >= 18);
         assert!(variance.avg_length_delta >= 0.0);
+    }
+
+    #[test]
+    fn test_va2_challenge_profile_detects_captcha() {
+        let mut profile = Va2ChallengeProfile::default();
+        let response = Va2HttpResponse {
+            status: 403,
+            headers: {
+                let mut headers = HashMap::new();
+                headers.insert("set-cookie".to_string(), "va2=1".to_string());
+                headers
+            },
+            body: "captcha javascript challenge".to_string(),
+        };
+        update_challenge_profile(&mut profile, &response);
+        assert!(profile.total >= 1);
+        assert!(profile.captcha >= 1);
+        assert!(profile.js_challenge >= 1);
+        assert!(profile.cookie_gate >= 1);
     }
 }
