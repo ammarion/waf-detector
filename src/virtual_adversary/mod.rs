@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::effectiveness::consent::ConsentManager;
+use crate::http::HttpClient;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VirtualAdversaryConfig {
@@ -134,12 +135,12 @@ impl RateLimiter {
     }
 }
 
-#[derive(Debug)]
 pub struct VirtualAdversaryRunner {
     config: VirtualAdversaryConfig,
     consent_manager: ConsentManager,
     budget: RequestBudget,
     rate_limiter: RateLimiter,
+    http: Box<dyn VaHttpAdapter + Send + Sync>,
 }
 
 const BASELINE_SAMPLE_LIMIT: usize = 1024;
@@ -301,6 +302,40 @@ impl VaRunReport {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct VaHttpResponse {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
+
+pub trait VaHttpAdapter {
+    fn get(&self, url: &str) -> anyhow::Result<VaHttpResponse>;
+}
+
+pub struct RealVaHttpAdapter {
+    client: HttpClient,
+}
+
+impl RealVaHttpAdapter {
+    pub fn new() -> anyhow::Result<Self> {
+        Ok(Self {
+            client: HttpClient::new()?,
+        })
+    }
+}
+
+impl VaHttpAdapter for RealVaHttpAdapter {
+    fn get(&self, url: &str) -> anyhow::Result<VaHttpResponse> {
+        let response = futures::executor::block_on(self.client.get(url))?;
+        Ok(VaHttpResponse {
+            status: response.status,
+            headers: response.headers,
+            body: response.body,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaPayloadCategory {
     SqlInjection,
@@ -398,12 +433,22 @@ impl VirtualAdversaryRunner {
             .map_err(|err| anyhow!("invalid Virtual Adversary config: {err}"))?;
         let budget = RequestBudget::new(config.request_budget)?;
         let rate_limiter = RateLimiter::new(config.request_delay)?;
+        let http = Box::new(RealVaHttpAdapter::new()?);
         Ok(Self {
             config,
             consent_manager: ConsentManager::new(),
             budget,
             rate_limiter,
+            http,
         })
+    }
+
+    pub fn with_http_adapter(
+        mut self,
+        http: Box<dyn VaHttpAdapter + Send + Sync>,
+    ) -> Self {
+        self.http = http;
+        self
     }
 
     pub fn plan(&self) -> Vec<VaPayloadVariant> {
@@ -429,6 +474,7 @@ impl VirtualAdversaryRunner {
         let _baseline_wait = self.rate_limiter.record_request();
         let _attack_wait = self.rate_limiter.record_request();
 
+        let _baseline = self.http.get(target_url).ok();
         let plan = self.plan();
         let mut report = VaRunReport::new(target_url, plan.len());
         for _item in plan {
@@ -446,6 +492,19 @@ mod tests {
     use serde::Serialize;
     use std::fs;
     use tempfile::TempDir;
+
+    #[derive(Default)]
+    struct StubHttpAdapter;
+
+    impl VaHttpAdapter for StubHttpAdapter {
+        fn get(&self, _url: &str) -> anyhow::Result<VaHttpResponse> {
+            Ok(VaHttpResponse {
+                status: 200,
+                headers: HashMap::new(),
+                body: "ok".to_string(),
+            })
+        }
+    }
 
     #[test]
     fn test_default_config_is_safe() {
@@ -555,7 +614,9 @@ mod tests {
             ..Default::default()
         };
 
-        let mut runner = VirtualAdversaryRunner::new(config).unwrap();
+        let mut runner = VirtualAdversaryRunner::new(config)
+            .unwrap()
+            .with_http_adapter(Box::new(StubHttpAdapter::default()));
         let result = runner.run("https://example.com");
         assert!(result.is_err());
     }
@@ -571,7 +632,9 @@ mod tests {
             ..Default::default()
         };
 
-        let mut runner = VirtualAdversaryRunner::new(config).unwrap();
+        let mut runner = VirtualAdversaryRunner::new(config)
+            .unwrap()
+            .with_http_adapter(Box::new(StubHttpAdapter::default()));
         let result = runner.run("https://example.com").unwrap();
         assert!(result.summary.total >= 1);
         assert_eq!(result.summary.allowed, result.summary.total);
@@ -726,9 +789,29 @@ mod tests {
             max_variants_per_payload: 2,
             ..Default::default()
         };
-        let runner = VirtualAdversaryRunner::new(config).unwrap();
+        let runner = VirtualAdversaryRunner::new(config)
+            .unwrap()
+            .with_http_adapter(Box::new(StubHttpAdapter::default()));
         let plan = runner.plan();
         assert!(!plan.is_empty());
         assert!(plan.len() >= 3);
+    }
+
+    #[test]
+    fn test_runner_uses_http_adapter() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+
+        let config = VirtualAdversaryConfig {
+            request_budget: 2,
+            ..Default::default()
+        };
+        let mut runner = VirtualAdversaryRunner::new(config)
+            .unwrap()
+            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+
+        let result = runner.run("https://example.com").unwrap();
+        assert_eq!(result.target_url, "https://example.com");
     }
 }
