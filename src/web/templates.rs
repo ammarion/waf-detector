@@ -573,5 +573,9 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaActivitySearch"));
         assert!(DASHBOARD_HTML.contains("deleteVaHistoryRange"));
         assert!(DASHBOARD_HTML.contains("Replay Plan"));
+        assert!(DASHBOARD_HTML.contains("vaReplayPlanPanel"));
+        assert!(DASHBOARD_HTML.contains("vaReplaySearch"));
+        assert!(DASHBOARD_HTML.contains("vaReplayClassFilter"));
+        assert!(DASHBOARD_HTML.contains("vaReplayChannelFilter"));
     }
 }
