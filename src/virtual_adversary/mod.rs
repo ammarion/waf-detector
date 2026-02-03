@@ -276,6 +276,31 @@ impl VaResultSummary {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct VaRunReport {
+    pub target_url: String,
+    pub plan_size: usize,
+    pub summary: VaResultSummary,
+    pub started_at: std::time::Instant,
+    pub finished_at: Option<std::time::Instant>,
+}
+
+impl VaRunReport {
+    pub fn new(target_url: &str, plan_size: usize) -> Self {
+        Self {
+            target_url: target_url.to_string(),
+            plan_size,
+            summary: VaResultSummary::new(),
+            started_at: std::time::Instant::now(),
+            finished_at: None,
+        }
+    }
+
+    pub fn finish(&mut self) {
+        self.finished_at = Some(std::time::Instant::now());
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaPayloadCategory {
     SqlInjection,
@@ -637,6 +662,16 @@ mod tests {
         assert_eq!(summary.challenge, 1);
         assert_eq!(summary.allowed, 2);
         assert_eq!(summary.error, 1);
+    }
+
+    #[test]
+    fn test_run_report_tracks_plan_and_timing() {
+        let mut report = VaRunReport::new("https://example.com", 5);
+        assert_eq!(report.target_url, "https://example.com");
+        assert_eq!(report.plan_size, 5);
+        assert!(report.finished_at.is_none());
+        report.finish();
+        assert!(report.finished_at.is_some());
     }
 
     #[test]
