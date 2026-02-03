@@ -431,9 +431,22 @@
                 </div>
                 <div class="va-explainability-card">
                     <div class="va-explainability-title">Pinned Probes</div>
+                    <div class="va-pinned-actions">
+                        <button class="va-evidence-button" id="vaPinnedExportJson">Export JSON</button>
+                        <button class="va-evidence-button" id="vaPinnedExportCsv">Export CSV</button>
+                    </div>
                     <div id="vaPinnedList" class="va-pinned-list">No pins yet.</div>
                 </div>
             `;
+
+            const pinnedJsonBtn = document.getElementById('vaPinnedExportJson');
+            if (pinnedJsonBtn) {
+                pinnedJsonBtn.onclick = () => exportPinnedJson();
+            }
+            const pinnedCsvBtn = document.getElementById('vaPinnedExportCsv');
+            if (pinnedCsvBtn) {
+                pinnedCsvBtn.onclick = () => exportPinnedCsv();
+            }
         }
 
         // Helper function to display status codes safely
@@ -1316,6 +1329,39 @@
                     toggleVaPin({ category: '', outcome: '', reason: '' }, index);
                 });
             });
+        }
+
+        function exportPinnedJson() {
+            const blob = new Blob([JSON.stringify(vaPinnedRows, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `va-pinned-${Date.now()}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportPinnedCsv() {
+            const header = 'index,category,outcome,reason';
+            const lines = vaPinnedRows.map(item => {
+                const index = item.index + 1;
+                const category = csvEscape(item.category || '');
+                const outcome = csvEscape(item.outcome || '');
+                const reason = csvEscape(item.reason || '');
+                return `${index},${category},${outcome},${reason}`;
+            });
+            const csv = [header].concat(lines).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `va-pinned-${Date.now()}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
 
         function openVaEvidenceModal(row) {

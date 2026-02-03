@@ -868,6 +868,13 @@ body {
     color: #e2e8f0;
 }
 
+.va-pinned-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
 .va-pinned-item {
     display: grid;
     grid-template-columns: auto auto auto 1fr auto;
