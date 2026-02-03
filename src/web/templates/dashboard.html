@@ -136,6 +136,18 @@
                                 <option value="allowed">Allowed</option>
                                 <option value="error">Error</option>
                             </select>
+                            <label for="vaEvidenceFilter">Evidence</label>
+                            <select id="vaEvidenceFilter" class="input-field va-activity-select">
+                                <option value="all">All</option>
+                                <option value="StatusCode">StatusCode</option>
+                                <option value="ChallengeHeader">ChallengeHeader</option>
+                                <option value="BlockedKeyword">BlockedKeyword</option>
+                                <option value="ChallengeKeyword">ChallengeKeyword</option>
+                                <option value="BaselineDeviation">BaselineDeviation</option>
+                                <option value="StatusChange">StatusChange</option>
+                                <option value="HeaderDiff">HeaderDiff</option>
+                                <option value="LengthDelta">LengthDelta</option>
+                            </select>
                             <input id="vaActivitySearch" class="input-field va-activity-input" type="text"
                                 placeholder="Search payloads">
                             <label class="va-activity-toggle">
@@ -497,6 +509,7 @@
         let vaEventCursor = {};
         let vaEventCache = {};
         let vaActivityFilter = 'all';
+        let vaEvidenceFilter = 'all';
         let vaActivitySearchTerm = '';
         let vaAutoScroll = true;
         let currentVaJobId = null;
@@ -519,6 +532,11 @@
                 if (!haystack.includes(vaActivitySearchTerm)) {
                     return false;
                 }
+            }
+            if (vaEvidenceFilter && vaEvidenceFilter !== 'all') {
+                const evidence = Array.isArray(event.evidence) ? event.evidence : [];
+                const hasKind = evidence.some(entry => entry.kind === vaEvidenceFilter);
+                if (!hasKind) return false;
             }
             if (vaActivityFilter === 'all') return true;
             if (vaActivityFilter === 'blocked_challenge') {
@@ -1783,6 +1801,16 @@
             if (activitySearch) {
                 activitySearch.addEventListener('input', (event) => {
                     vaActivitySearchTerm = event.target.value.trim().toLowerCase();
+                    if (currentVaJobId) {
+                        renderVaActivity(currentVaJobId);
+                    }
+                });
+            }
+
+            const evidenceFilter = document.getElementById('vaEvidenceFilter');
+            if (evidenceFilter) {
+                evidenceFilter.addEventListener('change', (event) => {
+                    vaEvidenceFilter = event.target.value;
                     if (currentVaJobId) {
                         renderVaActivity(currentVaJobId);
                     }
