@@ -311,6 +311,8 @@ pub struct VaHttpResponse {
 
 pub trait VaHttpAdapter {
     fn get(&self, url: &str) -> anyhow::Result<VaHttpResponse>;
+    fn get_with_payload(&self, url: &str, payload: &VaPayloadVariant)
+        -> anyhow::Result<VaHttpResponse>;
 }
 
 pub struct RealVaHttpAdapter {
@@ -333,6 +335,14 @@ impl VaHttpAdapter for RealVaHttpAdapter {
             headers: response.headers,
             body: response.body,
         })
+    }
+
+    fn get_with_payload(
+        &self,
+        url: &str,
+        _payload: &VaPayloadVariant,
+    ) -> anyhow::Result<VaHttpResponse> {
+        self.get(url)
     }
 }
 
@@ -474,6 +484,22 @@ impl VirtualAdversaryRunner {
         ))
     }
 
+    fn evaluate_payload(
+        &self,
+        target_url: &str,
+        baseline: &BaselineRecord,
+        payload: &VaPayloadVariant,
+    ) -> Result<VaOutcome> {
+        let response = self.http.get_with_payload(target_url, payload)?;
+        let diff = ResponseDiff::compare(
+            baseline,
+            response.status,
+            &response.headers,
+            &response.body,
+        );
+        Ok(classify_outcome(response.status, &diff))
+    }
+
     pub fn run(&mut self, target_url: &str) -> Result<VaRunReport> {
         ensure_consent_and_target(&self.consent_manager, target_url)?;
 
@@ -483,11 +509,12 @@ impl VirtualAdversaryRunner {
         let _baseline_wait = self.rate_limiter.record_request();
         let _attack_wait = self.rate_limiter.record_request();
 
-        let _baseline = self.collect_baseline(target_url)?;
+        let baseline = self.collect_baseline(target_url)?;
         let plan = self.plan();
         let mut report = VaRunReport::new(target_url, plan.len());
-        for _item in plan {
-            report.summary.record(VaOutcome::Allowed);
+        for item in plan {
+            let outcome = self.evaluate_payload(target_url, &baseline, &item)?;
+            report.summary.record(outcome);
         }
         report.finish();
         Ok(report)
@@ -511,6 +538,18 @@ mod tests {
                 status: 200,
                 headers: HashMap::new(),
                 body: "ok".to_string(),
+            })
+        }
+
+        fn get_with_payload(
+            &self,
+            _url: &str,
+            _payload: &VaPayloadVariant,
+        ) -> anyhow::Result<VaHttpResponse> {
+            Ok(VaHttpResponse {
+                status: 403,
+                headers: HashMap::new(),
+                body: "blocked".to_string(),
             })
         }
     }
@@ -837,5 +876,28 @@ mod tests {
         let baseline = runner.collect_baseline("https://example.com").unwrap();
         assert_eq!(baseline.status_code, 200);
         assert_eq!(baseline.body_sample, "ok");
+    }
+
+    #[test]
+    fn test_evaluate_payload_classifies_outcome() {
+        let config = VirtualAdversaryConfig {
+            request_budget: 2,
+            ..Default::default()
+        };
+        let runner = VirtualAdversaryRunner::new(config)
+            .unwrap()
+            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
+        let payload = VaPayloadVariant {
+            category: VaPayloadCategory::SqlInjection,
+            template_name: "sqli_basic_or",
+            payload: "' OR '1'='1".to_string(),
+        };
+
+        let outcome = runner
+            .evaluate_payload("https://example.com", &baseline, &payload)
+            .unwrap();
+        assert_eq!(outcome, VaOutcome::Blocked);
     }
 }
