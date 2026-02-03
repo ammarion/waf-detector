@@ -382,6 +382,17 @@
                         <div><strong>Evidence Score</strong><span>${evidenceScore === null ? 'N/A' : evidenceScore.toFixed(2)}</span></div>
                     </div>
                 </div>
+                <div class="va-explainability-card">
+                    <div class="va-explainability-title">Report Evidence</div>
+                    <div class="va-explainability-toggle">
+                        <label for="vaReportEvidenceDepth">Detail</label>
+                        <select id="vaReportEvidenceDepth" class="input-field va-activity-select">
+                            <option value="compact">Compact</option>
+                            <option value="full">Full</option>
+                        </select>
+                    </div>
+                    <div class="va-explainability-text">Controls evidence depth in the report table.</div>
+                </div>
             `;
         }
 
@@ -517,6 +528,7 @@
         let vaEvidenceFilter = 'all';
         let vaActivitySearchTerm = '';
         let vaReasonLevel = 'compact';
+        let vaReportEvidenceDepth = 'compact';
         let vaAutoScroll = true;
         let currentVaJobId = null;
 
@@ -1148,21 +1160,37 @@
 
             renderExplainabilityPanel(report, total, blocked, challenge, allowed, errorCount);
 
+            const evidenceDepthSelect = document.getElementById('vaReportEvidenceDepth');
+            if (evidenceDepthSelect) {
+                evidenceDepthSelect.value = vaReportEvidenceDepth;
+                evidenceDepthSelect.addEventListener('change', (event) => {
+                    vaReportEvidenceDepth = event.target.value;
+                    if (tableBody) {
+                        renderVaReportTable(tableBody, report.results || []);
+                    }
+                });
+            }
+
             if (tableBody) {
                 const rows = Array.isArray(report.results) ? report.results : [];
-                tableBody.innerHTML = rows.map((row, idx) => `
-                    <tr>
-                        <td>${idx + 1}</td>
-                        <td>${escapeHtml(row.category || '')}</td>
-                        <td>${escapeHtml(row.payload || '')}</td>
-                        <td>${escapeHtml(row.outcome || '')}</td>
-                        <td>${escapeHtml(row.reason || '')}</td>
-                        <td>${escapeHtml(formatVaEvidence(row.evidence, 3))}</td>
-                    </tr>
-                `).join('');
+                renderVaReportTable(tableBody, rows);
             }
 
             modal.classList.add('modal-open');
+        }
+
+        function renderVaReportTable(tableBody, rows) {
+            if (!tableBody) return;
+            tableBody.innerHTML = rows.map((row, idx) => `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td>${escapeHtml(row.category || '')}</td>
+                    <td>${escapeHtml(row.payload || '')}</td>
+                    <td>${escapeHtml(row.outcome || '')}</td>
+                    <td>${escapeHtml(row.reason || '')}</td>
+                    <td>${escapeHtml(formatVaEvidence(row.evidence, vaReportEvidenceDepth === 'full' ? 10 : 3))}</td>
+                </tr>
+            `).join('');
         }
 
         function closeVaReportModal() {
