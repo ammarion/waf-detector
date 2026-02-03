@@ -242,6 +242,31 @@
         </div>
     </div>
 
+    <div id="vaReportModal" class="modal-overlay" onclick="closeVaReportModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="vaReportTitle">VA Report</h3>
+                <button class="modal-close" onclick="closeVaReportModal()">✕</button>
+            </div>
+            <div id="vaReportMeta" class="modal-meta"></div>
+            <div id="vaReportSummary" class="modal-summary"></div>
+            <div class="payload-table-wrapper">
+                <table class="payload-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Category</th>
+                            <th>Payload</th>
+                            <th>Outcome</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vaReportTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <script>
         let allResults = [];
 
@@ -710,10 +735,17 @@
                 csvBtn.textContent = 'CSV';
                 csvBtn.onclick = () => downloadVaHistoryReportCsv(report.id);
 
+                const viewBtn = document.createElement('button');
+                viewBtn.type = 'button';
+                viewBtn.className = 'btn btn-secondary va-history-download';
+                viewBtn.textContent = 'View';
+                viewBtn.onclick = () => openVaReportModalFromHistory(report.id);
+
                 const actionGroup = document.createElement('div');
                 actionGroup.className = 'va-history-actions';
                 actionGroup.appendChild(btn);
                 actionGroup.appendChild(csvBtn);
+                actionGroup.appendChild(viewBtn);
 
                 li.appendChild(meta);
                 li.appendChild(actionGroup);
@@ -808,6 +840,19 @@
             }
         }
 
+        async function openVaReportModalFromHistory(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
+                const data = await response.json();
+                if (!data.success || !data.report) {
+                    throw new Error(data.error || 'Failed to load VA report');
+                }
+                openVaReportModal(data.report);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to open VA report');
+            }
+        }
+
         async function downloadVaHistoryReportCsv(reportId) {
             try {
                 const response = await fetch(`/api/virtual-adversary/reports/${reportId}.csv`);
@@ -886,6 +931,92 @@
             link.download = `va-report-${new Date().toISOString().split('T')[0]}.csv`;
             link.click();
             URL.revokeObjectURL(url);
+        }
+
+        function openVaReportModalFromResult(index) {
+            const result = allResults[index];
+            if (!result) {
+                showErrorMessage('No Virtual Adversary report available');
+                return;
+            }
+            const stored = {
+                id: result.report_id || 'local-report',
+                created_at: result.timestamp || new Date().toISOString(),
+                report: result
+            };
+            openVaReportModal(stored);
+        }
+
+        function computeVaRisk(summary, planSize) {
+            const total = summary.total || planSize || 0;
+            const effective = (summary.blocked || 0) + (summary.challenge || 0);
+            if (total === 0) return 'HIGH';
+            const score = effective / total;
+            if (score >= 0.8) return 'LOW';
+            if (score >= 0.5) return 'MEDIUM';
+            return 'HIGH';
+        }
+
+        function openVaReportModal(stored) {
+            const modal = document.getElementById('vaReportModal');
+            const title = document.getElementById('vaReportTitle');
+            const meta = document.getElementById('vaReportMeta');
+            const summaryEl = document.getElementById('vaReportSummary');
+            const tableBody = document.getElementById('vaReportTableBody');
+
+            if (!modal || !stored || !stored.report) {
+                showErrorMessage('VA report unavailable');
+                return;
+            }
+
+            const report = stored.report;
+            const summary = report.summary || {};
+            const total = summary.total || report.plan_size || (report.results ? report.results.length : 0);
+            const blocked = summary.blocked || 0;
+            const challenge = summary.challenge || 0;
+            const allowed = summary.allowed || 0;
+            const errorCount = summary.error || 0;
+            const risk = computeVaRisk(summary, total);
+            const effectiveness = total > 0 ? ((blocked + challenge) / total) * 100 : 0;
+
+            if (title) {
+                title.textContent = `VA Report • ${report.target_url || 'Unknown'}`;
+            }
+            if (meta) {
+                meta.textContent = `${stored.created_at || ''} • ${stored.id || ''}`;
+            }
+            if (summaryEl) {
+                summaryEl.innerHTML = `
+                    <div><strong>Effectiveness:</strong> ${effectiveness.toFixed(1)}%</div>
+                    <div><strong>Risk:</strong> ${risk}</div>
+                    <div><strong>Blocked:</strong> ${blocked}</div>
+                    <div><strong>Challenge:</strong> ${challenge}</div>
+                    <div><strong>Allowed:</strong> ${allowed}</div>
+                    <div><strong>Errors:</strong> ${errorCount}</div>
+                `;
+            }
+
+            if (tableBody) {
+                const rows = Array.isArray(report.results) ? report.results : [];
+                tableBody.innerHTML = rows.map((row, idx) => `
+                    <tr>
+                        <td>${idx + 1}</td>
+                        <td>${escapeHtml(row.category || '')}</td>
+                        <td>${escapeHtml(row.payload || '')}</td>
+                        <td>${escapeHtml(row.outcome || '')}</td>
+                        <td>${escapeHtml(row.reason || '')}</td>
+                    </tr>
+                `).join('');
+            }
+
+            modal.classList.add('modal-open');
+        }
+
+        function closeVaReportModal() {
+            const modal = document.getElementById('vaReportModal');
+            if (modal) {
+                modal.classList.remove('modal-open');
+            }
         }
 
         async function cleanupVaHistory() {
@@ -1077,6 +1208,9 @@
                                 </button>
                                 <button class="btn btn-secondary" onclick="downloadVaReportCsv(${index})">
                                     📄 CSV
+                                </button>
+                                <button class="btn btn-secondary" onclick="openVaReportModalFromResult(${index})">
+                                    🔎 View
                                 </button>
                             </div>
                             <div class="payload-table-wrapper">
@@ -1460,6 +1594,11 @@
             if (historyEnd) {
                 historyEnd.addEventListener('change', () => applyVaHistoryFilter());
             }
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeVaReportModal();
+                }
+            });
             const filter = document.getElementById('vaActivityFilter');
             if (filter) {
                 filter.addEventListener('change', (event) => {
