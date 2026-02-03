@@ -129,11 +129,19 @@ impl SimpleCliApp {
             let max_results = *matches.get_one::<u8>("va-top").unwrap_or(&3) as usize;
             if !report.results.is_empty() {
                 println!("   Top Results:");
+                let reason_level = *matches.get_one::<u8>("va-reason-level").unwrap_or(&1);
                 for result in report.results.iter().take(max_results) {
-                    println!(
-                        "   - {:?} | {} | {:?} | {}",
-                        result.category, result.payload, result.outcome, result.reason
-                    );
+                    if reason_level == 0 {
+                        println!(
+                            "   - {:?} | {} | {:?}",
+                            result.category, result.payload, result.outcome
+                        );
+                    } else {
+                        println!(
+                            "   - {:?} | {} | {:?} | {}",
+                            result.category, result.payload, result.outcome, result.reason
+                        );
+                    }
                 }
             }
             return Ok(());
@@ -817,6 +825,15 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .value_name("COUNT")
                 .value_parser(clap::value_parser!(u8))
                 .default_value("3")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-reason-level")
+                .long("va-reason-level")
+                .help("VA reason verbosity (0=none, 1=default)")
+                .value_name("LEVEL")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("1")
                 .requires("va"),
         )
         .arg(

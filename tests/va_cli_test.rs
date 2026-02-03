@@ -66,6 +66,15 @@ fn test_va_top_default_value() {
 }
 
 #[test]
+fn test_va_reason_level_default() {
+    let cmd = build_simple_cli();
+    let matches = cmd
+        .try_get_matches_from(["waf-detect", "--va", "https://example.com"])
+        .expect("VA CLI should parse");
+    assert_eq!(*matches.get_one::<u8>("va-reason-level").unwrap(), 1);
+}
+
+#[test]
 fn test_va_confidence_score_format() {
     let summary = waf_detector::virtual_adversary::VaResultSummary {
         total: 4,
