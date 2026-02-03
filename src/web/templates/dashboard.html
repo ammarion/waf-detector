@@ -610,7 +610,7 @@
                     <span class="va-activity-category">${escapeHtml(event.category)}</span>
                     <span class="va-activity-outcome ${outcomeClass}">${escapeHtml(event.outcome)}</span>
                     <span class="va-activity-reason">${escapeHtml(formatReason(event.reason))}</span>
-                    <span class="va-activity-evidence">${escapeHtml(formatVaEvidence(event.evidence))}</span>
+                    <span class="va-activity-evidence">${renderEvidenceChipsInline(event.evidence, 3)}</span>
                 `;
                 log.appendChild(li);
             });
