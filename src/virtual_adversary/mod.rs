@@ -241,6 +241,13 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> Va
     }
 
     let body_lc = body.to_lowercase();
+    if body_lc.contains("access denied")
+        || body_lc.contains("request blocked")
+        || body_lc.contains("forbidden")
+    {
+        return VaOutcome::Blocked;
+    }
+
     if body_lc.contains("captcha") || body_lc.contains("challenge") || body_lc.contains("verify") {
         return VaOutcome::Challenge;
     }
@@ -812,6 +819,16 @@ mod tests {
         assert_eq!(
             classify_outcome(500, &diff, "error"),
             VaOutcome::Challenge
+        );
+    }
+
+    #[test]
+    fn test_classify_outcome_blocked_by_body_keywords() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
+        let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "Access Denied");
+        assert_eq!(
+            classify_outcome(200, &diff, "Access Denied"),
+            VaOutcome::Blocked
         );
     }
 
