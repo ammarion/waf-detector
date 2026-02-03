@@ -298,6 +298,17 @@
         </div>
     </div>
 
+    <div id="vaEvidenceModal" class="modal-overlay" onclick="closeVaEvidenceModal()">
+        <div class="modal-content modal-content-narrow" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="vaEvidenceTitle">Probe Evidence</h3>
+                <button class="modal-close" onclick="closeVaEvidenceModal()">✕</button>
+            </div>
+            <div id="vaEvidenceMeta" class="modal-meta"></div>
+            <div id="vaEvidenceBody" class="va-evidence-body"></div>
+        </div>
+    </div>
+
     <script>
         let allResults = [];
 
@@ -1204,9 +1215,66 @@
                     <td>${escapeHtml(row.payload || '')}</td>
                     <td>${escapeHtml(row.outcome || '')}</td>
                     <td>${escapeHtml(row.reason || '')}</td>
-                    <td>${renderEvidenceChipsInline(row.evidence, vaReportEvidenceDepth === 'full' ? 10 : 3)}</td>
+                    <td class="va-evidence-cell">
+                        ${renderEvidenceChipsInline(row.evidence, vaReportEvidenceDepth === 'full' ? 10 : 3)}
+                        <button class="va-evidence-button" data-va-index="${idx}">Details</button>
+                    </td>
                 </tr>
             `).join('');
+
+            tableBody.querySelectorAll('.va-evidence-button').forEach(button => {
+                button.addEventListener('click', (event) => {
+                    const index = Number(event.currentTarget.getAttribute('data-va-index'));
+                    if (!Number.isFinite(index)) return;
+                    openVaEvidenceModal(rows[index]);
+                });
+            });
+        }
+
+        function openVaEvidenceModal(row) {
+            const modal = document.getElementById('vaEvidenceModal');
+            const title = document.getElementById('vaEvidenceTitle');
+            const meta = document.getElementById('vaEvidenceMeta');
+            const body = document.getElementById('vaEvidenceBody');
+            if (!modal || !row) return;
+
+            if (title) {
+                title.textContent = `Probe Evidence • ${row.category || 'Unknown'}`;
+            }
+            if (meta) {
+                meta.textContent = `${row.outcome || 'Unknown'} • ${row.reason || ''}`;
+            }
+
+            const evidenceList = Array.isArray(row.evidence) && row.evidence.length
+                ? row.evidence.map(entry => `
+                    <div class="va-evidence-row">
+                        <div class="va-evidence-key">${escapeHtml(entry.kind || '')}</div>
+                        <div class="va-evidence-detail">${escapeHtml(entry.detail || '')}</div>
+                    </div>
+                `).join('')
+                : '<div class="va-evidence-empty">No evidence recorded for this probe.</div>';
+
+            if (body) {
+                body.innerHTML = `
+                    <div class="va-evidence-section">
+                        <div class="va-evidence-label">Payload</div>
+                        <div class="va-evidence-value">${escapeHtml(row.payload || '')}</div>
+                    </div>
+                    <div class="va-evidence-section">
+                        <div class="va-evidence-label">Evidence</div>
+                        ${evidenceList}
+                    </div>
+                `;
+            }
+
+            modal.classList.add('modal-open');
+        }
+
+        function closeVaEvidenceModal() {
+            const modal = document.getElementById('vaEvidenceModal');
+            if (modal) {
+                modal.classList.remove('modal-open');
+            }
         }
 
         function closeVaReportModal() {
