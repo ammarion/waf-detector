@@ -503,5 +503,6 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaActivityFilter"));
         assert!(DASHBOARD_HTML.contains("downloadVaReportCsv"));
         assert!(DASHBOARD_HTML.contains("vaHistorySearch"));
+        assert!(DASHBOARD_HTML.contains("vaAutoScroll"));
     }
 }

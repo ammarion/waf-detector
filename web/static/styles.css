@@ -496,6 +496,23 @@ body {
     min-width: 180px;
 }
 
+.va-activity-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.va-activity-toggle input {
+    accent-color: var(--accent-primary);
+}
+
+.va-activity-log {
+    max-height: 240px;
+    overflow-y: auto;
+}
+
 .va-activity-empty {
     font-size: 0.85rem;
     color: var(--text-secondary);

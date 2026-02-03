@@ -136,6 +136,10 @@
                                 <option value="allowed">Allowed</option>
                                 <option value="error">Error</option>
                             </select>
+                            <label class="va-activity-toggle">
+                                <input type="checkbox" id="vaAutoScroll" checked>
+                                Auto-scroll
+                            </label>
                         </div>
                     </div>
                     <div id="vaActivityEmpty" class="va-activity-empty">No activity yet.</div>
@@ -373,6 +377,7 @@
         let vaEventCursor = {};
         let vaEventCache = {};
         let vaActivityFilter = 'all';
+        let vaAutoScroll = true;
         let currentVaJobId = null;
 
         function resetVaActivity() {
@@ -422,6 +427,10 @@
                 `;
                 log.appendChild(li);
             });
+
+            if (vaAutoScroll) {
+                log.scrollTop = log.scrollHeight;
+            }
         }
 
         function appendVaEvents(jobId, events) {
@@ -1387,6 +1396,15 @@
             if (filter) {
                 filter.addEventListener('change', (event) => {
                     vaActivityFilter = event.target.value;
+                    if (currentVaJobId) {
+                        renderVaActivity(currentVaJobId);
+                    }
+                });
+            }
+            const autoScrollToggle = document.getElementById('vaAutoScroll');
+            if (autoScrollToggle) {
+                autoScrollToggle.addEventListener('change', (event) => {
+                    vaAutoScroll = event.target.checked;
                     if (currentVaJobId) {
                         renderVaActivity(currentVaJobId);
                     }
