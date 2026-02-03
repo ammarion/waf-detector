@@ -940,6 +940,18 @@ body {
     font-size: 0.9rem;
 }
 
+.va-replay-filters {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.6rem;
+}
+
+.va-replay-filters .input-field {
+    min-width: 140px;
+    flex: 1 1 160px;
+}
+
 .va-replay-list {
     display: flex;
     flex-direction: column;

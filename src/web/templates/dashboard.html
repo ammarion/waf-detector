@@ -287,6 +287,11 @@
                         <button class="va-evidence-button" id="vaReplayToggle">Show all</button>
                     </div>
                 </div>
+                <div class="va-replay-filters">
+                    <input id="vaReplaySearch" class="input-field" type="text" placeholder="Filter replay plan">
+                    <select id="vaReplayClassFilter" class="input-field"></select>
+                    <select id="vaReplayChannelFilter" class="input-field"></select>
+                </div>
                 <div id="vaReplayPlanList" class="va-replay-list">No replay plan loaded.</div>
             </div>
             <div id="vaReportExplainability" class="va-explainability" aria-live="polite"></div>
@@ -653,6 +658,9 @@
         let vaCurrentReportTarget = null;
         let vaCurrentReplayPlan = [];
         let vaReplayExpanded = false;
+        let vaReplayFilterText = '';
+        let vaReplayFilterClass = 'all';
+        let vaReplayFilterChannel = 'all';
 
         function formatReason(reason) {
             if (!reason) return '';
@@ -1572,6 +1580,54 @@
             }
         }
 
+        function bindReplayFilters() {
+            const search = document.getElementById('vaReplaySearch');
+            const classSelect = document.getElementById('vaReplayClassFilter');
+            const channelSelect = document.getElementById('vaReplayChannelFilter');
+            if (search) {
+                search.value = vaReplayFilterText;
+                search.oninput = (event) => {
+                    vaReplayFilterText = event.target.value.toLowerCase();
+                    renderReplayPlanList();
+                };
+            }
+            if (classSelect) {
+                classSelect.value = vaReplayFilterClass;
+                classSelect.onchange = (event) => {
+                    vaReplayFilterClass = event.target.value;
+                    renderReplayPlanList();
+                };
+            }
+            if (channelSelect) {
+                channelSelect.value = vaReplayFilterChannel;
+                channelSelect.onchange = (event) => {
+                    vaReplayFilterChannel = event.target.value;
+                    renderReplayPlanList();
+                };
+            }
+        }
+
+        function updateReplayFilterOptions(plan) {
+            const classSelect = document.getElementById('vaReplayClassFilter');
+            const channelSelect = document.getElementById('vaReplayChannelFilter');
+            if (!classSelect || !channelSelect) return;
+            const classes = Array.from(new Set(plan.map(item => item.class).filter(Boolean))).sort();
+            const channels = Array.from(new Set(plan.map(item => item.channel).filter(Boolean))).sort();
+
+            const classOptions = ['all'].concat(classes);
+            const channelOptions = ['all'].concat(channels);
+
+            classSelect.innerHTML = classOptions
+                .map(value => `<option value="${value}">${value === 'all' ? 'All classes' : escapeHtml(value)}</option>`)
+                .join('');
+            channelSelect.innerHTML = channelOptions
+                .map(value => `<option value="${value}">${value === 'all' ? 'All channels' : escapeHtml(value)}</option>`)
+                .join('');
+
+            if (!classOptions.includes(vaReplayFilterClass)) vaReplayFilterClass = 'all';
+            if (!channelOptions.includes(vaReplayFilterChannel)) vaReplayFilterChannel = 'all';
+        }
+
         function renderReplayPlanList() {
             const container = document.getElementById('vaReplayPlanList');
             if (!container) return;
@@ -1580,7 +1636,20 @@
                 container.textContent = 'No replay plan loaded.';
                 return;
             }
-            const visible = vaReplayExpanded ? plan : plan.slice(0, 5);
+            updateReplayFilterOptions(plan);
+            bindReplayFilters();
+            const filtered = plan.filter(item => {
+                if (vaReplayFilterClass !== 'all' && item.class !== vaReplayFilterClass) {
+                    return false;
+                }
+                if (vaReplayFilterChannel !== 'all' && item.channel !== vaReplayFilterChannel) {
+                    return false;
+                }
+                if (!vaReplayFilterText) return true;
+                const haystack = `${item.class || ''} ${item.channel || ''} ${item.description || ''} ${item.method || ''} ${item.url || ''}`.toLowerCase();
+                return haystack.includes(vaReplayFilterText);
+            });
+            const visible = vaReplayExpanded ? filtered : filtered.slice(0, 5);
             container.innerHTML = visible.map(item => `
                 <div class="va-replay-item">
                     <div class="va-replay-index">#${item.index ?? ''}</div>
@@ -1590,6 +1659,11 @@
                     <div class="va-replay-url">${escapeHtml(item.url || '')}</div>
                 </div>
             `).join('');
+            const toggleBtn = document.getElementById('vaReplayToggle');
+            if (toggleBtn) {
+                toggleBtn.disabled = filtered.length <= 5;
+                toggleBtn.textContent = vaReplayExpanded ? 'Show less' : `Show all (${filtered.length})`;
+            }
             bindReplayExportActions();
         }
 
