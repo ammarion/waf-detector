@@ -111,12 +111,12 @@ impl AkamaiProvider {
         ];
 
         for (header_name, description, confidence) in akamai_headers {
-            if response.headers.contains_key(header_name) {
+            if let Some(value) = response.headers.get(header_name) {
                 evidence.push(Evidence {
                     method_type: MethodType::Header(header_name.to_string()),
                     confidence,
                     description: description.to_string(),
-                    raw_data: response.headers.get(header_name).unwrap().clone(),
+                    raw_data: value.clone(),
                     signature_matched: format!("{header_name}-pattern"),
                 });
             }

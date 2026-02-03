@@ -268,7 +268,8 @@ impl TlsAnalyzer {
                 // Capture the certificates
                 let mut certs = vec![end_entity.to_vec()];
                 certs.extend(intermediates.iter().map(|c| c.to_vec()));
-                *self.captured_certs.lock().unwrap() = Some(certs);
+                let mut guard = self.captured_certs.lock().unwrap_or_else(|e| e.into_inner());
+                *guard = Some(certs);
                 Ok(ServerCertVerified::assertion())
             }
 
@@ -319,7 +320,8 @@ impl TlsAnalyzer {
         let _tls_stream = connector.connect(server_name, stream).await?;
 
         // Get captured certificates
-        if let Some(certs) = captured_certs.lock().unwrap().as_ref() {
+        let guard = captured_certs.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(certs) = guard.as_ref() {
             if let Some(cert) = certs.first() {
                 return self.parse_certificate(cert);
             }

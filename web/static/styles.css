@@ -296,6 +296,43 @@ body {
     font-size: 0.85rem;
 }
 
+/* Smoke Test Card */
+.smoke-test-card {
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: #f0f9ff;
+    border-radius: 8px;
+    border-left: 4px solid #0ea5e9;
+    color: #0f172a;
+}
+
+.smoke-test-title {
+    margin: 0 0 0.5rem 0;
+    color: #0369a1;
+}
+
+.smoke-test-note {
+    font-size: 0.85rem;
+    color: #334155;
+    margin-bottom: 0.5rem;
+}
+
+.smoke-test-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1rem;
+    font-size: 0.9rem;
+}
+
+.payload-table-wrapper {
+    margin-top: 1rem;
+    overflow-x: auto;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    -webkit-overflow-scrolling: touch;
+}
+
 /* Detection Grid */
 .detection-info {
     display: grid;
@@ -397,26 +434,28 @@ body {
     border-collapse: separate;
     border-spacing: 0;
     font-size: 0.9rem;
-    margin-top: 1rem;
+    margin-top: 0;
+    min-width: 760px;
+    table-layout: fixed;
 }
 
 .payload-table th {
-    background: rgba(30, 41, 59, 0.5);
-    color: var(--text-secondary);
+    background: #e2e8f0;
+    color: #0f172a;
     font-weight: 600;
     text-align: left;
     padding: 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid #cbd5f5;
 }
 
 .payload-table td {
     padding: 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    color: var(--text-primary);
+    border-bottom: 1px solid #e2e8f0;
+    color: #0f172a;
 }
 
 .payload-table tr:hover td {
-    background: rgba(255, 255, 255, 0.02);
+    background: #f1f5f9;
 }
 
 .payload-table code {
@@ -426,6 +465,32 @@ body {
     padding: 0.2rem 0.4rem;
     border-radius: 4px;
     font-size: 0.85em;
+}
+
+.payload-table th:nth-child(1),
+.payload-table td:nth-child(1) {
+    width: 20%;
+}
+
+.payload-table th:nth-child(2),
+.payload-table td:nth-child(2) {
+    width: 45%;
+    word-break: break-word;
+}
+
+.payload-table th:nth-child(3),
+.payload-table td:nth-child(3) {
+    width: 15%;
+}
+
+.payload-table th:nth-child(4),
+.payload-table td:nth-child(4) {
+    width: 10%;
+}
+
+.payload-table th:nth-child(5),
+.payload-table td:nth-child(5) {
+    width: 10%;
 }
 
 /* Evidence Lists */

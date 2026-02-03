@@ -21,14 +21,15 @@ pub struct DetectionEngine {
 }
 
 impl DetectionEngine {
-    pub fn new(registry: ProviderRegistry) -> Self {
-        let dns_resolver = DnsResolver::new().expect("Failed to initialize DNS resolver");
-        Self {
+    pub fn new(registry: ProviderRegistry) -> Result<Self> {
+        let dns_resolver = DnsResolver::new()?;
+        let http_client = HttpClient::new()?;
+        Ok(Self {
             registry,
-            http_client: Arc::new(HttpClient::new().expect("Failed to initialize HTTP client")),
+            http_client: Arc::new(http_client),
             dns_resolver: Arc::new(dns_resolver),
             waf_mode_detector: None,
-        }
+        })
     }
 
     pub fn with_waf_mode_detection(mut self) -> Self {

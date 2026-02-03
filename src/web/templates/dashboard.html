@@ -378,16 +378,16 @@
                             "0"}ms</div>
                     </div>
                     ${isSmokeTest ? `
-                        <div style="margin-bottom: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #0ea5e9;">
-                            <h4 style="margin: 0 0 0.5rem 0; color: #0369a1;">🛡️ WAF Smoke Test Results</h4>
-                            <p style="font-size: 0.85rem; color: #4b5563; margin-bottom: 0.5rem;">Note: Scanner Detection tests use realistic User-Agent headers instead of query parameters to test if the WAF blocks security scanning tools.</p>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; font-size: 0.9rem;">
+                        <div class="smoke-test-card">
+                            <h4 class="smoke-test-title">🛡️ WAF Smoke Test Results</h4>
+                            <p class="smoke-test-note">Note: Scanner Detection tests use realistic User-Agent headers instead of query parameters to test if the WAF blocks security scanning tools.</p>
+                            <div class="smoke-test-grid">
                                 <div><strong>Effectiveness:</strong> ${result.summary && result.summary.effectiveness_percentage !== undefined ? result.summary.effectiveness_percentage.toFixed(1) : '0.0'}%</div>
                                 <div><strong>Blocked:</strong> ${result.summary && result.summary.blocked_count !== undefined ? result.summary.blocked_count : 0}</div>
                                 <div><strong>Allowed:</strong> ${result.summary && result.summary.allowed_count !== undefined ? result.summary.allowed_count : 0}</div>
                                 <div><strong>Errors:</strong> ${result.summary && result.summary.error_count !== undefined ? result.summary.error_count : 0}</div>
                             </div>
-                            <div style="margin-top: 1rem;">
+                            <div class="payload-table-wrapper">
                                 <table class="payload-table">
                                     <thead>
                                         <tr>
@@ -507,7 +507,7 @@
                             </div>
                         </div>
                     ` : ''}
-                    ${isCombined && result && result.recommendations && Array.isArray(result.recommendations) && result.recommendations.length > 0 ? `
+                    ${result && result.recommendations && Array.isArray(result.recommendations) && result.recommendations.length > 0 ? `
                         <div class="evidence-section">
                             <button class="evidence-toggle" onclick="toggleEvidence(this)">
                                 View Recommendations (${result.recommendations.length} items)

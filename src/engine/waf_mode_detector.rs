@@ -94,7 +94,10 @@ pub struct WafModeDetector {
 
 impl WafModeDetector {
     pub fn new() -> Self {
-        let http_client = HttpClient::new().expect("Failed to create HTTP client");
+        let http_client = HttpClient::new().unwrap_or_else(|err| {
+            eprintln!("⚠️  Failed to initialize HTTP client: {err}. Falling back to defaults.");
+            HttpClient::default()
+        });
         let payloads = Self::initialize_payloads();
 
         Self {

@@ -83,10 +83,15 @@ pub async fn analyze_static_page(url: &str) -> Result<StaticPageAnalysis> {
     }
 
     // Perform HTTP analysis
-    let client = Client::builder()
-        .timeout(Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    let mut builder = Client::builder().timeout(Duration::from_secs(10));
+    let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
+    if disable_proxy {
+        builder = builder.no_proxy();
+    }
+    if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    let client = builder.build()?;
 
     // Make initial request
     let response1 = client.get(url).send().await?;

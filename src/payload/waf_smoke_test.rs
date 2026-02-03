@@ -5,6 +5,7 @@
 //! colorful output, and structured results for both CLI and UI consumption.
 
 use crate::engine::waf_mode_detector::{PayloadType, WafMode};
+use crate::effectiveness::static_detection::calculate_similarity;
 use crate::http::HttpClient;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -108,9 +109,18 @@ pub struct SmokeTestResult {
     pub detected_waf: Option<String>,
     pub detected_cdn: Option<String>,
     pub recommendations: Vec<String>,
+    pub endpoint_context: Option<EndpointContext>,
     pub total_time_ms: u64,
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub is_smoke_test: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EndpointContext {
+    pub similarity: f64,
+    pub status_match: bool,
+    pub content_type: Option<String>,
+    pub likely_noninteractive: bool,
 }
 
 /// Summary statistics for the smoke test
@@ -266,6 +276,8 @@ impl WafSmokeTest {
         println!("🎯 Target: {url}");
         println!("═══════════════════════════════════════════════════════════════");
 
+        let endpoint_context = self.analyze_endpoint_context(url).await.ok();
+
         // Test each payload type
         for (payload_type, payloads) in &self.payloads {
             for payload in payloads {
@@ -285,7 +297,8 @@ impl WafSmokeTest {
         let summary = self.calculate_summary(&test_results);
         let waf_mode = self.determine_waf_mode(&test_results);
         let detected_waf = self.identify_waf_from_results(&test_results);
-        let recommendations = self.generate_recommendations(&summary, &waf_mode, &detected_waf);
+        let recommendations =
+            self.generate_recommendations(&summary, &waf_mode, &detected_waf, endpoint_context.as_ref());
 
         let result = SmokeTestResult {
             url: url.to_string(),
@@ -295,6 +308,7 @@ impl WafSmokeTest {
             detected_waf,
             detected_cdn: None,
             recommendations,
+            endpoint_context,
             total_time_ms: total_time.as_millis() as u64,
             timestamp: chrono::Utc::now(),
             is_smoke_test: true,
@@ -489,6 +503,12 @@ impl WafSmokeTest {
         // Check response body for indicators
         let body_lower = response.body.to_lowercase();
 
+        if let Some(vendor) = Self::match_block_template(&body_lower) {
+            evidence.push(format!("Block page template match: {vendor}"));
+            waf_indicators.push(vendor.to_string());
+            return (PayloadClassification::Blocked, evidence, waf_indicators);
+        }
+
         // Challenge page indicators
         if body_lower.contains("checking your browser")
             || body_lower.contains("challenge")
@@ -527,6 +547,55 @@ impl WafSmokeTest {
         }
 
         (classification, evidence, waf_indicators)
+    }
+
+    fn match_block_template(body_lower: &str) -> Option<&'static str> {
+        let templates = [
+            ("CloudFlare", ["cloudflare", "attention required", "ray id"].as_slice()),
+            ("Akamai", ["akamai", "reference", "incident id"].as_slice()),
+            ("AWS WAF", ["request blocked", "aws waf"].as_slice()),
+            ("F5 BIG-IP", ["the requested url was rejected", "support id"].as_slice()),
+            ("Sucuri", ["access denied", "sucuri"].as_slice()),
+            ("Imperva", ["incapsula", "incident id"].as_slice()),
+        ];
+
+        templates
+            .iter()
+            .find(|(_, markers)| markers.iter().all(|m| body_lower.contains(*m)))
+            .map(|(vendor, _)| *vendor)
+    }
+
+    async fn analyze_endpoint_context(
+        &self,
+        url: &str,
+    ) -> Result<EndpointContext, anyhow::Error> {
+        let baseline = self.http_client.get(url).await?;
+        let probe_url = if url.contains('?') {
+            format!("{url}&waf_probe=1")
+        } else {
+            format!("{url}?waf_probe=1")
+        };
+        let probe = self.http_client.get(&probe_url).await?;
+
+        let similarity = calculate_similarity(&baseline.body, &probe.body);
+        let status_match = baseline.status == probe.status;
+        let base_len = baseline.body.len() as f64;
+        let probe_len = probe.body.len() as f64;
+        let len_diff_ratio = if base_len > 0.0 {
+            ((base_len - probe_len).abs() / base_len).min(1.0)
+        } else {
+            0.0
+        };
+
+        let content_type = baseline.headers.get("content-type").cloned();
+        let likely_noninteractive = status_match && similarity > 0.95 && len_diff_ratio < 0.05;
+
+        Ok(EndpointContext {
+            similarity,
+            status_match,
+            content_type,
+            likely_noninteractive,
+        })
     }
 
     /// Print colored test result in real-time
@@ -674,8 +743,15 @@ impl WafSmokeTest {
         summary: &TestSummary,
         waf_mode: &Option<WafMode>,
         detected_waf: &Option<String>,
+        endpoint_context: Option<&EndpointContext>,
     ) -> Vec<String> {
         let mut recommendations = Vec::new();
+
+        if let Some(context) = endpoint_context {
+            if context.likely_noninteractive {
+                recommendations.push("⚠️ Target appears unresponsive to parameters (likely static or non-interactive). Consider testing an input-processing endpoint for higher confidence.".to_string());
+            }
+        }
 
         // Effectiveness recommendations
         match summary.effectiveness_percentage {
@@ -847,7 +923,18 @@ impl WafSmokeTest {
 
 impl Default for WafSmokeTest {
     fn default() -> Self {
-        Self::new(SmokeTestConfig::default()).expect("Failed to create WafSmokeTest")
+        let config = SmokeTestConfig::default();
+        match Self::new(config.clone()) {
+            Ok(test) => test,
+            Err(err) => {
+                eprintln!("⚠️  Failed to create WafSmokeTest: {err}. Falling back to defaults.");
+                Self {
+                    http_client: HttpClient::default(),
+                    config,
+                    payloads: Self::initialize_advanced_payloads(),
+                }
+            }
+        }
     }
 }
 
@@ -870,6 +957,43 @@ mod tests {
         let (classification, evidence, _) = smoke_test.classify_response(&response, "test");
         assert_eq!(classification, PayloadClassification::Blocked);
         assert!(!evidence.is_empty());
+    }
+
+    #[test]
+    fn test_template_match_blocked() {
+        let smoke_test = WafSmokeTest::default();
+        let response = crate::http::HttpResponse {
+            status: 200,
+            headers: std::collections::HashMap::new(),
+            body: "Attention Required! Cloudflare Ray ID: 12345".to_string(),
+            url: "test".to_string(),
+        };
+
+        let (classification, evidence, waf_indicators) =
+            smoke_test.classify_response(&response, "test");
+
+        assert_eq!(classification, PayloadClassification::Blocked);
+        assert!(evidence.iter().any(|e| e.contains("Block page template match")));
+        assert!(waf_indicators.iter().any(|w| w == "CloudFlare"));
+    }
+
+    #[tokio::test]
+    async fn test_endpoint_context_noninteractive() {
+        let baseline = crate::http::HttpResponse {
+            status: 200,
+            headers: std::collections::HashMap::new(),
+            body: "static page".to_string(),
+            url: "test".to_string(),
+        };
+        let probe = crate::http::HttpResponse {
+            status: 200,
+            headers: std::collections::HashMap::new(),
+            body: "static page".to_string(),
+            url: "test".to_string(),
+        };
+
+        let similarity = calculate_similarity(&baseline.body, &probe.body);
+        assert!(similarity > 0.95);
     }
 
     #[test]

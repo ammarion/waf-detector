@@ -120,14 +120,18 @@ impl EffectivenessReport {
     pub fn add_test_result(&mut self, name: String, result: TestResult) {
         self.statistics.total_tests += 1;
 
-        if result.blocked {
-            self.statistics.blocked_requests += 1;
-        } else {
-            self.statistics.allowed_requests += 1;
-        }
-
-        if result.status_code >= 500 {
+        if result.status_code == 0 {
             self.statistics.error_responses += 1;
+        } else {
+            if result.blocked {
+                self.statistics.blocked_requests += 1;
+            } else {
+                self.statistics.allowed_requests += 1;
+            }
+
+            if result.status_code >= 500 {
+                self.statistics.error_responses += 1;
+            }
         }
 
         self.test_results.insert(name, result);

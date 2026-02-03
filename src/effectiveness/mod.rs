@@ -75,6 +75,39 @@ pub(crate) struct BaselineSignature {
     headers: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BlockTemplate {
+    vendor: &'static str,
+    markers: &'static [&'static str],
+}
+
+const BLOCK_TEMPLATES: &[BlockTemplate] = &[
+    BlockTemplate {
+        vendor: "CloudFlare",
+        markers: &["cloudflare", "attention required", "ray id"],
+    },
+    BlockTemplate {
+        vendor: "Akamai",
+        markers: &["akamai", "reference", "incident id"],
+    },
+    BlockTemplate {
+        vendor: "AWS WAF",
+        markers: &["request blocked", "aws waf"],
+    },
+    BlockTemplate {
+        vendor: "F5 BIG-IP",
+        markers: &["the requested url was rejected", "support id"],
+    },
+    BlockTemplate {
+        vendor: "Sucuri",
+        markers: &["access denied", "sucuri"],
+    },
+    BlockTemplate {
+        vendor: "Imperva",
+        markers: &["incapsula", "incident id"],
+    },
+];
+
 impl EffectivenessTest {
     /// Check if a response indicates blocking
     pub(crate) fn is_blocked(
@@ -84,8 +117,11 @@ impl EffectivenessTest {
         baseline: Option<&BaselineSignature>,
     ) -> (bool, Vec<String>) {
         let mut reasons = Vec::new();
+        // Body similarity threshold for detecting abnormal block pages.
         const SIMILARITY_THRESHOLD: f64 = 0.65;
+        // Minimum reduction ratio relative to baseline to flag an unusual response.
         const REDUCTION_RATIO: f64 = 0.70;
+        // Avoid flagging small responses; require meaningful absolute length change.
         const MIN_LENGTH_DIFF: usize = 1200;
 
         // Check common block status codes
@@ -120,6 +156,10 @@ impl EffectivenessTest {
                     reasons.push(format!("Blocking keyword detected: {indicator}"));
                 }
             }
+        }
+
+        if let Some(vendor) = Self::match_block_template(&body_lower, baseline) {
+            reasons.push(format!("Block page template match: {vendor}"));
         }
 
         // Baseline-aware body delta: large reduction or low similarity can indicate blocking
@@ -179,7 +219,7 @@ impl EffectivenessTest {
         }
 
         // Auth challenge allowlist: don't flag as blocked if it's likely auth and no other signals
-        if let Some(value) = response_headers.get("www-authenticate") {
+        if let Some(_value) = response_headers.get("www-authenticate") {
             if status_code == 401 {
                 if reasons.len() == 1
                     && reasons
@@ -203,7 +243,6 @@ impl EffectivenessTest {
                     .first()
                     .is_some_and(|r| r.contains("Blocking status code"))
             {
-                let _ = value;
                 return (false, Vec::new());
             }
         }
@@ -469,10 +508,15 @@ impl EffectivenessTest {
         sleep(self.config.request_delay).await;
 
         // Build client with timeout
-        let client = reqwest::Client::builder()
-            .timeout(self.config.request_timeout)
-            .danger_accept_invalid_certs(true) // Allow testing sites with invalid certs (common in testing)
-            .build()?;
+        let mut client_builder = reqwest::Client::builder().timeout(self.config.request_timeout);
+        let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
+        if disable_proxy {
+            client_builder = client_builder.no_proxy();
+        }
+        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+            client_builder = client_builder.danger_accept_invalid_certs(true);
+        }
+        let client = client_builder.build()?;
 
         let mut request_builder = match method {
             "POST" => client.post(url).body(body.to_string()),
@@ -487,7 +531,10 @@ impl EffectivenessTest {
 
         // Add User-Agent if not present (to look more like a browser or scanner)
         // We check the input map since checking the builder is tricky
-        if !headers.keys().any(|k| k.eq_ignore_ascii_case("user-agent")) {
+        let has_valid_user_agent = headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("user-agent") && !v.trim().is_empty());
+        if !has_valid_user_agent {
             request_builder = request_builder.header("User-Agent", "WAF-Detector/1.0");
         }
 
@@ -532,7 +579,7 @@ impl EffectivenessTest {
             }
             Err(e) => {
                 Ok(TestResult {
-                    blocked: true, // Treat network failure as potential block (fail-open vs fail-close discussion)
+                    blocked: false,
                     status_code: 0,
                     evidence: format!("Connection failed: {e}"),
                     response_time: duration,
@@ -648,6 +695,23 @@ impl EffectivenessTest {
                 body_length: r.response_body_length,
                 headers: r.response_headers.clone(),
             })
+    }
+
+    fn match_block_template(body_lower: &str, baseline: Option<&BaselineSignature>) -> Option<&'static str> {
+        let baseline_body = baseline.map(|b| b.body_sample.to_lowercase()).unwrap_or_default();
+
+        for template in BLOCK_TEMPLATES {
+            let is_match = template
+                .markers
+                .iter()
+                .all(|marker| body_lower.contains(marker));
+
+            if is_match && !baseline_body.contains(template.markers[0]) {
+                return Some(template.vendor);
+            }
+        }
+
+        None
     }
 }
 
