@@ -67,3 +67,19 @@ fn test_va_confidence_score_format() {
     };
     assert!((summary.confidence_score() - 0.75).abs() < 0.001);
 }
+
+#[test]
+fn test_va_report_top_results_has_reason() {
+    let mut report = waf_detector::virtual_adversary::VaRunReport::new(
+        "https://example.com",
+        1,
+        waf_detector::virtual_adversary::VirtualAdversaryConfig::default(),
+    );
+    report.results.push(waf_detector::virtual_adversary::VaResultRecord {
+        payload: "payload".to_string(),
+        category: waf_detector::virtual_adversary::VaPayloadCategory::SqlInjection,
+        outcome: waf_detector::virtual_adversary::VaOutcome::Blocked,
+        reason: "status=403".to_string(),
+    });
+    assert_eq!(report.results[0].reason, "status=403");
+}

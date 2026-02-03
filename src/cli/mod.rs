@@ -126,6 +126,16 @@ impl SimpleCliApp {
                 report.config.request_timeout.as_secs(),
                 report.config.max_variants_per_payload
             );
+            let max_results = 3usize;
+            if !report.results.is_empty() {
+                println!("   Top Results:");
+                for result in report.results.iter().take(max_results) {
+                    println!(
+                        "   - {:?} | {} | {:?} | {}",
+                        result.category, result.payload, result.outcome, result.reason
+                    );
+                }
+            }
             return Ok(());
         }
 
