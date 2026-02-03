@@ -30,53 +30,207 @@ mod effectiveness_tests {
         assert_eq!(config.intensity_level, 3);
         assert_eq!(config.request_timeout.as_secs(), 30);
         assert_eq!(config.request_delay.as_millis(), 500);
+        assert_eq!(config.similarity_threshold, 0.65);
+        assert_eq!(config.reduction_ratio, 0.70);
+        assert_eq!(config.min_length_diff, 1200);
+    }
+
+    #[test]
+    fn test_effectiveness_config_overrides() {
+        let mut config = EffectivenessConfig::default();
+        let overrides = EffectivenessConfigOverrides {
+            max_requests_per_minute: Some(120),
+            audit_logging: Some(false),
+            intensity_level: Some(5),
+            request_timeout_seconds: Some(10),
+            request_delay_ms: Some(250),
+            similarity_threshold: Some(0.5),
+            reduction_ratio: Some(0.6),
+            min_length_diff: Some(500),
+        };
+
+        config.apply_overrides(overrides);
+
+        assert_eq!(config.max_requests_per_minute, 120);
+        assert!(!config.audit_logging);
+        assert_eq!(config.intensity_level, 5);
+        assert_eq!(config.request_timeout.as_secs(), 10);
+        assert_eq!(config.request_delay.as_millis(), 250);
+        assert_eq!(config.similarity_threshold, 0.5);
+        assert_eq!(config.reduction_ratio, 0.6);
+        assert_eq!(config.min_length_diff, 500);
     }
 
     #[test]
     fn test_is_blocked_detection() {
+        let config = EffectivenessConfig::default();
         // Test various blocked responses
-        assert!(EffectivenessTest::is_blocked(403, "Forbidden", &std::collections::HashMap::new(), None).0);
-        assert!(EffectivenessTest::is_blocked(406, "Not Acceptable", &std::collections::HashMap::new(), None).0);
-        assert!(EffectivenessTest::is_blocked(429, "Too Many Requests", &std::collections::HashMap::new(), None).0);
-        assert!(EffectivenessTest::is_blocked(503, "Service Unavailable", &std::collections::HashMap::new(), None).0);
+        assert!(
+            EffectivenessTest::is_blocked(
+                403,
+                "Forbidden",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
+        assert!(
+            EffectivenessTest::is_blocked(
+                406,
+                "Not Acceptable",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
+        assert!(
+            EffectivenessTest::is_blocked(
+                429,
+                "Too Many Requests",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
+        assert!(
+            EffectivenessTest::is_blocked(
+                503,
+                "Service Unavailable",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
 
         // Test 200 OK with block indicators
-        assert!(EffectivenessTest::is_blocked(200, "Access Denied", &std::collections::HashMap::new(), None).0);
-        assert!(EffectivenessTest::is_blocked(
-            200,
-            "Request blocked by security policy",
-            &std::collections::HashMap::new(),
-            None
-        )
-        .0);
-        assert!(EffectivenessTest::is_blocked(200, "WAF Protection", &std::collections::HashMap::new(), None).0);
-        assert!(EffectivenessTest::is_blocked(
-            200,
-            "Firewall blocked your request",
-            &std::collections::HashMap::new(),
-            None
-        )
-        .0);
+        assert!(
+            EffectivenessTest::is_blocked(
+                200,
+                "Access Denied",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
+        assert!(
+            EffectivenessTest::is_blocked(
+                200,
+                "Request blocked by security policy",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
+        assert!(
+            EffectivenessTest::is_blocked(
+                200,
+                "WAF Protection",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
+        assert!(
+            EffectivenessTest::is_blocked(
+                200,
+                "Firewall blocked your request",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
 
         // Test Akamai Bot Manager response
-        assert!(EffectivenessTest::is_blocked(200, "OK Bot.", &std::collections::HashMap::new(), None).0);
-        assert!(EffectivenessTest::is_blocked(200, "ok bot", &std::collections::HashMap::new(), None).0);
+        assert!(
+            EffectivenessTest::is_blocked(
+                200,
+                "OK Bot.",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
+        assert!(
+            EffectivenessTest::is_blocked(
+                200,
+                "ok bot",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
 
         // Test blocked keyword in short responses
-        assert!(EffectivenessTest::is_blocked(200, "Blocked", &std::collections::HashMap::new(), None).0);
+        assert!(
+            EffectivenessTest::is_blocked(
+                200,
+                "Blocked",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
         // "No" alone is not a block indicator - it needs context
-        assert!(!EffectivenessTest::is_blocked(200, "No", &std::collections::HashMap::new(), None).0);
-        assert!(EffectivenessTest::is_blocked(200, "Access Denied", &std::collections::HashMap::new(), None).0);
+        assert!(
+            !EffectivenessTest::is_blocked(
+                200,
+                "No",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
+        assert!(
+            EffectivenessTest::is_blocked(
+                200,
+                "Access Denied",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
 
         // Test normal responses that should NOT be blocked
-        assert!(!EffectivenessTest::is_blocked(200, "<!DOCTYPE html><html><body>Welcome to our website! Here is some normal content that is definitely longer than 100 characters.</body></html>", &std::collections::HashMap::new(), None).0);
-        assert!(!EffectivenessTest::is_blocked(200, "", &std::collections::HashMap::new(), None).0); // Empty response should not be blocked
-        assert!(!EffectivenessTest::is_blocked(404, "Not Found", &std::collections::HashMap::new(), None).0);
+        assert!(!EffectivenessTest::is_blocked(200, "<!DOCTYPE html><html><body>Welcome to our website! Here is some normal content that is definitely longer than 100 characters.</body></html>", &std::collections::HashMap::new(), None, &config).0);
+        assert!(
+            !EffectivenessTest::is_blocked(
+                200,
+                "",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        ); // Empty response should not be blocked
+        assert!(
+            !EffectivenessTest::is_blocked(
+                404,
+                "Not Found",
+                &std::collections::HashMap::new(),
+                None,
+                &config
+            )
+            .0
+        );
     }
 
     #[test]
     fn test_is_blocked_header_diff_baseline() {
         use std::collections::HashMap;
+        let config = EffectivenessConfig::default();
 
         let baseline = BaselineSignature {
             status_code: 200,
@@ -93,6 +247,7 @@ mod effectiveness_tests {
             "Welcome to the site",
             &response_headers,
             Some(&baseline),
+            &config,
         );
 
         assert!(blocked);
@@ -113,6 +268,7 @@ mod effectiveness_tests {
             "Welcome to the site",
             &response_headers,
             Some(&baseline_with_header),
+            &config,
         );
 
         assert!(!blocked_same);
@@ -122,6 +278,7 @@ mod effectiveness_tests {
     #[test]
     fn test_is_blocked_header_value_change() {
         use std::collections::HashMap;
+        let config = EffectivenessConfig::default();
 
         let mut baseline_headers = HashMap::new();
         baseline_headers.insert("x-waf".to_string(), "monitoring".to_string());
@@ -140,6 +297,7 @@ mod effectiveness_tests {
             "Welcome",
             &response_headers,
             Some(&baseline),
+            &config,
         );
 
         assert!(blocked);
@@ -183,7 +341,11 @@ mod effectiveness_tests {
                 "authorized_targets": ["example.com", "api.example.com"],
                 "acknowledgment": "I AGREE"
             });
-            std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+            std::fs::write(
+                &consent_path,
+                serde_json::to_string_pretty(&record).unwrap(),
+            )
+            .unwrap();
 
             let consent_manager = consent::ConsentManager::new();
             let status = consent_manager.status().unwrap();
@@ -204,7 +366,11 @@ mod effectiveness_tests {
                 "authorized_targets": ["example.com", "api.example.com"],
                 "acknowledgment": "I AGREE"
             });
-            std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+            std::fs::write(
+                &consent_path,
+                serde_json::to_string_pretty(&record).unwrap(),
+            )
+            .unwrap();
 
             let consent_manager = consent::ConsentManager::new();
             let removed = consent_manager
@@ -227,7 +393,11 @@ mod effectiveness_tests {
                 "authorized_targets": ["example.com"],
                 "acknowledgment": "I AGREE"
             });
-            std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+            std::fs::write(
+                &consent_path,
+                serde_json::to_string_pretty(&record).unwrap(),
+            )
+            .unwrap();
 
             let consent_manager = consent::ConsentManager::new();
             let removed = consent_manager

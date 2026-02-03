@@ -197,11 +197,7 @@ pub struct BaselineRecord {
 }
 
 impl BaselineRecord {
-    pub fn from_response(
-        status_code: u16,
-        headers: HashMap<String, String>,
-        body: &str,
-    ) -> Self {
+    pub fn from_response(status_code: u16, headers: HashMap<String, String>, body: &str) -> Self {
         let sample = if body.len() <= BASELINE_SAMPLE_LIMIT {
             body.to_string()
         } else {
@@ -643,8 +639,11 @@ pub fn va_report_schema() -> serde_json::Value {
 
 pub trait VaHttpAdapter {
     fn get(&self, url: &str) -> anyhow::Result<VaHttpResponse>;
-    fn get_with_payload(&self, url: &str, payload: &VaPayloadVariant)
-        -> anyhow::Result<VaHttpResponse>;
+    fn get_with_payload(
+        &self,
+        url: &str,
+        payload: &VaPayloadVariant,
+    ) -> anyhow::Result<VaHttpResponse>;
     fn send(&self, request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse>;
 }
 
@@ -768,10 +767,7 @@ pub fn base_payloads_for_tier(tier: u8) -> Vec<VaPayloadTemplate> {
     templates
 }
 
-pub fn generate_variants(
-    template: &VaPayloadTemplate,
-    max_variants: u8,
-) -> Vec<VaPayloadVariant> {
+pub fn generate_variants(template: &VaPayloadTemplate, max_variants: u8) -> Vec<VaPayloadVariant> {
     let mut variants = Vec::new();
     variants.push(VaPayloadVariant {
         category: template.category,
@@ -816,10 +812,7 @@ impl VirtualAdversaryRunner {
         })
     }
 
-    pub fn with_http_adapter(
-        mut self,
-        http: Box<dyn VaHttpAdapter + Send + Sync>,
-    ) -> Self {
+    pub fn with_http_adapter(mut self, http: Box<dyn VaHttpAdapter + Send + Sync>) -> Self {
         self.http = http;
         self
     }
@@ -863,13 +856,12 @@ impl VirtualAdversaryRunner {
             .collect()
     }
 
-    fn build_replay_item(
-        target_host: &str,
-        item: &VaReplayPlanItem,
-    ) -> Result<VaProbePlanItem> {
-        let parsed = Url::parse(&item.url)
-            .or_else(|_| Url::parse(&format!("https://{}", item.url)))?;
-        let host = parsed.host_str().ok_or_else(|| anyhow!("replay url missing host"))?;
+    fn build_replay_item(target_host: &str, item: &VaReplayPlanItem) -> Result<VaProbePlanItem> {
+        let parsed =
+            Url::parse(&item.url).or_else(|_| Url::parse(&format!("https://{}", item.url)))?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| anyhow!("replay url missing host"))?;
         if host != target_host {
             return Err(anyhow!(
                 "replay url host mismatch: expected {target_host}, got {host}"
@@ -923,12 +915,8 @@ impl VirtualAdversaryRunner {
         item: &VaProbePlanItem,
     ) -> Result<VaProbeEvaluation> {
         let response = self.http.send(&item.request)?;
-        let diff = ResponseDiff::compare(
-            baseline,
-            response.status,
-            &response.headers,
-            &response.body,
-        );
+        let diff =
+            ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
         let mut evaluation = classify_outcome(response.status, &diff, &response.body);
         evaluation.reason.push_str(&format!(
             " status={} len_delta={} header_diff={}",
@@ -948,9 +936,11 @@ impl VirtualAdversaryRunner {
         if replay_plan.is_empty() {
             return Err(anyhow!("replay plan is empty"));
         }
-        let base = Url::parse(target_url)
-            .or_else(|_| Url::parse(&format!("https://{target_url}")))?;
-        let target_host = base.host_str().ok_or_else(|| anyhow!("target url missing host"))?;
+        let base =
+            Url::parse(target_url).or_else(|_| Url::parse(&format!("https://{target_url}")))?;
+        let target_host = base
+            .host_str()
+            .ok_or_else(|| anyhow!("target url missing host"))?;
 
         let required = 1 + replay_plan.len() as u32;
         self.budget.consume(required)?;
@@ -1078,8 +1068,8 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 }
 
 fn build_probe_request(probe: &Probe, target_url: &str) -> Result<VaHttpRequest> {
-    let mut url = Url::parse(target_url)
-        .or_else(|_| Url::parse(&format!("https://{target_url}")))?;
+    let mut url =
+        Url::parse(target_url).or_else(|_| Url::parse(&format!("https://{target_url}")))?;
 
     match probe.channel {
         dae::ProbeChannel::Path => {
@@ -1329,9 +1319,13 @@ mod tests {
 
             let mut events = Vec::new();
             let report = runner
-                .run_with_events("https://example.com", |_, _| {}, |event| {
-                    events.push(event);
-                })
+                .run_with_events(
+                    "https://example.com",
+                    |_, _| {},
+                    |event| {
+                        events.push(event);
+                    },
+                )
                 .unwrap();
 
             assert_eq!(events.len(), report.plan_size);
@@ -1381,7 +1375,10 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("content-type".to_string(), "text/html".to_string());
         let record = BaselineRecord::from_response(200, headers.clone(), "ok");
-        assert_eq!(record.headers.get("content-type"), Some(&"text/html".to_string()));
+        assert_eq!(
+            record.headers.get("content-type"),
+            Some(&"text/html".to_string())
+        );
         assert_eq!(record.status_code, 200);
     }
 
@@ -1522,11 +1519,8 @@ mod tests {
 
     #[test]
     fn test_run_report_tracks_plan_and_timing() {
-        let mut report = VaRunReport::new(
-            "https://example.com",
-            5,
-            VirtualAdversaryConfig::default(),
-        );
+        let mut report =
+            VaRunReport::new("https://example.com", 5, VirtualAdversaryConfig::default());
         assert_eq!(report.target_url, "https://example.com");
         assert_eq!(report.plan_size, 5);
         assert_eq!(report.enforcement, VaEnforcement::Inconclusive);
@@ -1774,11 +1768,7 @@ mod tests {
 
     #[test]
     fn test_va_report_serializes_to_json() {
-        let report = VaRunReport::new(
-            "https://example.com",
-            2,
-            VirtualAdversaryConfig::default(),
-        );
+        let report = VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("example.com"));
         assert!(json.contains("plan_size"));
@@ -1788,10 +1778,7 @@ mod tests {
     #[test]
     fn test_va_report_schema_has_required_keys() {
         let schema = va_report_schema();
-        let required = schema
-            .get("required")
-            .and_then(|v| v.as_array())
-            .unwrap();
+        let required = schema.get("required").and_then(|v| v.as_array()).unwrap();
         let required_keys: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
         assert!(required_keys.contains(&"target_url"));
         assert!(required_keys.contains(&"plan_size"));

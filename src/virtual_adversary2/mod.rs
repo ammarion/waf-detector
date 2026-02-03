@@ -291,7 +291,12 @@ impl Va2Runner {
         } else {
             Some(compute_throttle_curve(&throttle_samples))
         };
-        let wbf = compute_wbf(&normalization, &state_summary, &challenge_profile, &throttle);
+        let wbf = compute_wbf(
+            &normalization,
+            &state_summary,
+            &challenge_profile,
+            &throttle,
+        );
         let pmi = compute_pmi(&wbf);
 
         Ok(Va2RunReport {
@@ -317,10 +322,7 @@ impl Va2Runner {
     }
 }
 
-fn ensure_va2_consent_and_target(
-    consent_manager: &ConsentManager,
-    target_url: &str,
-) -> Result<()> {
+fn ensure_va2_consent_and_target(consent_manager: &ConsentManager, target_url: &str) -> Result<()> {
     if !consent_manager.has_valid_consent()? {
         return Err(anyhow!(
             "Consent is required before running Virtual Adversary 2.0 tests"
@@ -459,7 +461,11 @@ fn compute_throttle_curve(samples: &[u128]) -> Va2ThrottleCurve {
         last = Some(*value);
     }
     let steps = samples.len().saturating_sub(1) as f64;
-    curve.slope_ms_per_step = if steps > 0.0 { total_slope / steps } else { 0.0 };
+    curve.slope_ms_per_step = if steps > 0.0 {
+        total_slope / steps
+    } else {
+        0.0
+    };
     curve.triggered = curve.slope_ms_per_step > 50.0;
     curve
 }
@@ -586,13 +592,7 @@ pub fn build_va2_campaign_plan(
                 }
             }
             Va2Phase::ProtocolVariance => {
-                let variants = [
-                    "/",
-                    "/./",
-                    "/%2e/",
-                    "/%2F",
-                    "/index.html",
-                ];
+                let variants = ["/", "/./", "/%2e/", "/%2F", "/index.html"];
                 for idx in 0..3 {
                     let path = variants[rng.gen_range(0..variants.len())];
                     steps.push(Va2CampaignStep {
@@ -748,25 +748,28 @@ mod tests {
             "authorized_targets": targets,
             "acknowledgment": "I AGREE"
         });
-        std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+        std::fs::write(
+            &consent_path,
+            serde_json::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
     fn test_va2_plan_requires_phases() {
-        let err = build_va2_campaign_plan(
-            "https://example.com",
-            &[],
-            Va2CampaignConfig::default(),
-        )
-        .unwrap_err()
-        .to_string();
+        let err = build_va2_campaign_plan("https://example.com", &[], Va2CampaignConfig::default())
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("at least one phase"));
     }
 
     #[test]
     fn test_va2_plan_deterministic() {
         let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
-        let config = Va2CampaignConfig { seed: 4242, budget: 20 };
+        let config = Va2CampaignConfig {
+            seed: 4242,
+            budget: 20,
+        };
         let plan_a = build_va2_campaign_plan("https://example.com", &phases, config).unwrap();
         let plan_b = build_va2_campaign_plan("https://example.com", &phases, config).unwrap();
         assert_eq!(plan_a, plan_b);
@@ -787,12 +790,9 @@ mod tests {
     #[test]
     fn test_va2_plan_serializes() {
         let phases = vec![Va2Phase::Baseline];
-        let plan = build_va2_campaign_plan(
-            "https://example.com",
-            &phases,
-            Va2CampaignConfig::default(),
-        )
-        .unwrap();
+        let plan =
+            build_va2_campaign_plan("https://example.com", &phases, Va2CampaignConfig::default())
+                .unwrap();
         let json = serde_json::to_string(&plan).unwrap();
         assert!(json.contains("va2-0.1"));
     }
@@ -827,7 +827,10 @@ mod tests {
             let mut plan = build_va2_campaign_plan(
                 "https://example.com",
                 &phases,
-                Va2CampaignConfig { seed: 1, budget: 10 },
+                Va2CampaignConfig {
+                    seed: 1,
+                    budget: 10,
+                },
             )
             .unwrap();
             for step in &mut plan.steps {

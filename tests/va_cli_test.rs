@@ -22,11 +22,8 @@ fn test_cli_builds() {
 #[test]
 fn test_va_report_config_fields() {
     let config = waf_detector::virtual_adversary::VirtualAdversaryConfig::default();
-    let report = waf_detector::virtual_adversary::VaRunReport::new(
-        "https://example.com",
-        3,
-        config.clone(),
-    );
+    let report =
+        waf_detector::virtual_adversary::VaRunReport::new("https://example.com", 3, config.clone());
     assert_eq!(report.config.tier, config.tier);
     assert_eq!(report.config.request_budget, config.request_budget);
 }
@@ -34,11 +31,7 @@ fn test_va_report_config_fields() {
 #[test]
 fn test_va_cli_output_requires_va() {
     let cmd = build_simple_cli();
-    let result = cmd.try_get_matches_from([
-        "waf-detect",
-        "--va-output",
-        "report.json",
-    ]);
+    let result = cmd.try_get_matches_from(["waf-detect", "--va-output", "report.json"]);
     assert!(result.is_err());
 }
 
@@ -173,12 +166,14 @@ fn test_va_report_top_results_has_reason() {
         1,
         waf_detector::virtual_adversary::VirtualAdversaryConfig::default(),
     );
-    report.results.push(waf_detector::virtual_adversary::VaResultRecord {
-        payload: "payload".to_string(),
-        category: waf_detector::virtual_adversary::VaPayloadCategory::SqlInjection,
-        outcome: waf_detector::virtual_adversary::VaOutcome::Blocked,
-        reason: "status=403".to_string(),
-        evidence: Vec::new(),
-    });
+    report
+        .results
+        .push(waf_detector::virtual_adversary::VaResultRecord {
+            payload: "payload".to_string(),
+            category: waf_detector::virtual_adversary::VaPayloadCategory::SqlInjection,
+            outcome: waf_detector::virtual_adversary::VaOutcome::Blocked,
+            reason: "status=403".to_string(),
+            evidence: Vec::new(),
+        });
     assert_eq!(report.results[0].reason, "status=403");
 }

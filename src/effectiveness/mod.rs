@@ -7,10 +7,9 @@
 //! ⚠️ WARNING: Only use this module against systems you own or have explicit permission to test.
 
 use anyhow::{anyhow, Result};
-use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -45,6 +44,24 @@ pub struct EffectivenessConfig {
     pub request_timeout: Duration,
     /// Delay between requests (for stealth)
     pub request_delay: Duration,
+    /// Body similarity threshold for detecting abnormal block pages
+    pub similarity_threshold: f64,
+    /// Minimum reduction ratio relative to baseline to flag an unusual response
+    pub reduction_ratio: f64,
+    /// Avoid flagging small responses; require meaningful absolute length change
+    pub min_length_diff: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EffectivenessConfigOverrides {
+    pub max_requests_per_minute: Option<u32>,
+    pub audit_logging: Option<bool>,
+    pub intensity_level: Option<u8>,
+    pub request_timeout_seconds: Option<u64>,
+    pub request_delay_ms: Option<u64>,
+    pub similarity_threshold: Option<f64>,
+    pub reduction_ratio: Option<f64>,
+    pub min_length_diff: Option<usize>,
 }
 
 impl Default for EffectivenessConfig {
@@ -56,6 +73,38 @@ impl Default for EffectivenessConfig {
             custom_headers: HashMap::new(),
             request_timeout: Duration::from_secs(30),
             request_delay: Duration::from_millis(500),
+            similarity_threshold: 0.65,
+            reduction_ratio: 0.70,
+            min_length_diff: 1200,
+        }
+    }
+}
+
+impl EffectivenessConfig {
+    pub fn apply_overrides(&mut self, overrides: EffectivenessConfigOverrides) {
+        if let Some(value) = overrides.max_requests_per_minute {
+            self.max_requests_per_minute = value;
+        }
+        if let Some(value) = overrides.audit_logging {
+            self.audit_logging = value;
+        }
+        if let Some(value) = overrides.intensity_level {
+            self.intensity_level = value;
+        }
+        if let Some(value) = overrides.request_timeout_seconds {
+            self.request_timeout = Duration::from_secs(value);
+        }
+        if let Some(value) = overrides.request_delay_ms {
+            self.request_delay = Duration::from_millis(value);
+        }
+        if let Some(value) = overrides.similarity_threshold {
+            self.similarity_threshold = value;
+        }
+        if let Some(value) = overrides.reduction_ratio {
+            self.reduction_ratio = value;
+        }
+        if let Some(value) = overrides.min_length_diff {
+            self.min_length_diff = value;
         }
     }
 }
@@ -117,14 +166,12 @@ impl EffectivenessTest {
         body: &str,
         response_headers: &HashMap<String, String>,
         baseline: Option<&BaselineSignature>,
+        config: &EffectivenessConfig,
     ) -> (bool, Vec<String>) {
         let mut reasons = Vec::new();
-        // Body similarity threshold for detecting abnormal block pages.
-        const SIMILARITY_THRESHOLD: f64 = 0.65;
-        // Minimum reduction ratio relative to baseline to flag an unusual response.
-        const REDUCTION_RATIO: f64 = 0.70;
-        // Avoid flagging small responses; require meaningful absolute length change.
-        const MIN_LENGTH_DIFF: usize = 1200;
+        let similarity_threshold = config.similarity_threshold;
+        let reduction_ratio = config.reduction_ratio;
+        let min_length_diff = config.min_length_diff;
 
         // Check common block status codes
         if status_code == 403 || status_code == 406 || status_code == 429 || status_code == 503 {
@@ -209,13 +256,12 @@ impl EffectivenessTest {
 
             let similarity =
                 static_detection::calculate_similarity(body, &baseline_sig.body_sample);
-            let length_diff =
-                (baseline_sig.body_length as i64 - body.len() as i64).abs() as usize;
+            let length_diff = (baseline_sig.body_length as i64 - body.len() as i64).abs() as usize;
             let significant_reduction = body.len()
-                < (baseline_sig.body_length as f64 * REDUCTION_RATIO) as usize
-                && length_diff > MIN_LENGTH_DIFF;
+                < (baseline_sig.body_length as f64 * reduction_ratio) as usize
+                && length_diff > min_length_diff;
 
-            if similarity < SIMILARITY_THRESHOLD && significant_reduction {
+            if similarity < similarity_threshold && significant_reduction {
                 reasons.push("Response body deviates significantly from baseline".to_string());
             }
         }
@@ -231,8 +277,7 @@ impl EffectivenessTest {
                     return (false, Vec::new());
                 }
 
-                if body.to_lowercase().contains("login")
-                    || body.to_lowercase().contains("sign in")
+                if body.to_lowercase().contains("login") || body.to_lowercase().contains("sign in")
                 {
                     return (false, Vec::new());
                 }
@@ -512,7 +557,8 @@ impl EffectivenessTest {
         // Build client with timeout
         let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
         let make_builder = |force_no_proxy: bool| {
-            let mut client_builder = reqwest::Client::builder().timeout(self.config.request_timeout);
+            let mut client_builder =
+                reqwest::Client::builder().timeout(self.config.request_timeout);
             if disable_proxy || force_no_proxy {
                 client_builder = client_builder.no_proxy();
             }
@@ -525,7 +571,9 @@ impl EffectivenessTest {
             Ok(Ok(client)) => client,
             Ok(Err(err)) => return Err(err.into()),
             Err(_) => {
-                eprintln!("⚠️  Effectiveness HTTP client init panicked; retrying without system proxy.");
+                eprintln!(
+                    "⚠️  Effectiveness HTTP client init panicked; retrying without system proxy."
+                );
                 make_builder(true).build()?
             }
         };
@@ -536,24 +584,18 @@ impl EffectivenessTest {
             _ => client.get(url), // Default to GET
         };
 
-        // Add headers
-        for (key, value) in &headers {
-            request_builder = request_builder.header(key, value);
-        }
-
-        // Add User-Agent if not present (to look more like a browser or scanner)
-        // We check the input map since checking the builder is tricky
+        let mut headers = headers;
         let has_valid_user_agent = headers
             .iter()
             .any(|(k, v)| k.eq_ignore_ascii_case("user-agent") && !v.trim().is_empty());
         if !has_valid_user_agent {
-            let agents = techniques::get_user_agents();
-            let mut rng = rand::thread_rng();
-            let ua = agents
-                .choose(&mut rng)
-                .copied()
-                .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            request_builder = request_builder.header("User-Agent", ua);
+            let fingerprint = techniques::random_browser_fingerprint();
+            techniques::apply_browser_fingerprint_headers(&mut headers, fingerprint);
+        }
+
+        // Add headers
+        for (key, value) in &headers {
+            request_builder = request_builder.header(key, value);
         }
 
         let start = Instant::now();
@@ -575,6 +617,7 @@ impl EffectivenessTest {
                     &response_text,
                     &headers,
                     self.baseline_signature.as_ref(),
+                    &self.config,
                 );
 
                 Ok(TestResult {
@@ -595,17 +638,15 @@ impl EffectivenessTest {
                     response_headers: headers,
                 })
             }
-            Err(e) => {
-                Ok(TestResult {
-                    blocked: false,
-                    status_code: 0,
-                    evidence: format!("Connection failed: {e}"),
-                    response_time: duration,
-                    response_body_sample: String::new(),
-                    response_body_length: 0,
-                    response_headers: HashMap::new(),
-                })
-            }
+            Err(e) => Ok(TestResult {
+                blocked: false,
+                status_code: 0,
+                evidence: format!("Connection failed: {e}"),
+                response_time: duration,
+                response_body_sample: String::new(),
+                response_body_length: 0,
+                response_headers: HashMap::new(),
+            }),
         }
     }
 
@@ -715,8 +756,13 @@ impl EffectivenessTest {
             })
     }
 
-    fn match_block_template(body_lower: &str, baseline: Option<&BaselineSignature>) -> Option<&'static str> {
-        let baseline_body = baseline.map(|b| b.body_sample.to_lowercase()).unwrap_or_default();
+    fn match_block_template(
+        body_lower: &str,
+        baseline: Option<&BaselineSignature>,
+    ) -> Option<&'static str> {
+        let baseline_body = baseline
+            .map(|b| b.body_sample.to_lowercase())
+            .unwrap_or_default();
 
         for template in BLOCK_TEMPLATES {
             let is_match = template

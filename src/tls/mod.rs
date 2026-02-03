@@ -268,7 +268,10 @@ impl TlsAnalyzer {
                 // Capture the certificates
                 let mut certs = vec![end_entity.to_vec()];
                 certs.extend(intermediates.iter().map(|c| c.to_vec()));
-                let mut guard = self.captured_certs.lock().unwrap_or_else(|e| e.into_inner());
+                let mut guard = self
+                    .captured_certs
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 *guard = Some(certs);
                 Ok(ServerCertVerified::assertion())
             }

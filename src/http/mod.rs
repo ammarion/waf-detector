@@ -49,7 +49,9 @@ impl HttpClient {
             Ok(Ok(client)) => client,
             Ok(Err(err)) => return Err(err.into()),
             Err(_) => {
-                eprintln!("⚠️  HTTP client initialization panicked; retrying without system proxy.");
+                eprintln!(
+                    "⚠️  HTTP client initialization panicked; retrying without system proxy."
+                );
                 make_builder(true).build()?
             }
         };
