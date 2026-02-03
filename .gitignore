@@ -1,6 +1,7 @@
 # Rust
 target/
 **/*.rs.bk
+integration_test_report.txt
 
 # OS
 .DS_Store
@@ -11,3 +12,7 @@ target/
 
 # Node (just in case)
 node_modules/
+
+# Local keys or binaries
+waf-detect
+waf-detect.pub
