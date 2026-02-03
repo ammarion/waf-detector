@@ -133,6 +133,42 @@ impl RateLimiter {
     }
 }
 
+#[derive(Debug)]
+pub struct VirtualAdversaryRunner {
+    config: VirtualAdversaryConfig,
+    consent_manager: ConsentManager,
+    budget: RequestBudget,
+    rate_limiter: RateLimiter,
+}
+
+impl VirtualAdversaryRunner {
+    pub fn new(config: VirtualAdversaryConfig) -> Result<Self> {
+        config
+            .validate()
+            .map_err(|err| anyhow!("invalid Virtual Adversary config: {err}"))?;
+        let budget = RequestBudget::new(config.request_budget)?;
+        let rate_limiter = RateLimiter::new(config.request_delay)?;
+        Ok(Self {
+            config,
+            consent_manager: ConsentManager::new(),
+            budget,
+            rate_limiter,
+        })
+    }
+
+    pub fn run(&mut self, target_url: &str) -> Result<()> {
+        ensure_consent_and_target(&self.consent_manager, target_url)?;
+
+        let _tier = self.config.tier;
+        // Reserve a minimal budget for baseline + one adversarial pass.
+        self.budget.consume(2)?;
+        let _baseline_wait = self.rate_limiter.record_request();
+        let _attack_wait = self.rate_limiter.record_request();
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +272,37 @@ mod tests {
         assert_eq!(first_wait, Duration::from_millis(0));
         let second_wait = limiter.record_request();
         assert!(second_wait >= Duration::from_millis(0));
+    }
+
+    #[test]
+    fn test_runner_enforces_consent_and_budget() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+
+        let config = VirtualAdversaryConfig {
+            request_budget: 1,
+            ..Default::default()
+        };
+
+        let mut runner = VirtualAdversaryRunner::new(config).unwrap();
+        let result = runner.run("https://example.com");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_runner_allows_valid_run() {
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("HOME", temp_dir.path());
+        write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+
+        let config = VirtualAdversaryConfig {
+            request_budget: 2,
+            ..Default::default()
+        };
+
+        let mut runner = VirtualAdversaryRunner::new(config).unwrap();
+        let result = runner.run("https://example.com");
+        assert!(result.is_ok());
     }
 }
