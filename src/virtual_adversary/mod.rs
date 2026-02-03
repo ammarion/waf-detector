@@ -65,6 +65,74 @@ pub fn ensure_consent_and_target(consent_manager: &ConsentManager, target_url: &
     Ok(())
 }
 
+#[derive(Debug, Default)]
+pub struct RequestBudget {
+    total: u32,
+    used: u32,
+}
+
+impl RequestBudget {
+    pub fn new(total: u32) -> Result<Self> {
+        if total == 0 {
+            return Err(anyhow!("request budget must be greater than 0"));
+        }
+        Ok(Self { total, used: 0 })
+    }
+
+    pub fn remaining(&self) -> u32 {
+        self.total.saturating_sub(self.used)
+    }
+
+    pub fn consume(&mut self, count: u32) -> Result<()> {
+        if count == 0 {
+            return Ok(());
+        }
+        let remaining = self.remaining();
+        if count > remaining {
+            return Err(anyhow!(
+                "request budget exceeded: requested {count}, remaining {remaining}"
+            ));
+        }
+        self.used = self.used.saturating_add(count);
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct RateLimiter {
+    min_delay: Duration,
+    last_request_at: Option<std::time::Instant>,
+}
+
+impl RateLimiter {
+    pub fn new(request_delay: Duration) -> Result<Self> {
+        if request_delay.is_zero() {
+            return Err(anyhow!("request delay must be greater than 0"));
+        }
+        Ok(Self {
+            min_delay: request_delay,
+            last_request_at: None,
+        })
+    }
+
+    pub fn record_request(&mut self) -> Duration {
+        let now = std::time::Instant::now();
+        let wait = if let Some(last) = self.last_request_at {
+            let elapsed = now.saturating_duration_since(last);
+            if elapsed >= self.min_delay {
+                Duration::from_millis(0)
+            } else {
+                self.min_delay - elapsed
+            }
+        } else {
+            Duration::from_millis(0)
+        };
+
+        self.last_request_at = Some(now);
+        wait
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +218,23 @@ mod tests {
         let consent_manager = ConsentManager::new();
         let result = ensure_consent_and_target(&consent_manager, "https://example.com/path");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_request_budget_enforced() {
+        let mut budget = RequestBudget::new(3).unwrap();
+        assert_eq!(budget.remaining(), 3);
+        budget.consume(2).unwrap();
+        assert_eq!(budget.remaining(), 1);
+        assert!(budget.consume(2).is_err());
+    }
+
+    #[test]
+    fn test_rate_limiter_waits() {
+        let mut limiter = RateLimiter::new(Duration::from_millis(200)).unwrap();
+        let first_wait = limiter.record_request();
+        assert_eq!(first_wait, Duration::from_millis(0));
+        let second_wait = limiter.record_request();
+        assert!(second_wait >= Duration::from_millis(0));
     }
 }
