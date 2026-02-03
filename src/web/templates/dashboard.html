@@ -434,6 +434,7 @@
                     <div class="va-pinned-actions">
                         <button class="va-evidence-button" id="vaPinBlocked">Pin Blocked</button>
                         <button class="va-evidence-button" id="vaPinChallenge">Pin Challenge</button>
+                        <button class="va-evidence-button" id="vaPinStrong">Pin Strong</button>
                         <button class="va-evidence-button" id="vaPinClear">Clear Pins</button>
                         <button class="va-evidence-button" id="vaPinnedExportJson">Export JSON</button>
                         <button class="va-evidence-button" id="vaPinnedExportCsv">Export CSV</button>
@@ -449,6 +450,10 @@
             const pinnedCsvBtn = document.getElementById('vaPinnedExportCsv');
             if (pinnedCsvBtn) {
                 pinnedCsvBtn.onclick = () => exportPinnedCsv();
+            }
+            const pinStrongBtn = document.getElementById('vaPinStrong');
+            if (pinStrongBtn) {
+                pinStrongBtn.onclick = () => pinByEvidence(0.65);
             }
             const pinBlockedBtn = document.getElementById('vaPinBlocked');
             if (pinBlockedBtn) {
@@ -601,6 +606,7 @@
         let currentVaJobId = null;
         let vaPinnedRows = [];
         let vaPinnedIndexSet = new Set();
+        let vaCurrentReportRows = [];
 
         function formatReason(reason) {
             if (!reason) return '';
@@ -1263,6 +1269,7 @@
 
             if (tableBody) {
                 const rows = Array.isArray(report.results) ? report.results : [];
+                vaCurrentReportRows = rows;
                 renderVaReportTable(tableBody, rows);
             }
 
@@ -1365,6 +1372,40 @@
                     }
                 }
             });
+        }
+
+        function scoreEvidenceFromRow(row) {
+            if (!row || !Array.isArray(row.evidence) || row.evidence.length === 0) return 0;
+            const weights = {
+                StatusCode: 1.0,
+                BlockedKeyword: 0.9,
+                ChallengeHeader: 0.8,
+                ChallengeKeyword: 0.7,
+                BaselineDeviation: 0.6,
+                StatusChange: 0.5,
+                HeaderDiff: 0.4,
+                LengthDelta: 0.2,
+            };
+            const total = row.evidence.reduce((sum, entry) => {
+                const weight = weights[entry.kind] ?? 0.2;
+                return sum + weight;
+            }, 0);
+            return Math.min(1, total / row.evidence.length);
+        }
+
+        function pinByEvidence(threshold) {
+            const modal = document.getElementById('vaReportModal');
+            if (!modal || !modal.classList.contains('modal-open')) return;
+            const tableBody = document.getElementById('vaReportTableBody');
+            if (!tableBody) return;
+            const rows = Array.isArray(vaCurrentReportRows) ? vaCurrentReportRows : [];
+            rows.forEach((row, idx) => {
+                const score = scoreEvidenceFromRow(row);
+                if (score >= threshold && !vaPinnedIndexSet.has(idx)) {
+                    toggleVaPin(row, idx);
+                }
+            });
+            renderVaReportTable(tableBody, rows);
         }
 
         function clearPins() {
