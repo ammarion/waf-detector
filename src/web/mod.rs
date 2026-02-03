@@ -1,8 +1,9 @@
 use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, SmokeTestResult, WafSmokeTest};
 use crate::script_executor::{CombinedResult, ScriptExecutor};
+use crate::virtual_adversary::{VaRunReport, VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::DetectionResult;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use axum::{
     extract::State,
     http::StatusCode,
@@ -60,6 +61,54 @@ pub struct SmokeTestResponse {
     error: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct VaRequest {
+    url: String,
+    tier: Option<u8>,
+    budget: Option<u32>,
+    timeout_ms: Option<u64>,
+    delay_ms: Option<u64>,
+    variants: Option<u8>,
+}
+
+impl VaRequest {
+    fn to_config(&self) -> Result<VirtualAdversaryConfig> {
+        let mut config = VirtualAdversaryConfig::default();
+        if let Some(tier) = self.tier {
+            config.tier = tier;
+        }
+        if let Some(budget) = self.budget {
+            config.request_budget = budget;
+        }
+        if let Some(timeout_ms) = self.timeout_ms {
+            if timeout_ms == 0 {
+                return Err(anyhow!("timeout_ms must be greater than 0"));
+            }
+            config.request_timeout = std::time::Duration::from_millis(timeout_ms);
+        }
+        if let Some(delay_ms) = self.delay_ms {
+            if delay_ms == 0 {
+                return Err(anyhow!("delay_ms must be greater than 0"));
+            }
+            config.request_delay = std::time::Duration::from_millis(delay_ms);
+        }
+        if let Some(variants) = self.variants {
+            config.max_variants_per_payload = variants;
+        }
+        config
+            .validate()
+            .map_err(|err| anyhow!("invalid Virtual Adversary config: {err}"))?;
+        Ok(config)
+    }
+}
+
+#[derive(Serialize)]
+pub struct VaResponse {
+    success: bool,
+    result: Option<VaRunReport>,
+    error: Option<String>,
+}
+
 impl WebServer {
     pub fn new(engine: DetectionEngine) -> Self {
         Self {
@@ -77,6 +126,7 @@ impl WebServer {
             .route("/api/combined-scan", post(combined_scan))
             .route("/api/smoke-test", post(smoke_test))
             .route("/api/batch-scan", post(batch_scan))
+            .route("/api/virtual-adversary", post(virtual_adversary))
             .route("/api/providers", get(list_providers))
             .route("/api/status", get(server_status))
             // Web pages
@@ -304,5 +354,118 @@ async fn smoke_test(
             };
             (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
         }
+    }
+}
+
+// Handler for Virtual Adversary testing
+async fn virtual_adversary(
+    State(_server): State<WebServer>,
+    Json(payload): Json<VaRequest>,
+) -> impl IntoResponse {
+    let config = match payload.to_config() {
+        Ok(config) => config,
+        Err(e) => {
+            let response = VaResponse {
+                success: false,
+                result: None,
+                error: Some(e.to_string()),
+            };
+            return (StatusCode::BAD_REQUEST, Json(response));
+        }
+    };
+
+    let url = payload.url.clone();
+    let report = tokio::task::spawn_blocking(move || {
+        let mut runner = VirtualAdversaryRunner::new(config)?;
+        runner.run(&url)
+    })
+    .await;
+
+    match report {
+        Ok(Ok(result)) => {
+            let response = VaResponse {
+                success: true,
+                result: Some(result),
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Ok(Err(e)) => {
+            let response = VaResponse {
+                success: false,
+                result: None,
+                error: Some(format!("Virtual Adversary failed: {e}")),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+        }
+        Err(e) => {
+            let response = VaResponse {
+                success: false,
+                result: None,
+                error: Some(format!("Virtual Adversary task failed: {e}")),
+            };
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(response))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VaRequest;
+    use crate::virtual_adversary::VirtualAdversaryConfig;
+    use std::time::Duration;
+
+    #[test]
+    fn va_request_defaults_to_config() {
+        let req = VaRequest {
+            url: "https://example.com".to_string(),
+            tier: None,
+            budget: None,
+            timeout_ms: None,
+            delay_ms: None,
+            variants: None,
+        };
+        let config = req.to_config().expect("config should be valid");
+        let defaults = VirtualAdversaryConfig::default();
+        assert_eq!(config.tier, defaults.tier);
+        assert_eq!(config.request_budget, defaults.request_budget);
+        assert_eq!(config.request_timeout, defaults.request_timeout);
+        assert_eq!(config.request_delay, defaults.request_delay);
+        assert_eq!(
+            config.max_variants_per_payload,
+            defaults.max_variants_per_payload
+        );
+    }
+
+    #[test]
+    fn va_request_overrides_values() {
+        let req = VaRequest {
+            url: "https://example.com".to_string(),
+            tier: Some(2),
+            budget: Some(64),
+            timeout_ms: Some(12_000),
+            delay_ms: Some(500),
+            variants: Some(2),
+        };
+        let config = req.to_config().expect("config should be valid");
+        assert_eq!(config.tier, 2);
+        assert_eq!(config.request_budget, 64);
+        assert_eq!(config.request_timeout, Duration::from_millis(12_000));
+        assert_eq!(config.request_delay, Duration::from_millis(500));
+        assert_eq!(config.max_variants_per_payload, 2);
+    }
+
+    #[test]
+    fn va_request_rejects_zero_timeout() {
+        let req = VaRequest {
+            url: "https://example.com".to_string(),
+            tier: None,
+            budget: None,
+            timeout_ms: Some(0),
+            delay_ms: None,
+            variants: None,
+        };
+        let err = req.to_config().expect_err("should reject zero timeout");
+        assert!(err.to_string().contains("timeout_ms"));
     }
 }

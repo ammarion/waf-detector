@@ -180,6 +180,53 @@ pub const API_DOCS_HTML: &str = r#"
   }
 }</code></pre>
         </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary</h3>
+            <p>Run Virtual Adversary effectiveness testing (consent required).</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "url": "https://example.com",
+  "tier": 2,
+  "budget": 120,
+  "timeout_ms": 15000,
+  "delay_ms": 750,
+  "variants": 4
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "result": {
+    "target_url": "https://example.com",
+    "plan_size": 24,
+    "summary": {
+      "total": 24,
+      "blocked": 14,
+      "challenge": 4,
+      "allowed": 6,
+      "error": 0
+    },
+    "config": {
+      "tier": 2,
+      "request_budget": 120,
+      "request_timeout": { "secs": 15, "nanos": 0 },
+      "request_delay": { "secs": 0, "nanos": 750000000 },
+      "max_variants_per_payload": 4
+    },
+    "results": [
+      {
+        "payload": "' OR '1'='1",
+        "category": "SqlInjection",
+        "outcome": "Blocked",
+        "reason": "status=403"
+      }
+    ]
+  },
+  "error": null
+}</code></pre>
+        </div>
         
         <div class="endpoint">
             <h3><span class="method get">GET</span> /api/providers</h3>
