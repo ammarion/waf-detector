@@ -267,6 +267,13 @@ impl WafSmokeTest {
         payloads
     }
 
+    pub fn payload_strings() -> Vec<String> {
+        Self::initialize_advanced_payloads()
+            .into_values()
+            .flatten()
+            .collect()
+    }
+
     /// Run comprehensive WAF smoke test
     pub async fn run_test(&self, url: &str) -> Result<SmokeTestResult, anyhow::Error> {
         let start_time = Instant::now();

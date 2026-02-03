@@ -11,6 +11,8 @@ use std::time::Duration;
 use crate::effectiveness::consent::ConsentManager;
 use crate::http::HttpClient;
 
+pub mod dae;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VirtualAdversaryConfig {
     /// Safety tier (1-3). Higher tiers enable more advanced mutations.
