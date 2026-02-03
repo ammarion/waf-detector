@@ -173,6 +173,20 @@ pub struct Va2ThrottleCurve {
     pub triggered: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Va2WbfSummary {
+    pub normalization_score: f64,
+    pub statefulness_score: f64,
+    pub challenge_score: f64,
+    pub throttle_score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Va2PmiScore {
+    pub score: f64,
+    pub label: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Va2RunReport {
     pub target_url: String,
@@ -183,6 +197,8 @@ pub struct Va2RunReport {
     pub statefulness: Option<Va2StateSummary>,
     pub challenge: Option<Va2ChallengeProfile>,
     pub throttle: Option<Va2ThrottleCurve>,
+    pub wbf: Va2WbfSummary,
+    pub pmi: Va2PmiScore,
 }
 
 pub struct Va2Runner {
@@ -275,6 +291,8 @@ impl Va2Runner {
         } else {
             Some(compute_throttle_curve(&throttle_samples))
         };
+        let wbf = compute_wbf(&normalization, &state_summary, &challenge_profile, &throttle);
+        let pmi = compute_pmi(&wbf);
 
         Ok(Va2RunReport {
             target_url: plan.target_url.clone(),
@@ -293,6 +311,8 @@ impl Va2Runner {
                 Some(challenge_profile)
             },
             throttle,
+            wbf,
+            pmi,
         })
     }
 }
@@ -442,6 +462,53 @@ fn compute_throttle_curve(samples: &[u128]) -> Va2ThrottleCurve {
     curve.slope_ms_per_step = if steps > 0.0 { total_slope / steps } else { 0.0 };
     curve.triggered = curve.slope_ms_per_step > 50.0;
     curve
+}
+
+fn compute_wbf(
+    normalization: &Option<Va2NormalizationVariance>,
+    statefulness: &Va2StateSummary,
+    challenge: &Va2ChallengeProfile,
+    throttle: &Option<Va2ThrottleCurve>,
+) -> Va2WbfSummary {
+    let normalization_score = normalization
+        .as_ref()
+        .map(|n| (n.max_status_delta as f64 / 50.0).min(1.0))
+        .unwrap_or(0.0);
+    let statefulness_score = (statefulness.deviations as f64 / 3.0).min(1.0);
+    let challenge_score = if challenge.total == 0 {
+        0.0
+    } else {
+        (challenge.hard_blocks as f64 / challenge.total as f64).min(1.0)
+    };
+    let throttle_score = throttle
+        .as_ref()
+        .map(|t| if t.triggered { 1.0 } else { 0.2 })
+        .unwrap_or(0.0);
+    Va2WbfSummary {
+        normalization_score,
+        statefulness_score,
+        challenge_score,
+        throttle_score,
+    }
+}
+
+fn compute_pmi(wbf: &Va2WbfSummary) -> Va2PmiScore {
+    let raw = (wbf.normalization_score * 0.25)
+        + (wbf.statefulness_score * 0.25)
+        + (wbf.challenge_score * 0.3)
+        + (wbf.throttle_score * 0.2);
+    let score = (raw * 100.0).round();
+    let label = if score >= 80.0 {
+        "strong"
+    } else if score >= 55.0 {
+        "moderate"
+    } else {
+        "weak"
+    };
+    Va2PmiScore {
+        score,
+        label: label.to_string(),
+    }
 }
 
 impl Va2CampaignPlan {
@@ -784,6 +851,8 @@ mod tests {
             assert!(report.statefulness.is_some());
             assert!(report.challenge.is_some());
             assert!(report.throttle.is_some());
+            assert!(report.pmi.score >= 0.0);
+            assert!(!report.pmi.label.is_empty());
         });
     }
 
@@ -827,5 +896,17 @@ mod tests {
         let curve = compute_throttle_curve(&[10, 80, 140]);
         assert!(curve.slope_ms_per_step > 0.0);
         assert!(curve.triggered);
+    }
+
+    #[test]
+    fn test_va2_pmi_labeling() {
+        let wbf = Va2WbfSummary {
+            normalization_score: 1.0,
+            statefulness_score: 1.0,
+            challenge_score: 1.0,
+            throttle_score: 1.0,
+        };
+        let pmi = compute_pmi(&wbf);
+        assert_eq!(pmi.label, "strong");
     }
 }
