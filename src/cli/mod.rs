@@ -101,6 +101,11 @@ impl SimpleCliApp {
                 return Ok(());
             }
             let report = runner.run(url)?;
+            if matches.get_flag("va-json") {
+                let json = serde_json::to_string_pretty(&report)?;
+                println!("{json}");
+                return Ok(());
+            }
             if let Some(output) = matches.get_one::<String>("va-output") {
                 let json = serde_json::to_string_pretty(&report)?;
                 std::fs::write(output, json)?;
@@ -856,6 +861,13 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .long("va-output")
                 .help("Write VA report JSON to file")
                 .value_name("FILE")
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-json")
+                .long("va-json")
+                .help("Print VA report JSON to stdout")
+                .action(clap::ArgAction::SetTrue)
                 .requires("va"),
         )
         .arg(

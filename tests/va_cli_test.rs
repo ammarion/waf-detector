@@ -84,6 +84,13 @@ fn test_va_max_len_default() {
 }
 
 #[test]
+fn test_va_json_requires_va() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va-json"]);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_va_confidence_score_format() {
     let summary = waf_detector::virtual_adversary::VaResultSummary {
         total: 4,
