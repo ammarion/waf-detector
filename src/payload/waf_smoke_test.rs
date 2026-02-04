@@ -9,9 +9,7 @@ use crate::engine::waf_mode_detector::{PayloadType, WafMode};
 use crate::http::HttpClient;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Write;
 use std::time::{Duration, Instant};
-use tempfile::NamedTempFile;
 use tokio::time::sleep;
 
 /// WAF Smoke Test Configuration
@@ -920,8 +918,7 @@ impl WafSmokeTest {
         output_file: &str,
     ) -> Result<(), anyhow::Error> {
         let json = serde_json::to_string_pretty(result)?;
-        let mut temp_file = NamedTempFile::new()?;
-        temp_file.write_all(json.as_bytes())?;
+        std::fs::write(output_file, json.as_bytes())?;
         println!("📄 Results exported to: {output_file}");
         Ok(())
     }
