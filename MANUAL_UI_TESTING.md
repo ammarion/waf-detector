@@ -30,6 +30,12 @@
 
 ### 2. Functional Testing
 
+#### 2.0 Virtual Adversary Setup
+- **Consent**: Ensure consent is recorded before running VA tests.
+  - [ ] Use the consent UI or run `./target/debug/waf-detect --consent request`
+- **Authorized Targets**:
+  - [ ] Add target via consent UI (e.g., `api.frame.io`) or CLI `--consent add-target`
+
 #### 2.1 Single URL Scan Tests
 
 **Test Case 1: CloudFlare Detection**
@@ -104,6 +110,37 @@ For each positive detection, verify:
    - [ ] High confidence score (98-99%)
    - [ ] Description mentions "Infrastructure-level detection"
 
+#### 2.5 Virtual Adversary Run (Web UI)
+**Test Case: VA run with replay plan**
+- **Target**: https://api.frame.io (authorized)
+- **Expected**:
+  - [ ] VA job starts and status updates stream in Activity feed
+  - [ ] Report modal opens from history entry
+  - [ ] Enforcement label and evidence summary render
+  - [ ] Pinned probes show in sidebar and summary header
+  - [ ] Replay plan exports (JSON/CSV) download successfully
+
+#### 2.6 Virtual Adversary History Downloads
+- **From VA history list**:
+  - [ ] Download report JSON
+  - [ ] Download report CSV
+  - [ ] Download replay JSON
+  - [ ] Download replay CSV
+
+#### 2.7 Virtual Adversary Replay Filters
+- [ ] Replay plan search filters by class/channel/url text
+- [ ] Class filter reduces visible replay rows
+- [ ] Channel filter reduces visible replay rows
+- [ ] Method filter reduces visible replay rows
+- [ ] Outcome filter reduces visible replay rows
+- [ ] "Show all" reflects filtered count
+
+#### 2.7 Virtual Adversary Evidence Modal
+- [ ] Evidence modal opens from report table
+- [ ] Copy Evidence works
+- [ ] Export JSON/CSV works
+- [ ] Raw payload toggle switches view
+
 ### 3. User Experience Testing
 
 #### 3.1 Loading States
@@ -133,6 +170,10 @@ For each positive detection, verify:
 **Server Error Test**:
 - Stop the server temporarily
 - **Expected**: Connection error message
+
+**VA Consent Error Test**:
+- Run VA without consent or target authorization
+- **Expected**: Clear consent error in UI
 
 ### 4. API Testing (Optional)
 

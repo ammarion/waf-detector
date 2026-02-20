@@ -24,6 +24,22 @@ This document contains information for developers who want to contribute to the 
 └─────────────────┴─────────────────┴─────────────────────────┘
 ```
 
+### 🧠 Virtual Adversary Architecture
+
+Virtual Adversary (VA) is a consent-gated effectiveness engine built around a **differential probe catalog** and **replayable plans**.
+
+- **Probe Catalog**: `src/virtual_adversary/dae.rs`
+- **Runner + Evidence**: `src/virtual_adversary/mod.rs`
+- **Replay Plan**: exported in VA reports for audit and reproducibility
+- **Web UI**: report modal + history downloads (replay JSON/CSV)
+- **API Endpoints**: `/api/virtual-adversary/reports/:id/replay.json` and `.csv`
+
+Key flow:
+1. Build probe plan (tier + budget)
+2. Collect baseline response signature
+3. Execute probes, record evidence, classify enforcement
+4. Store report with replay plan for later audit
+
 ## 🧪 Testing
 
 ### Run all tests:
@@ -88,10 +104,12 @@ registry.register_provider(provider, metadata)?;
 - [ ] **Additional WAF Providers** - Support for more WAF vendors
 - [ ] **Active Probing** - Enhanced detection techniques
 - [ ] **Performance Benchmarks** - Criterion-based benchmarking
+- [ ] **VA Replay Runner** - Re-execute a stored replay plan against a target with integrity checks
 
 ### Medium Priority  
 - [ ] **DNS Analysis** - DNS-based detection methods
 - [ ] **TLS Fingerprinting** - JA3 hash analysis
+- [ ] **VA Replay Diffs** - Compare current run to previous replay plan results
 
 ### Low Priority
 - [ ] **HTTP Server Mode** - REST API server

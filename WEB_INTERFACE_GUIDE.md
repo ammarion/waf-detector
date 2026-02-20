@@ -59,6 +59,14 @@ python3 test_web_server.py
 - **Performance metrics** showing detection time
 - **Professional card-based layout**
 
+### **🧠 Virtual Adversary (VA)**
+- **Consent-gated testing** with authorized target lists
+- **Baseline-aware analysis** with evidence summaries
+- **Explainability panel** with enforcement classification
+- **Pinned probes** for export and auditing
+- **Replay plan exports** (JSON/CSV) for reproducibility
+- **History panel** with filters, retention, and downloads
+
 ## 🎨 Design Features
 
 ### **Modern UI/UX**
@@ -139,6 +147,19 @@ Get server health status.
 
 - **/** or **/dashboard** - Main dashboard interface
 - **/api-docs** - API documentation page
+
+### **Virtual Adversary Endpoints**
+- **POST** `/api/virtual-adversary` - Run a VA scan
+- **POST** `/api/virtual-adversary/start` - Start an async VA job
+- **GET** `/api/virtual-adversary/status/:id` - Poll job status
+- **GET** `/api/virtual-adversary/reports` - List saved VA reports
+- **GET** `/api/virtual-adversary/reports/:id` - Fetch a VA report
+- **GET** `/api/virtual-adversary/reports/:id/csv` - Download VA report CSV
+- **GET** `/api/virtual-adversary/reports/:id/replay.json` - Download replay plan JSON
+- **GET** `/api/virtual-adversary/reports/:id/replay.csv` - Download replay plan CSV
+- **GET** `/api/virtual-adversary/reports.csv` - Download report summary CSV
+- **POST** `/api/virtual-adversary/reports/cleanup` - Apply retention
+- **POST** `/api/virtual-adversary/reports/delete-range` - Delete report range
 
 ## 📱 Responsive Design
 
@@ -250,6 +271,10 @@ cargo build --release --bin web-server
 ```bash
 export WAF_DETECTOR_PORT=8080
 export WAF_DETECTOR_HOST=0.0.0.0
+export WAF_DETECTOR_AI_ENABLED=true
+export WAF_DETECTOR_AI_ENDPOINT=http://127.0.0.1:11434
+export WAF_DETECTOR_AI_MODEL=llama3.2:3b
+export WAF_DETECTOR_AI_TIMEOUT_MS=4000
 ```
 
 ### **Docker Ready**

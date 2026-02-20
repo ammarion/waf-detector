@@ -1,4 +1,42 @@
-pub const DASHBOARD_HTML: &str = include_str!("templates/dashboard.html");
+use std::fs;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+pub const DASHBOARD_HTML_EMBEDDED: &str = include_str!("templates/dashboard.html");
+
+static DASHBOARD_HTML_CACHE: OnceLock<String> = OnceLock::new();
+
+pub fn dashboard_html() -> &'static str {
+    DASHBOARD_HTML_CACHE
+        .get_or_init(load_dashboard_html)
+        .as_str()
+}
+
+fn load_dashboard_html() -> String {
+    if let Some(path) = resolve_dashboard_template_path() {
+        if let Ok(contents) = fs::read_to_string(&path) {
+            return contents;
+        }
+    }
+
+    DASHBOARD_HTML_EMBEDDED.to_string()
+}
+
+fn resolve_dashboard_template_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("WAF_DETECTOR_DASHBOARD_TEMPLATE") {
+        if !path.trim().is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+
+    if let Ok(dir) = std::env::var("WAF_DETECTOR_TEMPLATE_DIR") {
+        if !dir.trim().is_empty() {
+            return Some(PathBuf::from(dir).join("dashboard.html"));
+        }
+    }
+
+    None
+}
 
 pub const API_DOCS_HTML: &str = r#"
 <!DOCTYPE html>
@@ -362,6 +400,18 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,
     "report": {
       "target_url": "https://example.com",
       "plan_size": 24,
+      "replay_plan": [
+        {
+          "index": 1,
+          "class": "SemanticDrift",
+          "channel": "Query",
+          "description": "Duplicate key ordering drift",
+          "method": "GET",
+          "url": "https://example.com/?a=1&a=2",
+          "headers": [],
+          "body": null
+        }
+      ],
       "summary": {
         "total": 24,
         "blocked": 10,
@@ -384,12 +434,104 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,24,
         </div>
 
         <div class="endpoint">
-            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id.csv</h3>
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id/csv</h3>
             <p>Download a saved Virtual Adversary report as CSV.</p>
 
             <h4>Response</h4>
-            <pre><code>report_id,target_url,created_at,index,category,payload,outcome,reason
-va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,SqlInjection,' OR '1'='1,Blocked,status=403</code></pre>
+            <pre><code>report_id,target_url,created_at,index,category,payload,outcome,reason,evidence,probe_class,probe_channel,probe_description,method,url
+va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,SqlInjection,' OR '1'='1,Blocked,status=403,,SemanticDrift,Query,Duplicate key ordering drift,GET,https://example.com/?a=1&a=2</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id/replay.json</h3>
+            <p>Download the replay plan JSON for a saved Virtual Adversary report.</p>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "replay_plan": [
+    {
+      "index": 1,
+      "class": "SemanticDrift",
+      "channel": "Query",
+      "description": "Duplicate key ordering drift",
+      "method": "GET",
+      "url": "https://example.com/?a=1&a=2",
+      "headers": [],
+      "body": null
+    }
+  ],
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/virtual-adversary/reports/:id/replay.csv</h3>
+            <p>Download the replay plan CSV for a saved Virtual Adversary report.</p>
+
+            <h4>Response</h4>
+            <pre><code>index,probe_class,probe_channel,probe_description,method,url,headers,body
+1,SemanticDrift,Query,Duplicate key ordering drift,GET,https://example.com/?a=1&a=2,[],</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary2/plan</h3>
+            <p>Generate a VA2 campaign plan (behavioral profiling) without executing.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target_url": "https://example.com",
+  "phases": "baseline,protocol-variance",
+  "seed": 1337,
+  "budget": 60
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "plan": {
+    "version": "va2-0.1",
+    "seed": 1337,
+    "target_url": "https://example.com",
+    "phases": ["baseline", "protocol_variance"],
+    "budget": 60,
+    "steps": []
+  },
+  "error": null
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/virtual-adversary2/run</h3>
+            <p>Execute a VA2 campaign plan with consent enforcement.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target_url": "https://example.com",
+  "phases": "baseline,protocol-variance",
+  "seed": 1337,
+  "budget": 60
+}</code></pre>
+
+            <h4>Response</h4>
+            <pre><code>{
+  "success": true,
+  "report": {
+    "target_url": "https://example.com",
+    "results": [],
+    "wbf": {
+      "normalization_score": 0.6,
+      "statefulness_score": 0.4,
+      "challenge_score": 0.5,
+      "throttle_score": 0.2
+    },
+    "pmi": {
+      "score": 62,
+      "label": "moderate"
+    }
+  },
+  "error": null
+}</code></pre>
         </div>
 
 
@@ -507,26 +649,16 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,S
 
 #[cfg(test)]
 mod tests {
-    use super::DASHBOARD_HTML;
+    use super::dashboard_html;
 
     #[test]
-    fn dashboard_html_contains_va_placeholder() {
-        assert!(DASHBOARD_HTML.contains("Virtual Adversary"));
-        assert!(DASHBOARD_HTML.contains("vaTestForm"));
-        assert!(DASHBOARD_HTML.contains("Download VA Report"));
-        assert!(DASHBOARD_HTML.contains("consentTargetInput"));
-        assert!(DASHBOARD_HTML.contains("vaHistoryList"));
-        assert!(DASHBOARD_HTML.contains("vaActivityLog"));
-        assert!(DASHBOARD_HTML.contains("reports.csv"));
-        assert!(DASHBOARD_HTML.contains("vaRetentionInput"));
-        assert!(DASHBOARD_HTML.contains("vaActivityFilter"));
-        assert!(DASHBOARD_HTML.contains("downloadVaReportCsv"));
-        assert!(DASHBOARD_HTML.contains("vaHistorySearch"));
-        assert!(DASHBOARD_HTML.contains("vaAutoScroll"));
-        assert!(DASHBOARD_HTML.contains("vaHistoryDate"));
-        assert!(DASHBOARD_HTML.contains("vaReportModal"));
-        assert!(DASHBOARD_HTML.contains("vaHistorySort"));
-        assert!(DASHBOARD_HTML.contains("vaActivitySearch"));
-        assert!(DASHBOARD_HTML.contains("deleteVaHistoryRange"));
+    fn dashboard_html_contains_smoke_test_controls() {
+        let html = dashboard_html();
+        assert!(html.contains("WAF Smoke Test"));
+        assert!(html.contains("smokeTestForm"));
+        assert!(html.contains("smokeTestUrl"));
+        assert!(html.contains("smokeTestText"));
+        assert!(html.contains("singleScanForm"));
+        assert!(html.contains("batchScanForm"));
     }
 }

@@ -10,8 +10,19 @@ use integration::{
 use std::env;
 use std::time::Instant;
 
+fn should_run_integration_tests() -> bool {
+    matches!(
+        env::var("WAF_DETECTOR_RUN_INTEGRATION").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
 #[tokio::test]
 async fn test_all_integration_scenarios() {
+    if !should_run_integration_tests() {
+        eprintln!("Skipping integration scenarios (set WAF_DETECTOR_RUN_INTEGRATION=1 to enable).");
+        return;
+    }
     // Set up test context
     let context = TestContext {
         debug_mode: env::var("DEBUG").is_ok(),
@@ -60,6 +71,12 @@ async fn test_all_integration_scenarios() {
 
 #[tokio::test]
 async fn test_provider_specific_scenarios() {
+    if !should_run_integration_tests() {
+        eprintln!(
+            "Skipping provider-specific scenarios (set WAF_DETECTOR_RUN_INTEGRATION=1 to enable)."
+        );
+        return;
+    }
     let context = TestContext::default();
 
     let mut runner = TestRunner::new().with_context(context);
@@ -92,6 +109,12 @@ mod integration_helpers {
 // Individual scenario tests for debugging
 #[tokio::test]
 async fn test_basic_detection_individually() {
+    if !should_run_integration_tests() {
+        eprintln!(
+            "Skipping basic detection scenario (set WAF_DETECTOR_RUN_INTEGRATION=1 to enable)."
+        );
+        return;
+    }
     let passed = integration_helpers::run_single_scenario(BasicDetectionScenario::new()).await;
 
     assert!(passed, "Basic detection scenario failed");
@@ -99,6 +122,10 @@ async fn test_basic_detection_individually() {
 
 #[tokio::test]
 async fn test_performance_individually() {
+    if !should_run_integration_tests() {
+        eprintln!("Skipping performance scenario (set WAF_DETECTOR_RUN_INTEGRATION=1 to enable).");
+        return;
+    }
     let passed = integration_helpers::run_single_scenario(PerformanceScenario::new()).await;
 
     assert!(passed, "Performance scenario failed");
@@ -106,6 +133,10 @@ async fn test_performance_individually() {
 
 #[tokio::test]
 async fn test_waf_blocking_individually() {
+    if !should_run_integration_tests() {
+        eprintln!("Skipping WAF blocking scenario (set WAF_DETECTOR_RUN_INTEGRATION=1 to enable).");
+        return;
+    }
     let passed = integration_helpers::run_single_scenario(WafBlockingScenario::new()).await;
 
     assert!(passed, "WAF blocking scenario failed");

@@ -62,6 +62,27 @@ echo "https://example.com" >> urls.txt
 # Then open http://localhost:8080 in your browser
 ```
 
+## 🤖 AI Summaries (Local, Results-Only)
+
+The dashboard can generate plain-language summaries for detection and smoke-test
+results using a local LLM. Only the existing results shown in the UI are sent to
+the model (no raw payloads or response bodies).
+
+### Prerequisites
+
+- Install and run Ollama locally.
+- Pull a model (default is `llama3.2:3b`).
+
+### Environment Variables
+
+- `WAF_DETECTOR_AI_ENABLED=true|false` (default: false)
+- `WAF_DETECTOR_AI_ENDPOINT=http://127.0.0.1:11434`
+- `WAF_DETECTOR_AI_MODEL=llama3.2:3b`
+- `WAF_DETECTOR_AI_TIMEOUT_MS=4000`
+
+When enabled, the UI shows an "AI Summary" button on result cards. If the model
+is unavailable, the UI displays a friendly inline error.
+
 **Include payload-based analysis (optional but recommended for full detection coverage):**
 ```bash
 ./target/release/waf-detect example.com --payload-analysis
@@ -184,12 +205,37 @@ Virtual Adversary adds adaptive, consent-gated effectiveness testing with baseli
 **Common options:**
 - `--va-tier 1|2|3`: Safety tier for payload sophistication.
 - `--va-budget N`: Max requests allowed per run.
-- `--va-timeout MS`: Per-request timeout in milliseconds.
+- `--va-timeout SECONDS`: Per-request timeout in seconds.
 - `--va-delay MS`: Delay between requests in milliseconds.
 - `--va-variants N`: Variants per payload template.
 - `--va-output report.json`: Save JSON report (also writes a `.summary.txt`).
+- `--va-replay`: Print the replay plan JSON to stdout (probes, headers, and URLs).
+- `--va-replay-csv`: Print the replay plan CSV to stdout.
+
+**Replay plan exports (web UI):**
+- VA history entries expose **Replay JSON** and **Replay CSV** downloads.
+- Reports also include replay plan metadata in VA CSV exports.
 
 > ⚠️ **Ethical Use Required:** Virtual Adversary simulates evasive attackers. Only use on systems you own or have explicit permission to test.
+
+## 🧪 Virtual Adversary 2.0 (Experimental)
+
+Virtual Adversary 2.0 focuses on **behavioral profiling** (normalization variance, statefulness, challenge response, throttle curves) and produces a **WBF** (WAF Behavior Fingerprint) and **PMI** (Protection Maturity Index). It does **not** reuse OWASP payloads from the Smoke Test.
+
+```bash
+# Generate a deterministic VA2 plan (no execution)
+./target/release/waf-detect --va2 https://example.com --va2-dry-run
+
+# Run VA2 (consent required)
+./target/release/waf-detect --va2 https://example.com --va2-run
+```
+
+**VA2 options:**
+- `--va2-phases baseline,protocol-variance,state-escalation,behavioral-pressure,challenge-interaction`
+- `--va2-seed N`: Deterministic seed for replayable plans.
+- `--va2-budget N`: Request budget.
+- `--va2-json`: Print the plan JSON.
+- `--va2-output FILE`: Save the plan JSON.
 
 ## 📊 Output Options
 

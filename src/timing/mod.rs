@@ -7,6 +7,7 @@ pub mod connection_behavior;
 
 use crate::{Evidence, MethodType};
 use anyhow::Result;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
 
 /// Timing analysis results
@@ -67,18 +68,34 @@ pub struct TimingAnalyzer {
 
 impl TimingAnalyzer {
     pub fn new(config: TimingConfig) -> Self {
-        let mut builder = reqwest::Client::builder().timeout(config.request_timeout);
         let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
-        if disable_proxy {
-            builder = builder.no_proxy();
-        }
-        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
-            builder = builder.danger_accept_invalid_certs(true);
-        }
-        let http_client = builder.build().unwrap_or_else(|err| {
-            eprintln!("⚠️  Failed to initialize timing HTTP client: {err}. Using defaults.");
-            reqwest::Client::new()
-        });
+        let make_builder = |force_no_proxy: bool| {
+            let mut builder = reqwest::Client::builder().timeout(config.request_timeout);
+            if disable_proxy || force_no_proxy {
+                builder = builder.no_proxy();
+            }
+            if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+                builder = builder.danger_accept_invalid_certs(true);
+            }
+            builder
+        };
+
+        let http_client = match catch_unwind(AssertUnwindSafe(|| make_builder(false).build())) {
+            Ok(Ok(client)) => client,
+            Ok(Err(err)) => {
+                eprintln!("⚠️  Failed to initialize timing HTTP client: {err}. Using defaults.");
+                reqwest::Client::new()
+            }
+            Err(_) => {
+                eprintln!("⚠️  Timing HTTP client init panicked; retrying without system proxy.");
+                make_builder(true).build().unwrap_or_else(|err| {
+                    eprintln!(
+                        "⚠️  Failed to initialize timing HTTP client: {err}. Using defaults."
+                    );
+                    reqwest::Client::new()
+                })
+            }
+        };
 
         Self {
             config,

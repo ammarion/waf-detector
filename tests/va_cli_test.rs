@@ -91,6 +91,63 @@ fn test_va_output_requires_va() {
 }
 
 #[test]
+fn test_va_replay_requires_va() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va-replay"]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_va_replay_csv_requires_va() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va-replay-csv"]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_va_replay_run_parses() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va-replay-run", "report.json"]);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_va2_cli_defaults() {
+    let cmd = build_simple_cli();
+    let matches = cmd
+        .try_get_matches_from(["waf-detect", "--va2", "https://example.com"])
+        .expect("CLI should parse VA2 defaults");
+
+    assert_eq!(*matches.get_one::<u64>("va2-seed").unwrap(), 1337);
+    assert_eq!(*matches.get_one::<u32>("va2-budget").unwrap(), 60);
+    assert_eq!(
+        matches.get_one::<String>("va2-phases").unwrap(),
+        "baseline,protocol-variance"
+    );
+}
+
+#[test]
+fn test_va2_dry_run_requires_va2() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va2-dry-run"]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_va2_run_requires_va2() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va2-run"]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_va2_json_requires_va2() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--va2-json"]);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_va_confidence_score_format() {
     let summary = waf_detector::virtual_adversary::VaResultSummary {
         total: 4,
@@ -116,6 +173,7 @@ fn test_va_report_top_results_has_reason() {
             category: waf_detector::virtual_adversary::VaPayloadCategory::SqlInjection,
             outcome: waf_detector::virtual_adversary::VaOutcome::Blocked,
             reason: "status=403".to_string(),
+            evidence: Vec::new(),
         });
     assert_eq!(report.results[0].reason, "status=403");
 }

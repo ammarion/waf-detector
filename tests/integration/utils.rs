@@ -76,11 +76,25 @@ pub fn parse_detection_results(json: &Value) -> Result<DetectionResults> {
         .get("detected_cdn")
         .and_then(|c| parse_detection_info(c).ok());
 
-    let evidence = json
+    let mut evidence: Vec<EvidenceInfo> = json
         .get("evidence")
         .and_then(|e| e.as_array())
         .map(|arr| arr.iter().filter_map(|v| parse_evidence(v).ok()).collect())
         .unwrap_or_default();
+
+    if evidence.is_empty() {
+        if let Some(map) = json.get("evidence_map").and_then(|e| e.as_object()) {
+            for entries in map.values() {
+                if let Some(arr) = entries.as_array() {
+                    for item in arr {
+                        if let Ok(info) = parse_evidence(item) {
+                            evidence.push(info);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     Ok(DetectionResults {
         waf,

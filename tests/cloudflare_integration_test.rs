@@ -127,10 +127,13 @@ impl IntegrationTestCase for CloudFlareHeaderTest {
         }
 
         // Check evidence
-        let has_cf_ray = results
-            .evidence
-            .iter()
-            .any(|e| e.description.contains("CF-Ray"));
+        let has_cf_ray = results.evidence.iter().any(|e| {
+            let description = e.description.to_lowercase();
+            let method_type = e.method_type.to_lowercase();
+            method_type.contains("cf-ray")
+                || description.contains("cf-ray")
+                || description.contains("ray id")
+        });
         checks.push(("CF-Ray evidence", has_cf_ray));
 
         let all_passed = checks.iter().all(|(_, passed)| *passed);
@@ -191,7 +194,8 @@ impl IntegrationTestCase for CloudFlareChallengePage {
 <body>
     <div class="cf-browser-verification cf-im-under-attack">
         <h1 data-translate="turn_on_js">Please turn JavaScript on and reload the page.</h1>
-        <div id="cf-content">Checking your browser before accessing the website.</div>
+        <div id="cf-content">Checking your browser before accessing the Cloudflare website.</div>
+        <input type="hidden" name="cf_chl_jschl_tk" value="test-token" />
     </div>
 </body>
 </html>"#

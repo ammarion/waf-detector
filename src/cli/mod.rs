@@ -10,6 +10,7 @@ use crate::providers::{
 };
 use crate::registry::ProviderRegistry;
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
+use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use clap::{Arg, ArgMatches, Command};
@@ -17,6 +18,42 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::Instant;
 use url::Url;
+
+fn csv_escape(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn parse_va2_phases(raw: &str) -> Result<Vec<Va2Phase>> {
+    let mut phases = Vec::new();
+    for item in raw.split(',') {
+        let phase = match item.trim().to_lowercase().as_str() {
+            "baseline" => Va2Phase::Baseline,
+            "protocol-variance" => Va2Phase::ProtocolVariance,
+            "state-escalation" => Va2Phase::StateEscalation,
+            "behavioral-pressure" => Va2Phase::BehavioralPressure,
+            "challenge-interaction" => Va2Phase::ChallengeInteraction,
+            other => return Err(anyhow!("unknown va2 phase: {other}")),
+        };
+        phases.push(phase);
+    }
+    if phases.is_empty() {
+        return Err(anyhow!("va2 phases cannot be empty"));
+    }
+    Ok(phases)
+}
+
+fn load_effectiveness_overrides(
+    path: &str,
+) -> Result<crate::effectiveness::EffectivenessConfigOverrides> {
+    let contents = fs::read_to_string(path)?;
+    let overrides = toml::from_str(&contents)
+        .map_err(|err| anyhow!("Failed to parse effectiveness config TOML {path}: {err}"))?;
+    Ok(overrides)
+}
 
 pub struct SimpleCliApp {
     registry: ProviderRegistry,
@@ -45,6 +82,10 @@ impl SimpleCliApp {
 
     pub async fn run(&self) -> Result<()> {
         let matches = build_simple_cli().get_matches();
+        self.run_with_matches(matches).await
+    }
+
+    pub async fn run_with_matches(&self, matches: ArgMatches) -> Result<()> {
         let payload_analysis_enabled = matches.get_flag("payload-analysis");
         self.registry
             .set_payload_analysis_enabled(payload_analysis_enabled);
@@ -68,7 +109,7 @@ impl SimpleCliApp {
 
         // Handle effectiveness testing
         if let Some(url) = matches.get_one::<String>("effectiveness") {
-            return self.run_effectiveness_test(url).await;
+            return self.run_effectiveness_test(url, &matches).await;
         }
 
         // Handle smoke test command
@@ -83,7 +124,166 @@ impl SimpleCliApp {
             return Ok(());
         }
 
+        // Handle virtual adversary 2.0 (VA2)
+        if let Some(url) = matches.get_one::<String>("va2") {
+            let phases_raw = matches
+                .get_one::<String>("va2-phases")
+                .map(String::as_str)
+                .unwrap_or("baseline,protocol-variance");
+            let phases = parse_va2_phases(phases_raw)?;
+            let config = Va2CampaignConfig {
+                seed: *matches.get_one::<u64>("va2-seed").unwrap_or(&1337),
+                budget: *matches.get_one::<u32>("va2-budget").unwrap_or(&60),
+            };
+            let plan = build_va2_campaign_plan(url, &phases, config)?;
+
+            if matches.get_flag("va2-run") {
+                let runner = Va2Runner::new()?;
+                let report = runner.run_plan(plan).await?;
+                let errors = report
+                    .results
+                    .iter()
+                    .filter(|result| result.error.is_some())
+                    .count();
+                println!(
+                    "🧪 VA2 Run: {} steps | errors {}",
+                    report.results.len(),
+                    errors
+                );
+                return Ok(());
+            }
+
+            if matches.get_flag("va2-json") {
+                let json = serde_json::to_string_pretty(&plan)?;
+                println!("{json}");
+                return Ok(());
+            }
+
+            if let Some(output) = matches.get_one::<String>("va2-output") {
+                let json = serde_json::to_string_pretty(&plan)?;
+                fs::write(output, json)?;
+                println!("📄 VA2 plan saved to: {output}");
+                return Ok(());
+            }
+
+            println!(
+                "🧭 VA2 Dry Run: {} steps across {} phases (seed={}, budget={})",
+                plan.steps.len(),
+                plan.phases.len(),
+                plan.seed,
+                plan.budget
+            );
+            return Ok(());
+        }
+
         // Handle virtual adversary (VA) mode
+        if let Some(replay_path) = matches.get_one::<String>("va-replay-run") {
+            let raw = fs::read_to_string(replay_path)?;
+            let report = serde_json::from_str::<crate::virtual_adversary::VaRunReport>(&raw)
+                .or_else(|_| {
+                    serde_json::from_str::<crate::web::VaStoredReport>(&raw)
+                        .map(|stored| stored.report)
+                })
+                .map_err(|err| anyhow!("failed to parse replay report: {err}"))?;
+            let target = matches
+                .get_one::<String>("va-replay-target")
+                .cloned()
+                .unwrap_or_else(|| report.target_url.clone());
+            let mut runner = VirtualAdversaryRunner::new(report.config.clone())?;
+            let report = runner.run_replay_plan(&target, report.replay_plan.clone())?;
+
+            if matches.get_flag("va-json") {
+                let json = serde_json::to_string_pretty(&report)?;
+                println!("{json}");
+                return Ok(());
+            }
+            if matches.get_flag("va-replay") {
+                let json = serde_json::to_string_pretty(&report.replay_plan)?;
+                println!("{json}");
+                return Ok(());
+            }
+            if matches.get_flag("va-replay-csv") {
+                let mut lines = Vec::new();
+                lines.push(
+                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
+                        .to_string(),
+                );
+                for item in &report.replay_plan {
+                    let row = vec![
+                        item.index.to_string(),
+                        csv_escape(&item.class),
+                        csv_escape(&item.channel),
+                        csv_escape(&item.description),
+                        csv_escape(&item.method),
+                        csv_escape(&item.url),
+                        csv_escape(&serde_json::to_string(&item.headers).unwrap_or_default()),
+                        csv_escape(&item.body.clone().unwrap_or_default()),
+                    ]
+                    .join(",");
+                    lines.push(row);
+                }
+                println!("{}", lines.join("\n"));
+                return Ok(());
+            }
+            if let Some(output) = matches.get_one::<String>("va-output") {
+                let json = serde_json::to_string_pretty(&report)?;
+                std::fs::write(output, json)?;
+                let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
+                let summary = format!(
+                    "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
+                    report.target_url,
+                    report.summary.confidence_score(),
+                    report.summary.risk_label(),
+                    report.summary.blocked,
+                    report.summary.challenge,
+                    report.summary.allowed,
+                    report.summary.error
+                );
+                std::fs::write(&summary_path, summary)?;
+                println!("📄 VA replay report saved to: {output}");
+                println!("📄 VA replay summary saved to: {summary_path}");
+                return Ok(());
+            }
+            println!(
+                "🧪 Virtual Adversary Replay: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
+                report.target_url,
+                report.summary.total,
+                report.summary.blocked,
+                report.summary.challenge,
+                report.summary.allowed,
+                report.summary.error,
+                report.summary.confidence_score(),
+                report.summary.risk_label(),
+                report.enforcement,
+                report.evidence_score
+            );
+            let max_results = *matches.get_one::<u8>("va-top").unwrap_or(&3) as usize;
+            if !report.results.is_empty() {
+                println!("   Top Results:");
+                let reason_level = *matches.get_one::<u8>("va-reason-level").unwrap_or(&1);
+                let max_len = *matches.get_one::<u16>("va-max-len").unwrap_or(&80) as usize;
+                for result in report.results.iter().take(max_results) {
+                    let payload = if result.payload.len() > max_len {
+                        format!("{}...", &result.payload[..max_len.saturating_sub(3)])
+                    } else {
+                        result.payload.clone()
+                    };
+                    if reason_level == 0 {
+                        println!(
+                            "   - {:?} | {} | {:?}",
+                            result.category, payload, result.outcome
+                        );
+                    } else {
+                        println!(
+                            "   - {:?} | {} | {:?} | {}",
+                            result.category, payload, result.outcome, result.reason
+                        );
+                    }
+                }
+            }
+            return Ok(());
+        }
+
         if let Some(url) = matches.get_one::<String>("va") {
             let config = VirtualAdversaryConfig {
                 tier: *matches.get_one::<u8>("va-tier").unwrap_or(&1),
@@ -98,10 +298,13 @@ impl SimpleCliApp {
             };
             let mut runner = VirtualAdversaryRunner::new(config)?;
             if matches.get_flag("va-dry-run") {
-                let plan = runner.plan();
-                println!("🧪 VA Dry Run: {} planned payloads", plan.len());
-                for payload in plan {
-                    println!(" - {:?}: {}", payload.category, payload.payload);
+                let plan = runner.plan(url);
+                println!("🧪 VA Dry Run: {} planned probes", plan.len());
+                for probe in plan {
+                    println!(
+                        " - {:?}::{:?}: {}",
+                        probe.probe.class, probe.probe.channel, probe.display
+                    );
                 }
                 return Ok(());
             }
@@ -109,6 +312,34 @@ impl SimpleCliApp {
             if matches.get_flag("va-json") {
                 let json = serde_json::to_string_pretty(&report)?;
                 println!("{json}");
+                return Ok(());
+            }
+            if matches.get_flag("va-replay") {
+                let json = serde_json::to_string_pretty(&report.replay_plan)?;
+                println!("{json}");
+                return Ok(());
+            }
+            if matches.get_flag("va-replay-csv") {
+                let mut lines = Vec::new();
+                lines.push(
+                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
+                        .to_string(),
+                );
+                for item in &report.replay_plan {
+                    let row = vec![
+                        item.index.to_string(),
+                        csv_escape(&item.class),
+                        csv_escape(&item.channel),
+                        csv_escape(&item.description),
+                        csv_escape(&item.method),
+                        csv_escape(&item.url),
+                        csv_escape(&serde_json::to_string(&item.headers).unwrap_or_default()),
+                        csv_escape(&item.body.clone().unwrap_or_default()),
+                    ]
+                    .join(",");
+                    lines.push(row);
+                }
+                println!("{}", lines.join("\n"));
                 return Ok(());
             }
             if let Some(output) = matches.get_one::<String>("va-output") {
@@ -131,7 +362,7 @@ impl SimpleCliApp {
                 return Ok(());
             }
             println!(
-                "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {}",
+                "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
                 report.target_url,
                 report.summary.total,
                 report.summary.blocked,
@@ -139,7 +370,9 @@ impl SimpleCliApp {
                 report.summary.allowed,
                 report.summary.error,
                 report.summary.confidence_score(),
-                report.summary.risk_label()
+                report.summary.risk_label(),
+                report.enforcement,
+                report.evidence_score
             );
             println!(
                 "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",
@@ -578,20 +811,70 @@ impl SimpleCliApp {
     async fn start_web_server(&self, engine: &DetectionEngine, port: u16) -> Result<()> {
         println!("🌐 Starting WAF Detector Web Server...");
 
-        let web_server = crate::web::WebServer::new(engine.clone());
-        web_server.start(port).await?;
+        let mut last_error: Option<anyhow::Error> = None;
+        let max_attempts = 10u16;
 
-        Ok(())
+        for offset in 0..max_attempts {
+            let candidate = port.saturating_add(offset);
+            let web_server = crate::web::WebServer::new(engine.clone());
+            match web_server.start(candidate).await {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    let addr_in_use = err
+                        .downcast_ref::<std::io::Error>()
+                        .map(|io_err| io_err.kind() == std::io::ErrorKind::AddrInUse)
+                        .unwrap_or(false);
+                    if addr_in_use {
+                        println!("⚠️  Port {candidate} is in use, trying next port...");
+                        last_error = Some(err);
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow!("Unable to bind to a free port")))
     }
 
-    async fn run_effectiveness_test(&self, url: &str) -> Result<()> {
+    async fn run_effectiveness_test(&self, url: &str, matches: &ArgMatches) -> Result<()> {
         use crate::effectiveness::{EffectivenessConfig, EffectivenessTest};
 
         println!("🔍 WAF Effectiveness Testing");
         println!("════════════════════════════════════════════════════════════════");
 
         // Create effectiveness test with default config
-        let config = EffectivenessConfig::default();
+        let mut config = EffectivenessConfig::default();
+        if let Some(path) = matches.get_one::<String>("effectiveness-config") {
+            let overrides = load_effectiveness_overrides(path)?;
+            config.apply_overrides(overrides);
+        }
+
+        if let Some(value) = matches.get_one::<f64>("effectiveness-similarity-threshold") {
+            if !(0.0..=1.0).contains(value) {
+                return Err(anyhow!(
+                    "effectiveness-similarity-threshold must be between 0.0 and 1.0"
+                ));
+            }
+            config.similarity_threshold = *value;
+        }
+        if let Some(value) = matches.get_one::<f64>("effectiveness-reduction-ratio") {
+            if !(0.0..=1.0).contains(value) {
+                return Err(anyhow!(
+                    "effectiveness-reduction-ratio must be between 0.0 and 1.0"
+                ));
+            }
+            config.reduction_ratio = *value;
+        }
+        if let Some(value) = matches.get_one::<usize>("effectiveness-min-length-diff") {
+            if *value == 0 {
+                return Err(anyhow!(
+                    "effectiveness-min-length-diff must be greater than 0"
+                ));
+            }
+            config.min_length_diff = *value;
+        }
+
         let mut test = EffectivenessTest::new(config).await?;
 
         // Run the test
@@ -828,9 +1111,115 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .num_args(1),
         )
         .arg(
+            Arg::new("effectiveness-config")
+                .long("effectiveness-config")
+                .help("Path to TOML config overrides for effectiveness testing")
+                .value_name("FILE")
+                .requires("effectiveness"),
+        )
+        .arg(
+            Arg::new("effectiveness-similarity-threshold")
+                .long("effectiveness-similarity-threshold")
+                .help("Override response body similarity threshold (0.0-1.0)")
+                .value_name("FLOAT")
+                .value_parser(clap::value_parser!(f64))
+                .requires("effectiveness"),
+        )
+        .arg(
+            Arg::new("effectiveness-reduction-ratio")
+                .long("effectiveness-reduction-ratio")
+                .help("Override response body reduction ratio (0.0-1.0)")
+                .value_name("FLOAT")
+                .value_parser(clap::value_parser!(f64))
+                .requires("effectiveness"),
+        )
+        .arg(
+            Arg::new("effectiveness-min-length-diff")
+                .long("effectiveness-min-length-diff")
+                .help("Override minimum response body length diff")
+                .value_name("BYTES")
+                .value_parser(clap::value_parser!(usize))
+                .requires("effectiveness"),
+        )
+        .arg(
+            Arg::new("va2")
+                .long("va2")
+                .help("Run Virtual Adversary 2.0 dry run (behavioral campaign)")
+                .value_name("URL")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("va2-dry-run")
+                .long("va2-dry-run")
+                .help("Print VA2 plan summary without execution")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-run")
+                .long("va2-run")
+                .help("Execute VA2 campaign plan (requires consent)")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-json")
+                .long("va2-json")
+                .help("Print VA2 plan JSON to stdout")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-output")
+                .long("va2-output")
+                .help("Write VA2 plan JSON to file")
+                .value_name("FILE")
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-phases")
+                .long("va2-phases")
+                .help("VA2 phases (comma-separated)")
+                .value_name("LIST")
+                .default_value("baseline,protocol-variance")
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-seed")
+                .long("va2-seed")
+                .help("VA2 deterministic seed")
+                .value_name("SEED")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("1337")
+                .requires("va2"),
+        )
+        .arg(
+            Arg::new("va2-budget")
+                .long("va2-budget")
+                .help("VA2 request budget")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(u32))
+                .default_value("60")
+                .requires("va2"),
+        )
+        .arg(
             Arg::new("va")
                 .long("va")
                 .help("Run Virtual Adversary effectiveness validation (requires consent)")
+                .value_name("URL")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("va-replay-run")
+                .long("va-replay-run")
+                .help("Run a saved VA replay plan from a JSON report")
+                .value_name("FILE")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("va-replay-target")
+                .long("va-replay-target")
+                .help("Override target URL for replay run")
                 .value_name("URL")
                 .num_args(1),
         )
@@ -885,6 +1274,20 @@ The tool automatically adds https:// if needed and supports both domain names an
             Arg::new("va-json")
                 .long("va-json")
                 .help("Print VA report JSON to stdout")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-replay")
+                .long("va-replay")
+                .help("Print VA replay plan JSON to stdout")
+                .action(clap::ArgAction::SetTrue)
+                .requires("va"),
+        )
+        .arg(
+            Arg::new("va-replay-csv")
+                .long("va-replay-csv")
+                .help("Print VA replay plan CSV to stdout")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va"),
         )

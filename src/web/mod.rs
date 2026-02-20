@@ -1,9 +1,16 @@
+use crate::ai::{
+    ai_enabled, ai_endpoint, ai_model, ai_timeout, AiProvider, AiSummaryRequest,
+    AiSummaryResponse, OllamaProvider,
+};
 use crate::effectiveness::consent::{ConsentManager, ConsentStatus};
 use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, SmokeTestResult, WafSmokeTest};
 use crate::script_executor::{CombinedResult, ScriptExecutor};
 use crate::virtual_adversary::{
     VaOutcome, VaPayloadCategory, VaRunReport, VirtualAdversaryConfig, VirtualAdversaryRunner,
+};
+use crate::virtual_adversary2::{
+    build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2RunReport, Va2Runner,
 };
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
@@ -29,6 +36,7 @@ pub mod templates;
 
 const VA_REPORTS_DIR: &str = ".waf-detector/va-reports";
 const VA_REPORT_RETENTION_DEFAULT: usize = 50;
+const VA2_PHASE_DEFAULT: &str = "baseline,protocol-variance";
 
 #[derive(Clone)]
 pub struct WebServer {
@@ -76,6 +84,13 @@ pub struct SmokeTestResponse {
     error: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct AiSummaryApiResponse {
+    success: bool,
+    summary: Option<AiSummaryResponse>,
+    error: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub struct VaRequest {
     url: String,
@@ -84,6 +99,14 @@ pub struct VaRequest {
     timeout_ms: Option<u64>,
     delay_ms: Option<u64>,
     variants: Option<u8>,
+}
+
+#[derive(Deserialize)]
+pub struct Va2Request {
+    target_url: String,
+    phases: Option<String>,
+    seed: Option<u64>,
+    budget: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -122,10 +145,43 @@ impl VaRequest {
     }
 }
 
+fn parse_va2_phases(raw: &str) -> Result<Vec<Va2Phase>> {
+    let mut phases = Vec::new();
+    for item in raw.split(',') {
+        let phase = match item.trim().to_lowercase().as_str() {
+            "baseline" => Va2Phase::Baseline,
+            "protocol-variance" => Va2Phase::ProtocolVariance,
+            "state-escalation" => Va2Phase::StateEscalation,
+            "behavioral-pressure" => Va2Phase::BehavioralPressure,
+            "challenge-interaction" => Va2Phase::ChallengeInteraction,
+            other => return Err(anyhow!("unknown va2 phase: {other}")),
+        };
+        phases.push(phase);
+    }
+    if phases.is_empty() {
+        return Err(anyhow!("va2 phases cannot be empty"));
+    }
+    Ok(phases)
+}
+
 #[derive(Serialize)]
 pub struct VaResponse {
     success: bool,
     result: Option<VaRunReport>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Va2PlanResponse {
+    success: bool,
+    plan: Option<serde_json::Value>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Va2RunResponse {
+    success: bool,
+    report: Option<Va2RunReport>,
     error: Option<String>,
 }
 
@@ -259,6 +315,13 @@ pub struct VaReportResponse {
 }
 
 #[derive(Serialize)]
+pub struct VaReplayPlanResponse {
+    success: bool,
+    replay_plan: Option<Vec<crate::virtual_adversary::VaReplayPlanItem>>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct VaRetentionResponse {
     success: bool,
     kept: usize,
@@ -317,8 +380,16 @@ impl WebServer {
                 get(virtual_adversary_report),
             )
             .route(
-                "/api/virtual-adversary/reports/:id.csv",
+                "/api/virtual-adversary/reports/:id/replay.json",
+                get(virtual_adversary_report_replay_json),
+            )
+            .route(
+                "/api/virtual-adversary/reports/:id/csv",
                 get(virtual_adversary_report_csv),
+            )
+            .route(
+                "/api/virtual-adversary/reports/:id/replay.csv",
+                get(virtual_adversary_report_replay_csv),
             )
             .route(
                 "/api/virtual-adversary/reports.csv",
@@ -332,6 +403,12 @@ impl WebServer {
                 "/api/virtual-adversary/reports/delete-range",
                 post(virtual_adversary_reports_delete_range),
             )
+            .route(
+                "/api/virtual-adversary2/plan",
+                post(virtual_adversary2_plan),
+            )
+            .route("/api/virtual-adversary2/run", post(virtual_adversary2_run))
+            .route("/api/ai/summary", post(ai_summary))
             .route("/api/consent-status", get(consent_status))
             .route("/api/consent/add-target", post(consent_add_target))
             .route("/api/consent/remove-target", post(consent_remove_target))
@@ -345,7 +422,7 @@ impl WebServer {
             .layer(CorsLayer::permissive())
             .with_state(self);
 
-        let addr = format!("0.0.0.0:{port}");
+        let addr = format!("127.0.0.1:{port}");
         println!("🌐 WAF Detector Web Server starting on http://localhost:{port}");
         println!("📊 Dashboard: http://localhost:{port}/dashboard");
         println!("📖 API Docs: http://localhost:{port}/api-docs");
@@ -359,7 +436,7 @@ impl WebServer {
 
 // Handler for the main dashboard
 async fn dashboard() -> impl IntoResponse {
-    Html(templates::DASHBOARD_HTML)
+    Html(templates::dashboard_html())
 }
 
 // Handler for API documentation
@@ -566,10 +643,25 @@ fn build_va_reports_csv(reports: &[VaReportSummary]) -> String {
     lines.join("\n")
 }
 
+fn format_va_evidence(evidence: &[crate::virtual_adversary::VaEvidence]) -> String {
+    if evidence.is_empty() {
+        return String::new();
+    }
+    evidence
+        .iter()
+        .map(|entry| format!("{:?}:{}", entry.kind, entry.detail))
+        .collect::<Vec<String>>()
+        .join("|")
+}
+
 fn build_va_report_csv(stored: &VaStoredReport) -> String {
     let mut lines = Vec::new();
-    lines.push("report_id,target_url,created_at,index,category,payload,outcome,reason".to_string());
+    lines.push(
+        "report_id,target_url,created_at,index,category,payload,outcome,reason,evidence,probe_class,probe_channel,probe_description,method,url".to_string(),
+    );
     for (idx, record) in stored.report.results.iter().enumerate() {
+        let replay = stored.report.replay_plan.get(idx);
+        let row = vec![
         let row = [
             csv_escape(&stored.id),
             csv_escape(&stored.report.target_url),
@@ -579,6 +671,34 @@ fn build_va_report_csv(stored: &VaStoredReport) -> String {
             csv_escape(&record.payload),
             csv_escape(&format!("{:?}", record.outcome)),
             csv_escape(&record.reason),
+            csv_escape(&format_va_evidence(&record.evidence)),
+            csv_escape(&replay.map(|item| item.class.as_str()).unwrap_or("")),
+            csv_escape(&replay.map(|item| item.channel.as_str()).unwrap_or("")),
+            csv_escape(&replay.map(|item| item.description.as_str()).unwrap_or("")),
+            csv_escape(&replay.map(|item| item.method.as_str()).unwrap_or("")),
+            csv_escape(&replay.map(|item| item.url.as_str()).unwrap_or("")),
+        ]
+        .join(",");
+        lines.push(row);
+    }
+    lines.join("\n")
+}
+
+fn build_va_replay_plan_csv(replay_plan: &[crate::virtual_adversary::VaReplayPlanItem]) -> String {
+    let mut lines = Vec::new();
+    lines.push(
+        "index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string(),
+    );
+    for item in replay_plan {
+        let row = vec![
+            item.index.to_string(),
+            csv_escape(&item.class),
+            csv_escape(&item.channel),
+            csv_escape(&item.description),
+            csv_escape(&item.method),
+            csv_escape(&item.url),
+            csv_escape(&serde_json::to_string(&item.headers).unwrap_or_default()),
+            csv_escape(&item.body.clone().unwrap_or_default()),
         ]
         .join(",");
         lines.push(row);
@@ -1099,6 +1219,28 @@ async fn virtual_adversary_report(Path(report_id): Path<String>) -> impl IntoRes
     }
 }
 
+// Handler to fetch a Virtual Adversary replay plan as JSON
+async fn virtual_adversary_report_replay_json(Path(report_id): Path<String>) -> impl IntoResponse {
+    match load_va_report(&report_id) {
+        Ok(report) => {
+            let response = VaReplayPlanResponse {
+                success: true,
+                replay_plan: Some(report.report.replay_plan),
+                error: None,
+            };
+            (StatusCode::OK, Json(response))
+        }
+        Err(e) => {
+            let response = VaReplayPlanResponse {
+                success: false,
+                replay_plan: None,
+                error: Some(format!("Failed to load report: {e}")),
+            };
+            (StatusCode::NOT_FOUND, Json(response))
+        }
+    }
+}
+
 // Handler to export Virtual Adversary reports as CSV
 async fn virtual_adversary_reports_csv() -> impl IntoResponse {
     match list_va_reports() {
@@ -1119,6 +1261,21 @@ async fn virtual_adversary_report_csv(Path(report_id): Path<String>) -> impl Int
     match load_va_report(&report_id) {
         Ok(report) => {
             let body = build_va_report_csv(&report);
+            (StatusCode::OK, [(header::CONTENT_TYPE, "text/csv")], body)
+        }
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("Failed to load report: {e}"),
+        ),
+    }
+}
+
+// Handler to export a Virtual Adversary replay plan as CSV
+async fn virtual_adversary_report_replay_csv(Path(report_id): Path<String>) -> impl IntoResponse {
+    match load_va_report(&report_id) {
+        Ok(report) => {
+            let body = build_va_replay_plan_csv(&report.report.replay_plan);
             (StatusCode::OK, [(header::CONTENT_TYPE, "text/csv")], body)
         }
         Err(e) => (
@@ -1202,6 +1359,119 @@ async fn virtual_adversary_reports_delete_range(
             };
             (StatusCode::BAD_REQUEST, Json(response))
         }
+    }
+}
+
+async fn virtual_adversary2_plan(Json(payload): Json<Va2Request>) -> impl IntoResponse {
+    let phases_raw = payload.phases.as_deref().unwrap_or(VA2_PHASE_DEFAULT);
+    let phases = match parse_va2_phases(phases_raw) {
+        Ok(phases) => phases,
+        Err(err) => {
+            return Json(Va2PlanResponse {
+                success: false,
+                plan: None,
+                error: Some(err.to_string()),
+            });
+        }
+    };
+
+    let config = Va2CampaignConfig {
+        seed: payload.seed.unwrap_or(1337),
+        budget: payload.budget.unwrap_or(60),
+    };
+
+    match build_va2_campaign_plan(&payload.target_url, &phases, config) {
+        Ok(plan) => Json(Va2PlanResponse {
+            success: true,
+            plan: Some(serde_json::to_value(plan).unwrap_or_else(|_| serde_json::json!({}))),
+            error: None,
+        }),
+        Err(err) => Json(Va2PlanResponse {
+            success: false,
+            plan: None,
+            error: Some(err.to_string()),
+        }),
+    }
+}
+
+async fn virtual_adversary2_run(Json(payload): Json<Va2Request>) -> impl IntoResponse {
+    let phases_raw = payload.phases.as_deref().unwrap_or(VA2_PHASE_DEFAULT);
+    let phases = match parse_va2_phases(phases_raw) {
+        Ok(phases) => phases,
+        Err(err) => {
+            return Json(Va2RunResponse {
+                success: false,
+                report: None,
+                error: Some(err.to_string()),
+            });
+        }
+    };
+
+    let config = Va2CampaignConfig {
+        seed: payload.seed.unwrap_or(1337),
+        budget: payload.budget.unwrap_or(60),
+    };
+
+    let plan = match build_va2_campaign_plan(&payload.target_url, &phases, config) {
+        Ok(plan) => plan,
+        Err(err) => {
+            return Json(Va2RunResponse {
+                success: false,
+                report: None,
+                error: Some(err.to_string()),
+            });
+        }
+    };
+
+    match Va2Runner::new() {
+        Ok(runner) => match runner.run_plan(plan).await {
+            Ok(report) => Json(Va2RunResponse {
+                success: true,
+                report: Some(report),
+                error: None,
+            }),
+            Err(err) => Json(Va2RunResponse {
+                success: false,
+                report: None,
+                error: Some(err.to_string()),
+            }),
+        },
+        Err(err) => Json(Va2RunResponse {
+            success: false,
+            report: None,
+            error: Some(err.to_string()),
+        }),
+    }
+}
+
+async fn ai_summary(Json(payload): Json<AiSummaryRequest>) -> impl IntoResponse {
+    if !ai_enabled() {
+        let response = AiSummaryApiResponse {
+            success: false,
+            summary: None,
+            error: Some("AI summaries are disabled".to_string()),
+        };
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(response));
+    }
+
+    let provider = OllamaProvider::new(ai_endpoint(), ai_model(), ai_timeout());
+    match provider.summarize(&payload).await {
+        Ok(summary) => (
+            StatusCode::OK,
+            Json(AiSummaryApiResponse {
+                success: true,
+                summary: Some(summary),
+                error: None,
+            }),
+        ),
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            Json(AiSummaryApiResponse {
+                success: false,
+                summary: None,
+                error: Some(format!("AI unavailable: {err}")),
+            }),
+        ),
     }
 }
 
@@ -1326,12 +1596,25 @@ mod tests {
         let mut report =
             VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
         report
+            .replay_plan
+            .push(crate::virtual_adversary::VaReplayPlanItem {
+                index: 1,
+                class: "SemanticDrift".to_string(),
+                channel: "Query".to_string(),
+                description: "Duplicate key ordering drift".to_string(),
+                method: "GET".to_string(),
+                url: "https://example.com/?a=1&a=2".to_string(),
+                headers: Vec::new(),
+                body: None,
+            });
+        report
             .results
             .push(crate::virtual_adversary::VaResultRecord {
                 payload: "' OR '1'='1".to_string(),
                 category: crate::virtual_adversary::VaPayloadCategory::SqlInjection,
                 outcome: crate::virtual_adversary::VaOutcome::Blocked,
                 reason: "status=403".to_string(),
+                evidence: Vec::new(),
             });
         let stored = VaStoredReport {
             id: "va-1.json".to_string(),
@@ -1341,6 +1624,27 @@ mod tests {
         let csv = build_va_report_csv(&stored);
         assert!(csv.contains("payload"));
         assert!(csv.contains("' OR '1'='1"));
+        assert!(csv.contains("probe_class"));
+        assert!(csv.contains("SemanticDrift"));
+        assert!(csv.contains("https://example.com/?a=1&a=2"));
+    }
+
+    #[test]
+    fn build_va_replay_plan_csv_includes_rows() {
+        let replay_plan = vec![crate::virtual_adversary::VaReplayPlanItem {
+            index: 1,
+            class: "ProtocolMutation".to_string(),
+            channel: "Header".to_string(),
+            description: "Case and whitespace header mutation".to_string(),
+            method: "GET".to_string(),
+            url: "https://example.com".to_string(),
+            headers: vec![("X-Test".to_string(), "1".to_string())],
+            body: None,
+        }];
+        let csv = super::build_va_replay_plan_csv(&replay_plan);
+        assert!(csv.contains("probe_class"));
+        assert!(csv.contains("ProtocolMutation"));
+        assert!(csv.contains("X-Test"));
     }
 
     #[test]

@@ -138,9 +138,10 @@ impl ConsentManager {
 
         let targets: Vec<String> = targets_input
             .split(',')
-            .map(|s| s.trim().to_string())
+            .map(|s| s.trim())
             .filter(|s| !s.is_empty())
-            .collect();
+            .map(Self::normalize_target)
+            .collect::<Result<Vec<_>>>()?;
 
         if targets.is_empty() {
             return Err(anyhow!("No authorized targets provided"));
@@ -175,6 +176,8 @@ impl ConsentManager {
 
         // Check if host matches any authorized target
         for authorized in &consent.authorized_targets {
+            let authorized =
+                Self::normalize_target(authorized).unwrap_or_else(|_| authorized.to_string());
             if host == authorized || host.ends_with(&format!(".{authorized}")) {
                 return Ok(true);
             }
@@ -186,9 +189,10 @@ impl ConsentManager {
     /// Add a new authorized target
     pub fn add_authorized_target(&self, target: &str) -> Result<()> {
         let mut consent = self.load_consent()?;
+        let normalized = Self::normalize_target(target)?;
 
-        if !consent.authorized_targets.contains(&target.to_string()) {
-            consent.authorized_targets.push(target.to_string());
+        if !consent.authorized_targets.contains(&normalized) {
+            consent.authorized_targets.push(normalized);
             self.save_consent(&consent)?;
         }
 
@@ -224,6 +228,20 @@ impl ConsentManager {
     /// Current version of terms
     fn current_terms_version() -> String {
         "1.0.0".to_string()
+    }
+
+    fn normalize_target(target: &str) -> Result<String> {
+        let trimmed = target.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("Authorized target cannot be empty"));
+        }
+        let url = Url::parse(trimmed).or_else(|_| Url::parse(&format!("https://{trimmed}")));
+        if let Ok(parsed) = url {
+            if let Some(host) = parsed.host_str() {
+                return Ok(host.to_lowercase());
+            }
+        }
+        Ok(trimmed.to_lowercase())
     }
 
     /// Consent text displayed to users
@@ -293,6 +311,29 @@ pub fn manage_consent_cli(args: Vec<String>) -> Result<()> {
     } else {
         match args[0].as_str() {
             "request" => consent_manager.request_consent()?,
+            "status" => {
+                let status = consent_manager.status()?;
+                if status.has_consent {
+                    println!("✅ Valid consent on file");
+                } else {
+                    println!("❌ No valid consent on file");
+                }
+                println!("Terms version: {}", status.terms_version);
+                if let Some(days) = status.expires_in_days {
+                    println!("Expires in: {} day(s)", days);
+                }
+                if let Some(ts) = status.consent_timestamp {
+                    println!("Consent timestamp: {}", ts.to_rfc3339());
+                }
+                if status.authorized_targets.is_empty() {
+                    println!("Authorized targets: (none)");
+                } else {
+                    println!(
+                        "Authorized targets: {}",
+                        status.authorized_targets.join(", ")
+                    );
+                }
+            }
             "add-target" => {
                 if args.len() < 2 {
                     return Err(anyhow!("Usage: consent add-target <domain>"));

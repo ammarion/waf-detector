@@ -6,6 +6,7 @@ pub mod cli;
 pub mod confidence;
 pub mod engine;
 pub mod http;
+pub mod ai;
 pub mod providers;
 pub mod registry;
 pub mod script_executor;
@@ -26,6 +27,7 @@ pub mod tls;
 // NEW: WAF Effectiveness Testing module
 pub mod effectiveness;
 pub mod virtual_adversary;
+pub mod virtual_adversary2;
 
 #[derive(Debug, Clone)]
 pub struct DetectionContext {
