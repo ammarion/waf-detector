@@ -201,14 +201,13 @@ impl ProviderRegistry {
         };
 
         // Run all detection techniques in parallel
-        let (provider_results, timing_result, dns_result, payload_result, tls_result) =
-            tokio::join!(
-                futures::future::join_all(provider_futures),
-                timing_future,
-                dns_future,
-                payload_future,
-                tls_future
-            );
+        let (provider_results, timing_result, dns_result, payload_result, tls_result) = tokio::join!(
+            futures::future::join_all(provider_futures),
+            timing_future,
+            dns_future,
+            payload_future,
+            tls_future
+        );
 
         let mut provider_scores = HashMap::new();
         let mut evidence_map: HashMap<String, Vec<crate::Evidence>> = HashMap::new();
@@ -272,9 +271,11 @@ impl ProviderRegistry {
 
                 let has_tier1 = Self::has_tier1_evidence(&provider_name, evidence);
                 let passes_correlation = Self::passes_correlation(evidence);
-                let confidence_result = self
-                    .advanced_scoring
-                    .calculate_confidence(&provider_name, evidence, &response_headers);
+                let confidence_result = self.advanced_scoring.calculate_confidence(
+                    &provider_name,
+                    evidence,
+                    &response_headers,
+                );
                 let final_confidence = confidence_result.score;
 
                 provider_scores.insert(provider_name.clone(), final_confidence);
@@ -282,7 +283,10 @@ impl ProviderRegistry {
                 if let Some(metadata) = self.provider_metadata.get(&provider_name) {
                     match metadata.provider_type.as_str() {
                         "WAF Only" => {
-                            if has_tier1 && passes_correlation && final_confidence > best_waf_confidence {
+                            if has_tier1
+                                && passes_correlation
+                                && final_confidence > best_waf_confidence
+                            {
                                 best_waf_confidence = final_confidence;
                                 best_waf = Some(ProviderDetection {
                                     name: provider_name.clone(),
@@ -291,7 +295,10 @@ impl ProviderRegistry {
                             }
                         }
                         "CDN Only" => {
-                            if has_tier1 && passes_correlation && final_confidence > best_cdn_confidence {
+                            if has_tier1
+                                && passes_correlation
+                                && final_confidence > best_cdn_confidence
+                            {
                                 best_cdn_confidence = final_confidence;
                                 best_cdn = Some(ProviderDetection {
                                     name: provider_name.clone(),
@@ -300,14 +307,20 @@ impl ProviderRegistry {
                             }
                         }
                         "Both" => {
-                            if has_tier1 && passes_correlation && final_confidence > best_waf_confidence {
+                            if has_tier1
+                                && passes_correlation
+                                && final_confidence > best_waf_confidence
+                            {
                                 best_waf_confidence = final_confidence;
                                 best_waf = Some(ProviderDetection {
                                     name: provider_name.clone(),
                                     confidence: final_confidence,
                                 });
                             }
-                            if has_tier1 && passes_correlation && final_confidence > best_cdn_confidence {
+                            if has_tier1
+                                && passes_correlation
+                                && final_confidence > best_cdn_confidence
+                            {
                                 best_cdn_confidence = final_confidence;
                                 best_cdn = Some(ProviderDetection {
                                     name: provider_name.clone(),
@@ -433,6 +446,7 @@ impl ProviderRegistry {
             "azure" => "Azure",
             "f5" => "F5",
             "imperva" => "Imperva",
+            "modsecurity" => "ModSecurity",
             "sucuri" => "Sucuri",
             "generic_waf" => "Generic WAF",
             _ => return None,
@@ -474,6 +488,10 @@ impl ProviderRegistry {
             "imperva-x-iinfo-header",
             "imperva-incap-cookie",
             "imperva-visid-cookie",
+            // ModSecurity
+            "modsecurity-server-header",
+            "modsecurity-header",
+            "modsecurity-error-body",
             // Sucuri
             "sucuri-id-header",
             "sucuri-cookie",
@@ -490,10 +508,12 @@ impl ProviderRegistry {
     }
 
     fn passes_correlation(evidence: &[crate::Evidence]) -> bool {
-        if evidence
-            .iter()
-            .any(|ev| matches!(ev.method_type, crate::MethodType::DNS(_) | crate::MethodType::Certificate))
-        {
+        if evidence.iter().any(|ev| {
+            matches!(
+                ev.method_type,
+                crate::MethodType::DNS(_) | crate::MethodType::Certificate
+            )
+        }) {
             return true;
         }
 
@@ -597,7 +617,10 @@ mod tests {
             signature_matched: "cf-ray-header".to_string(),
         }];
 
-        assert!(ProviderRegistry::has_tier1_evidence("CloudFlare", &evidence));
+        assert!(ProviderRegistry::has_tier1_evidence(
+            "CloudFlare",
+            &evidence
+        ));
     }
 
     #[test]
