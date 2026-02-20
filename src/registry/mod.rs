@@ -448,6 +448,8 @@ impl ProviderRegistry {
             "imperva" => "Imperva",
             "modsecurity" => "ModSecurity",
             "sucuri" => "Sucuri",
+            "radware" => "Radware",
+            "fortiweb" => "FortiWeb",
             "generic_waf" => "Generic WAF",
             _ => return None,
         };
@@ -496,6 +498,14 @@ impl ProviderRegistry {
             "sucuri-id-header",
             "sucuri-cookie",
             "sucuri-server-header",
+            // Radware
+            "radware-compstate-header",
+            "radware-requestid-header",
+            "radware-cookie",
+            // FortiWeb
+            "fortiweb-server-header",
+            "fortiweb-nonce-header",
+            "fortiweb-cookie",
         ];
 
         evidence.iter().any(|ev| match ev.method_type {

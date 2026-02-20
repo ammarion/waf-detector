@@ -4,8 +4,9 @@ use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, WafSmokeTest};
 use crate::providers::{
     akamai::AkamaiProvider, aws::AwsProvider, azure::AzureProvider, cloudflare::CloudFlareProvider,
-    f5::F5Provider, fastly::FastlyProvider, imperva::ImpervaProvider,
-    modsecurity::ModSecurityProvider, sucuri::SucuriProvider, vercel::VercelProvider, Provider,
+    f5::F5Provider, fastly::FastlyProvider, fortiweb::FortiWebProvider, imperva::ImpervaProvider,
+    modsecurity::ModSecurityProvider, radware::RadwareProvider, sucuri::SucuriProvider,
+    vercel::VercelProvider, Provider,
 };
 use crate::registry::ProviderRegistry;
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
@@ -36,6 +37,8 @@ impl SimpleCliApp {
         registry.register_provider(Provider::Imperva(ImpervaProvider::new()))?;
         registry.register_provider(Provider::ModSecurity(ModSecurityProvider::new()))?;
         registry.register_provider(Provider::Sucuri(SucuriProvider::new()))?;
+        registry.register_provider(Provider::Radware(RadwareProvider::new()))?;
+        registry.register_provider(Provider::FortiWeb(FortiWebProvider::new()))?;
 
         Ok(Self { registry })
     }

@@ -4,8 +4,10 @@ pub mod azure;
 pub mod cloudflare;
 pub mod f5;
 pub mod fastly;
+pub mod fortiweb;
 pub mod imperva;
 pub mod modsecurity;
+pub mod radware;
 pub mod sucuri;
 pub mod vercel;
 
@@ -25,6 +27,8 @@ pub enum Provider {
     Imperva(imperva::ImpervaProvider),
     ModSecurity(modsecurity::ModSecurityProvider),
     Sucuri(sucuri::SucuriProvider),
+    Radware(radware::RadwareProvider),
+    FortiWeb(fortiweb::FortiWebProvider),
 }
 
 impl Provider {
@@ -40,6 +44,8 @@ impl Provider {
             Provider::Imperva(p) => p.name(),
             Provider::ModSecurity(p) => p.name(),
             Provider::Sucuri(p) => p.name(),
+            Provider::Radware(p) => p.name(),
+            Provider::FortiWeb(p) => p.name(),
         }
     }
 
@@ -55,6 +61,8 @@ impl Provider {
             Provider::Imperva(p) => p.version(),
             Provider::ModSecurity(p) => p.version(),
             Provider::Sucuri(p) => p.version(),
+            Provider::Radware(p) => p.version(),
+            Provider::FortiWeb(p) => p.version(),
         }
     }
 
@@ -70,6 +78,8 @@ impl Provider {
             Provider::Imperva(p) => p.description(),
             Provider::ModSecurity(p) => p.description(),
             Provider::Sucuri(p) => p.description(),
+            Provider::Radware(p) => p.description(),
+            Provider::FortiWeb(p) => p.description(),
         }
     }
 
@@ -85,6 +95,8 @@ impl Provider {
             Provider::Imperva(p) => p.provider_type(),
             Provider::ModSecurity(p) => p.provider_type(),
             Provider::Sucuri(p) => p.provider_type(),
+            Provider::Radware(p) => p.provider_type(),
+            Provider::FortiWeb(p) => p.provider_type(),
         }
     }
 
@@ -100,6 +112,8 @@ impl Provider {
             Provider::Imperva(p) => p.confidence_base(),
             Provider::ModSecurity(p) => p.confidence_base(),
             Provider::Sucuri(p) => p.confidence_base(),
+            Provider::Radware(p) => p.confidence_base(),
+            Provider::FortiWeb(p) => p.confidence_base(),
         }
     }
 
@@ -115,6 +129,8 @@ impl Provider {
             Provider::Imperva(p) => p.priority(),
             Provider::ModSecurity(p) => p.priority(),
             Provider::Sucuri(p) => p.priority(),
+            Provider::Radware(p) => p.priority(),
+            Provider::FortiWeb(p) => p.priority(),
         }
     }
 
@@ -130,6 +146,8 @@ impl Provider {
             Provider::Imperva(p) => p.enabled(),
             Provider::ModSecurity(p) => p.enabled(),
             Provider::Sucuri(p) => p.enabled(),
+            Provider::Radware(p) => p.enabled(),
+            Provider::FortiWeb(p) => p.enabled(),
         }
     }
 
@@ -145,6 +163,8 @@ impl Provider {
             Provider::Imperva(p) => p.detect(context).await,
             Provider::ModSecurity(p) => p.detect(context).await,
             Provider::Sucuri(p) => p.detect(context).await,
+            Provider::Radware(p) => p.detect(context).await,
+            Provider::FortiWeb(p) => p.detect(context).await,
         }
     }
 
@@ -163,6 +183,8 @@ impl Provider {
             Provider::Imperva(p) => p.passive_detect(response).await,
             Provider::ModSecurity(p) => p.passive_detect(response).await,
             Provider::Sucuri(p) => p.passive_detect(response).await,
+            Provider::Radware(p) => p.passive_detect(response).await,
+            Provider::FortiWeb(p) => p.passive_detect(response).await,
         }
     }
 
@@ -178,6 +200,8 @@ impl Provider {
             Provider::Imperva(p) => p.active_detect(client, url).await,
             Provider::ModSecurity(p) => p.active_detect(client, url).await,
             Provider::Sucuri(p) => p.active_detect(client, url).await,
+            Provider::Radware(p) => p.active_detect(client, url).await,
+            Provider::FortiWeb(p) => p.active_detect(client, url).await,
         }
     }
 }
