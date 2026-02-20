@@ -1,15 +1,15 @@
 //! WAF Mode Detection Engine
-//! 
+//!
 //! This module implements active probing to determine WAF behavior:
 //! - Blocking Mode: WAF actively blocks malicious requests
 //! - Monitoring Mode: WAF logs but allows requests through
 //! - Mixed Mode: WAF blocks some but not all malicious requests
 
+use crate::http::HttpClient;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
-use crate::http::HttpClient;
 
 /// WAF operational mode
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -47,6 +47,13 @@ pub enum PayloadType {
     FileUpload,
     ScannerDetection,
     Enumeration,
+    HttpRequestSmuggling,
+    GraphQLInjection,
+    SSTI,
+    PrototypePollution,
+    SSRF,
+    Log4Shell,
+    WebSocketInjection,
 }
 
 impl std::fmt::Display for PayloadType {
@@ -61,6 +68,13 @@ impl std::fmt::Display for PayloadType {
             PayloadType::FileUpload => write!(f, "File Upload"),
             PayloadType::ScannerDetection => write!(f, "Scanner Detection"),
             PayloadType::Enumeration => write!(f, "Enumeration"),
+            PayloadType::HttpRequestSmuggling => write!(f, "HTTP Request Smuggling"),
+            PayloadType::GraphQLInjection => write!(f, "GraphQL Injection"),
+            PayloadType::SSTI => write!(f, "Server-Side Template Injection"),
+            PayloadType::PrototypePollution => write!(f, "Prototype Pollution"),
+            PayloadType::SSRF => write!(f, "Server-Side Request Forgery"),
+            PayloadType::Log4Shell => write!(f, "Log4Shell"),
+            PayloadType::WebSocketInjection => write!(f, "WebSocket Injection"),
         }
     }
 }
@@ -94,7 +108,10 @@ pub struct WafModeDetector {
 
 impl WafModeDetector {
     pub fn new() -> Self {
-        let http_client = HttpClient::new().expect("Failed to create HTTP client");
+        let http_client = HttpClient::new().unwrap_or_else(|err| {
+            eprintln!("⚠️  Failed to initialize HTTP client: {err}. Falling back to defaults.");
+            HttpClient::default()
+        });
         let payloads = Self::initialize_payloads();
 
         Self {
@@ -108,78 +125,111 @@ impl WafModeDetector {
         let mut payloads = HashMap::new();
 
         // XSS Payloads
-        payloads.insert(PayloadType::XssBasic, vec![
-            "<script>alert('XSS')</script>".to_string(),
-            "<img src=x onerror=alert('XSS')>".to_string(),
-            "javascript:alert('XSS')".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::XssBasic,
+            vec![
+                "<script>alert('XSS')</script>".to_string(),
+                "<img src=x onerror=alert('XSS')>".to_string(),
+                "javascript:alert('XSS')".to_string(),
+            ],
+        );
 
-        payloads.insert(PayloadType::XssAdvanced, vec![
-            "<svg onload=alert('XSS')>".to_string(),
-            "';alert('XSS');//".to_string(),
-            "\"><script>alert('XSS')</script>".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::XssAdvanced,
+            vec![
+                "<svg onload=alert('XSS')>".to_string(),
+                "';alert('XSS');//".to_string(),
+                "\"><script>alert('XSS')</script>".to_string(),
+            ],
+        );
 
         // SQL Injection Payloads
-        payloads.insert(PayloadType::SqlInjectionBasic, vec![
-            "' OR '1'='1".to_string(),
-            "'; DROP TABLE users; --".to_string(),
-            "1' UNION SELECT NULL,NULL,NULL--".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::SqlInjectionBasic,
+            vec![
+                "' OR '1'='1".to_string(),
+                "'; DROP TABLE users; --".to_string(),
+                "1' UNION SELECT NULL,NULL,NULL--".to_string(),
+            ],
+        );
 
-        payloads.insert(PayloadType::SqlInjectionAdvanced, vec![
-            "1' AND (SELECT COUNT(*) FROM information_schema.tables)>0--".to_string(),
-            "'; WAITFOR DELAY '00:00:05'--".to_string(),
-            "' OR 1=1 LIMIT 1 OFFSET 0--".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::SqlInjectionAdvanced,
+            vec![
+                "1' AND (SELECT COUNT(*) FROM information_schema.tables)>0--".to_string(),
+                "'; WAITFOR DELAY '00:00:05'--".to_string(),
+                "' OR 1=1 LIMIT 1 OFFSET 0--".to_string(),
+            ],
+        );
 
         // Path Traversal
-        payloads.insert(PayloadType::PathTraversal, vec![
-            "../../../etc/passwd".to_string(),
-            "..\\..\\..\\windows\\system32\\drivers\\etc\\hosts".to_string(),
-            "....//....//....//etc/passwd".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::PathTraversal,
+            vec![
+                "../../../etc/passwd".to_string(),
+                "..\\..\\..\\windows\\system32\\drivers\\etc\\hosts".to_string(),
+                "....//....//....//etc/passwd".to_string(),
+            ],
+        );
 
         // Command Injection
-        payloads.insert(PayloadType::CommandInjection, vec![
-            "; cat /etc/passwd".to_string(),
-            "| whoami".to_string(),
-            "`id`".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::CommandInjection,
+            vec![
+                "; cat /etc/passwd".to_string(),
+                "| whoami".to_string(),
+                "`id`".to_string(),
+            ],
+        );
 
         // File Upload
-        payloads.insert(PayloadType::FileUpload, vec![
-            "shell.php".to_string(),
-            "test.php%00.jpg".to_string(),
-            "../../../shell.php".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::FileUpload,
+            vec![
+                "shell.php".to_string(),
+                "test.php%00.jpg".to_string(),
+                "../../../shell.php".to_string(),
+            ],
+        );
 
         // Scanner Detection
-        payloads.insert(PayloadType::ScannerDetection, vec![
-            "sqlmap".to_string(),
-            "nikto".to_string(),
-            "nessus".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::ScannerDetection,
+            vec![
+                "sqlmap".to_string(),
+                "nikto".to_string(),
+                "nessus".to_string(),
+            ],
+        );
 
         // Enumeration
-        payloads.insert(PayloadType::Enumeration, vec![
-            "admin".to_string(),
-            "administrator".to_string(),
-            "config.php".to_string(),
-        ]);
+        payloads.insert(
+            PayloadType::Enumeration,
+            vec![
+                "admin".to_string(),
+                "administrator".to_string(),
+                "config.php".to_string(),
+            ],
+        );
 
         payloads
     }
 
     /// Detect WAF mode by sending test payloads
-    pub async fn detect_mode(&self, url: &str, custom_headers: Option<HashMap<String, String>>) -> Result<WafModeResult> {
+    pub async fn detect_mode(
+        &self,
+        url: &str,
+        custom_headers: Option<HashMap<String, String>>,
+    ) -> Result<WafModeResult> {
         let start_time = Instant::now();
         let mut test_results = Vec::new();
 
         // Test each payload type
         for (payload_type, payloads) in &self.payloads {
             for payload in payloads {
-                let result = self.test_payload(url, payload_type.clone(), payload, &custom_headers).await?;
+                let result = self
+                    .test_payload(url, payload_type.clone(), payload, &custom_headers)
+                    .await?;
                 test_results.push(result);
             }
         }
@@ -209,7 +259,7 @@ impl WafModeDetector {
 
         // URL encode the payload
         let encoded_payload = urlencoding::encode(payload);
-        let test_url = format!("{}?test={}", base_url, encoded_payload);
+        let test_url = format!("{base_url}?test={encoded_payload}");
 
         let response = self.http_client.get(&test_url).await?;
         let response_time = start_time.elapsed();
@@ -228,7 +278,11 @@ impl WafModeDetector {
     }
 
     /// Analyze HTTP response to determine if request was blocked
-    fn analyze_response(&self, response: &crate::http::HttpResponse, payload: &str) -> (bool, Vec<String>) {
+    fn analyze_response(
+        &self,
+        response: &crate::http::HttpResponse,
+        payload: &str,
+    ) -> (bool, Vec<String>) {
         let mut evidence = Vec::new();
         let mut blocked = false;
 
@@ -246,28 +300,37 @@ impl WafModeDetector {
             let name_lower = name.to_lowercase();
             let value_lower = value.to_lowercase();
 
-            if name_lower.contains("x-blocked") || 
-               name_lower.contains("x-denied") ||
-               value_lower.contains("blocked") ||
-               value_lower.contains("denied") ||
-               value_lower.contains("forbidden") {
+            if name_lower.contains("x-blocked")
+                || name_lower.contains("x-denied")
+                || value_lower.contains("blocked")
+                || value_lower.contains("denied")
+                || value_lower.contains("forbidden")
+            {
                 blocked = true;
-                evidence.push(format!("Blocking header: {}: {}", name, value));
+                evidence.push(format!("Blocking header: {name}: {value}"));
             }
         }
 
         // Check response body for blocking indicators
         let body_lower = response.body.to_lowercase();
         let blocking_keywords = [
-            "access denied", "blocked", "forbidden", "not allowed",
-            "security violation", "malicious request", "attack detected",
-            "waf", "firewall", "protection", "security policy"
+            "access denied",
+            "blocked",
+            "forbidden",
+            "not allowed",
+            "security violation",
+            "malicious request",
+            "attack detected",
+            "waf",
+            "firewall",
+            "protection",
+            "security policy",
         ];
 
         for keyword in &blocking_keywords {
             if body_lower.contains(keyword) {
                 blocked = true;
-                evidence.push(format!("Blocking keyword in body: {}", keyword));
+                evidence.push(format!("Blocking keyword in body: {keyword}"));
                 break;
             }
         }
@@ -298,9 +361,11 @@ impl WafModeDetector {
             _ => {
                 // Check if any responses indicate monitoring
                 let has_monitoring_indicators = results.iter().any(|r| {
-                    r.evidence.iter().any(|e| e.contains("monitoring") || e.contains("reflected"))
+                    r.evidence
+                        .iter()
+                        .any(|e| e.contains("monitoring") || e.contains("reflected"))
                 });
-                
+
                 if has_monitoring_indicators {
                     (WafMode::Monitoring, 0.7)
                 } else {
@@ -328,13 +393,15 @@ mod tests {
         let detector = WafModeDetector::new();
         assert!(!detector.payloads.is_empty());
         assert!(detector.payloads.contains_key(&PayloadType::XssBasic));
-        assert!(detector.payloads.contains_key(&PayloadType::SqlInjectionBasic));
+        assert!(detector
+            .payloads
+            .contains_key(&PayloadType::SqlInjectionBasic));
     }
 
     #[test]
     fn test_mode_analysis() {
         let detector = WafModeDetector::new();
-        
+
         // Test blocking mode
         let blocking_results = vec![
             ProbeResult {
@@ -354,7 +421,7 @@ mod tests {
                 response_time_ms: 100,
             },
         ];
-        
+
         let (mode, confidence) = detector.analyze_results(&blocking_results);
         assert_eq!(mode, WafMode::Blocking);
         assert!(confidence > 0.8);

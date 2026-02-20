@@ -1,9 +1,9 @@
 //! Vercel CDN Detection Provider
 
-use crate::{DetectionProvider, DetectionContext, Evidence, ProviderType, MethodType};
+use crate::{DetectionContext, DetectionProvider, Evidence, MethodType, ProviderType};
+use anyhow::Result;
 use regex::Regex;
 use std::sync::OnceLock;
-use anyhow::Result;
 
 /// Vercel CDN detection provider
 #[derive(Debug, Clone)]
@@ -46,7 +46,7 @@ impl VercelProvider {
                     confidence: 0.98,
                     description: "Vercel server header detected".to_string(),
                     raw_data: server.clone(),
-                    signature_matched: "vercel-server-pattern".to_string(),
+                    signature_matched: "vercel-server-header".to_string(),
                 });
             }
         }
@@ -59,7 +59,7 @@ impl VercelProvider {
                     confidence: 0.95,
                     description: "Vercel request ID header detected".to_string(),
                     raw_data: vercel_id.clone(),
-                    signature_matched: "vercel-id-pattern".to_string(),
+                    signature_matched: "x-vercel-id-header".to_string(),
                 });
             }
         }
@@ -127,7 +127,7 @@ impl VercelProvider {
                 evidence.push(Evidence {
                     method_type: MethodType::Header(header_name.clone()),
                     confidence: 0.65,
-                    description: format!("Vercel domain reference in {} header", header_name),
+                    description: format!("Vercel domain reference in {header_name} header"),
                     raw_data: header_value.clone(),
                     signature_matched: "vercel-domain-pattern".to_string(),
                 });
@@ -141,20 +141,17 @@ impl VercelProvider {
         let mut evidence = Vec::new();
 
         // Vercel-specific status code patterns
-        match response.status {
-            404 => {
-                // Check if it's a Vercel 404 with specific headers
-                if response.headers.get("x-vercel-id").is_some() {
-                    evidence.push(Evidence {
-                        method_type: MethodType::StatusCode(404),
-                        confidence: 0.75,
-                        description: "Vercel 404 Not Found response".to_string(),
-                        raw_data: "404".to_string(),
-                        signature_matched: "vercel-404-pattern".to_string(),
-                    });
-                }
+        if response.status == 404 {
+            // Check if it's a Vercel 404 with specific headers
+            if response.headers.contains_key("x-vercel-id") {
+                evidence.push(Evidence {
+                    method_type: MethodType::StatusCode(404),
+                    confidence: 0.75,
+                    description: "Vercel 404 Not Found response".to_string(),
+                    raw_data: "404".to_string(),
+                    signature_matched: "vercel-404-pattern".to_string(),
+                });
             }
-            _ => {}
         }
 
         evidence
@@ -176,7 +173,7 @@ impl DetectionProvider for VercelProvider {
     }
 
     fn provider_type(&self) -> ProviderType {
-        ProviderType::CDN  // Vercel provides CDN/Edge services, not traditional WAF
+        ProviderType::CDN // Vercel provides CDN/Edge services, not traditional WAF
     }
 
     fn confidence_base(&self) -> f64 {
@@ -209,16 +206,18 @@ impl DetectionProvider for VercelProvider {
         Ok(evidence)
     }
 
-    async fn active_detect(&self, _client: &crate::http::HttpClient, _url: &str) -> Result<Vec<Evidence>> {
+    async fn active_detect(
+        &self,
+        _client: &crate::http::HttpClient,
+        _url: &str,
+    ) -> Result<Vec<Evidence>> {
         // Vercel doesn't require active detection - all evidence is in headers
         Ok(vec![])
     }
-
-
 }
 
 impl Default for VercelProvider {
     fn default() -> Self {
         Self::new()
     }
-} 
+}

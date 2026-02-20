@@ -17,6 +17,10 @@ This document contains information for developers who want to contribute to the 
 │                 Detection Providers                         │
 ├─────────────────┬─────────────────┬─────────────────────────┤
 │ CloudFlare      │  AWS WAF        │  Akamai                 │
+├─────────────────┼─────────────────┼─────────────────────────┤
+│ Fastly          │  Vercel         │  Azure                  │
+├─────────────────┼─────────────────┼─────────────────────────┤
+│ F5 BIG-IP       │                 │                         │
 └─────────────────┴─────────────────┴─────────────────────────┘
 ```
 

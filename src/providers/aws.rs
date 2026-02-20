@@ -1,9 +1,9 @@
 //! AWS WAF/CloudFront Detection Provider
 
-use crate::{DetectionProvider, DetectionContext, Evidence, ProviderType, MethodType};
+use crate::{DetectionContext, DetectionProvider, Evidence, MethodType, ProviderType};
+use anyhow::Result;
 use regex::Regex;
 use std::sync::OnceLock;
-use anyhow::Result;
 
 /// AWS WAF/CloudFront detection provider
 #[derive(Debug, Clone)]
@@ -27,12 +27,19 @@ impl AwsProvider {
     // Pre-compiled regex patterns for performance
     fn aws_request_id_pattern() -> &'static Regex {
         static PATTERN: OnceLock<Regex> = OnceLock::new();
-        PATTERN.get_or_init(|| Regex::new(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$").unwrap())
+        PATTERN.get_or_init(|| {
+            Regex::new(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$").unwrap()
+        })
     }
 
     fn cloudfront_id_pattern() -> &'static Regex {
         static PATTERN: OnceLock<Regex> = OnceLock::new();
-        PATTERN.get_or_init(|| Regex::new(r"^[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}$").unwrap())
+        PATTERN.get_or_init(|| {
+            Regex::new(
+                r"^[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}$",
+            )
+            .unwrap()
+        })
     }
 
     fn cloudfront_pop_pattern() -> &'static Regex {
@@ -42,12 +49,18 @@ impl AwsProvider {
 
     fn cloudfront_via_pattern() -> &'static Regex {
         static PATTERN: OnceLock<Regex> = OnceLock::new();
-        PATTERN.get_or_init(|| Regex::new(r"(?i)(cloudfront|1\.1 [a-f0-9]+ \(CloudFront\))").unwrap())
+        PATTERN
+            .get_or_init(|| Regex::new(r"(?i)(cloudfront|1\.1 [a-f0-9]+ \(CloudFront\))").unwrap())
     }
 
     fn cloudfront_cache_pattern() -> &'static Regex {
         static PATTERN: OnceLock<Regex> = OnceLock::new();
-        PATTERN.get_or_init(|| Regex::new(r"(?i)((hit|miss|refresh_hit|error|bypass)\s+(from\s+)?cloudfront|cloudfront)").unwrap())
+        PATTERN.get_or_init(|| {
+            Regex::new(
+                r"(?i)((hit|miss|refresh_hit|error|bypass)\s+(from\s+)?cloudfront|cloudfront)",
+            )
+            .unwrap()
+        })
     }
 
     fn cloudfront_server_pattern() -> &'static Regex {
@@ -62,12 +75,18 @@ impl AwsProvider {
 
     fn aws_error_body_pattern() -> &'static Regex {
         static PATTERN: OnceLock<Regex> = OnceLock::new();
-        PATTERN.get_or_init(|| Regex::new(r"(?i)(access\s+denied|request\s+id|you\s+don't\s+have\s+permission)").unwrap())
+        PATTERN.get_or_init(|| {
+            Regex::new(r"(?i)(access\s+denied|request\s+id|you\s+don't\s+have\s+permission)")
+                .unwrap()
+        })
     }
 
     fn aws_json_error_pattern() -> &'static Regex {
         static PATTERN: OnceLock<Regex> = OnceLock::new();
-        PATTERN.get_or_init(|| Regex::new(r#"(?i)("__type"|"errortype"|"requestid"|"accessdenied|"throttling")"#).unwrap())
+        PATTERN.get_or_init(|| {
+            Regex::new(r#"(?i)("__type"|"errortype"|"requestid"|"accessdenied|"throttling")"#)
+                .unwrap()
+        })
     }
 
     async fn check_headers(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
@@ -105,7 +124,7 @@ impl AwsProvider {
                     confidence: 0.95,
                     description: "CloudFront request ID header detected".to_string(),
                     raw_data: cf_id.clone(),
-                    signature_matched: "cloudfront-id-pattern".to_string(),
+                    signature_matched: "x-amz-cf-id-header".to_string(),
                 });
             }
         }
@@ -118,7 +137,7 @@ impl AwsProvider {
                     confidence: 0.90,
                     description: "CloudFront Point of Presence header detected".to_string(),
                     raw_data: cf_pop.clone(),
-                    signature_matched: "cloudfront-pop-pattern".to_string(),
+                    signature_matched: "x-amz-cf-pop-header".to_string(),
                 });
             }
         }
@@ -131,7 +150,7 @@ impl AwsProvider {
                     confidence: 0.85,
                     description: "CloudFront via header detected".to_string(),
                     raw_data: via.clone(),
-                    signature_matched: "cloudfront-via-pattern".to_string(),
+                    signature_matched: "cloudfront-via-header".to_string(),
                 });
             }
         }
@@ -157,7 +176,7 @@ impl AwsProvider {
                     confidence: 0.85,
                     description: "CloudFront server header detected".to_string(),
                     raw_data: server.clone(),
-                    signature_matched: "cloudfront-server-pattern".to_string(),
+                    signature_matched: "cloudfront-server-header".to_string(),
                 });
             }
         }
@@ -166,11 +185,17 @@ impl AwsProvider {
         if let Some(age) = response.headers.get("age") {
             if Self::cloudfront_age_pattern().is_match(age) {
                 // Only add moderate confidence if other CloudFront indicators are present
-                let has_other_cf_indicators = response.headers.get("x-amz-cf-id").is_some() ||
-                    response.headers.get("x-amz-cf-pop").is_some() ||
-                    response.headers.get("via").map_or(false, |v| Self::cloudfront_via_pattern().is_match(v)) ||
-                    response.headers.get("x-cache").map_or(false, |c| Self::cloudfront_cache_pattern().is_match(c));
-                
+                let has_other_cf_indicators = response.headers.contains_key("x-amz-cf-id")
+                    || response.headers.contains_key("x-amz-cf-pop")
+                    || response
+                        .headers
+                        .get("via")
+                        .is_some_and(|v| Self::cloudfront_via_pattern().is_match(v))
+                    || response
+                        .headers
+                        .get("x-cache")
+                        .is_some_and(|c| Self::cloudfront_cache_pattern().is_match(c));
+
                 if has_other_cf_indicators {
                     evidence.push(Evidence {
                         method_type: MethodType::Header("age".to_string()),
@@ -199,12 +224,15 @@ impl AwsProvider {
         // Check for CloudFront specific served-by headers (more specific patterns)
         if let Some(timing) = response.headers.get("x-served-by") {
             // Must contain CloudFront-specific indicators, not just generic "cache"
-            if timing.contains("cloudfront") || 
-               (timing.contains("cache") && (
-                   response.headers.get("x-amz-cf-pop").is_some() ||
-                   response.headers.get("x-amz-cf-id").is_some() ||
-                   response.headers.get("via").map_or(false, |v| v.contains("CloudFront"))
-               )) {
+            if timing.contains("cloudfront")
+                || (timing.contains("cache")
+                    && (response.headers.contains_key("x-amz-cf-pop")
+                        || response.headers.contains_key("x-amz-cf-id")
+                        || response
+                            .headers
+                            .get("via")
+                            .is_some_and(|v| v.contains("CloudFront"))))
+            {
                 evidence.push(Evidence {
                     method_type: MethodType::Header("x-served-by".to_string()),
                     confidence: 0.75,
@@ -218,12 +246,18 @@ impl AwsProvider {
         // Check for CloudFront response timing patterns (only when CloudFront is confirmed)
         if let Some(rt) = response.headers.get("x-timer") {
             // Only match x-timer if we have other CloudFront evidence to avoid Fastly false positives
-            if rt.contains("S") && (
-                response.headers.get("x-amz-cf-pop").is_some() ||
-                response.headers.get("x-amz-cf-id").is_some() ||
-                response.headers.get("via").map_or(false, |v| v.contains("CloudFront")) ||
-                response.headers.get("server").map_or(false, |s| s.contains("CloudFront"))
-            ) {
+            if rt.contains("S")
+                && (response.headers.contains_key("x-amz-cf-pop")
+                    || response.headers.contains_key("x-amz-cf-id")
+                    || response
+                        .headers
+                        .get("via")
+                        .is_some_and(|v| v.contains("CloudFront"))
+                    || response
+                        .headers
+                        .get("server")
+                        .is_some_and(|s| s.contains("CloudFront")))
+            {
                 evidence.push(Evidence {
                     method_type: MethodType::Header("x-timer".to_string()),
                     confidence: 0.65,
@@ -253,7 +287,11 @@ impl AwsProvider {
             ("x-amz-request-id", "AWS request ID header", 0.80),
             ("x-amz-id-2", "AWS extended request ID header", 0.75),
             ("x-amz-bucket-region", "AWS S3 bucket region header", 0.75),
-            ("x-amz-server-side-encryption", "AWS S3 encryption header", 0.70),
+            (
+                "x-amz-server-side-encryption",
+                "AWS S3 encryption header",
+                0.70,
+            ),
             ("x-amz-apigw-id", "AWS API Gateway ID header", 0.85),
             ("x-amzn-trace-id", "AWS X-Ray trace ID header", 0.80),
         ];
@@ -265,7 +303,7 @@ impl AwsProvider {
                     confidence,
                     description: description.to_string(),
                     raw_data: value.clone(),
-                    signature_matched: format!("{}-pattern", header_name),
+                    signature_matched: format!("{header_name}-pattern"),
                 });
             }
         }
@@ -285,14 +323,14 @@ impl AwsProvider {
 
         // More aggressive CloudFront detection - look for common CDN patterns
         // that might indicate CloudFront even without explicit headers
-        
+
         // Check for ETag patterns that are common with CloudFront
         if let Some(etag) = response.headers.get("etag") {
             // CloudFront ETags often have specific patterns
             if etag.contains("-") && etag.len() > 10 {
-                let has_cf_timing = response.headers.get("age").is_some();
-                let has_cache_control = response.headers.get("cache-control").is_some();
-                
+                let has_cf_timing = response.headers.contains_key("age");
+                let has_cache_control = response.headers.contains_key("cache-control");
+
                 if has_cf_timing && has_cache_control {
                     evidence.push(Evidence {
                         method_type: MethodType::Header("etag".to_string()),
@@ -307,14 +345,20 @@ impl AwsProvider {
 
         // Check for cache-control patterns ONLY when we have confirmed CloudFront evidence
         if let Some(cache_control) = response.headers.get("cache-control") {
-            if cache_control.contains("max-age") && response.headers.get("age").is_some() {
+            if cache_control.contains("max-age") && response.headers.contains_key("age") {
                 // Only match if we have specific CloudFront indicators to avoid false positives
-                let has_cloudfront_evidence = response.headers.get("x-amz-cf-pop").is_some() ||
-                    response.headers.get("x-amz-cf-id").is_some() ||
-                    response.headers.get("via").map_or(false, |v| v.contains("CloudFront")) ||
-                    response.headers.get("server").map_or(false, |s| s.contains("CloudFront")) ||
-                    response.headers.get("x-amzn-requestid").is_some();
-                
+                let has_cloudfront_evidence = response.headers.contains_key("x-amz-cf-pop")
+                    || response.headers.contains_key("x-amz-cf-id")
+                    || response
+                        .headers
+                        .get("via")
+                        .is_some_and(|v| v.contains("CloudFront"))
+                    || response
+                        .headers
+                        .get("server")
+                        .is_some_and(|s| s.contains("CloudFront"))
+                    || response.headers.contains_key("x-amzn-requestid");
+
                 if has_cloudfront_evidence {
                     evidence.push(Evidence {
                         method_type: MethodType::Header("cache-control".to_string()),
@@ -339,8 +383,6 @@ impl AwsProvider {
                 });
             }
         }
-
-
 
         evidence
     }
@@ -379,10 +421,11 @@ impl AwsProvider {
         match response.status {
             403 => {
                 // Check if it's an AWS 403 (has AWS headers or signatures)
-                if response.headers.get("x-amzn-requestid").is_some() || 
-                   response.headers.get("x-amzn-errortype").is_some() ||
-                   response.headers.get("x-amz-cf-id").is_some() ||
-                   Self::aws_error_body_pattern().is_match(&response.body) {
+                if response.headers.contains_key("x-amzn-requestid")
+                    || response.headers.contains_key("x-amzn-errortype")
+                    || response.headers.contains_key("x-amz-cf-id")
+                    || Self::aws_error_body_pattern().is_match(&response.body)
+                {
                     evidence.push(Evidence {
                         method_type: MethodType::StatusCode(403),
                         confidence: 0.75,
@@ -394,8 +437,9 @@ impl AwsProvider {
             }
             429 => {
                 // AWS rate limiting
-                if response.headers.get("x-amzn-requestid").is_some() || 
-                   response.headers.get("x-amz-cf-id").is_some() {
+                if response.headers.contains_key("x-amzn-requestid")
+                    || response.headers.contains_key("x-amz-cf-id")
+                {
                     evidence.push(Evidence {
                         method_type: MethodType::StatusCode(429),
                         confidence: 0.80,
@@ -407,8 +451,9 @@ impl AwsProvider {
             }
             503 => {
                 // AWS service unavailable
-                if response.headers.get("x-amzn-requestid").is_some() || 
-                   response.headers.get("x-amz-cf-id").is_some() {
+                if response.headers.contains_key("x-amzn-requestid")
+                    || response.headers.contains_key("x-amz-cf-id")
+                {
                     evidence.push(Evidence {
                         method_type: MethodType::StatusCode(503),
                         confidence: 0.70,
@@ -427,16 +472,14 @@ impl AwsProvider {
     /// Diagnostic method to analyze headers and provide detailed detection information
     pub fn diagnose_response(&self, response: &crate::http::HttpResponse) -> String {
         let mut report = String::new();
-        report.push_str(&format!("=== AWS/CloudFront Diagnostic Report ===\n"));
+        report.push_str("=== AWS/CloudFront Diagnostic Report ===\n");
         report.push_str(&format!("Status Code: {}\n", response.status));
         report.push_str(&format!("Total Headers: {}\n\n", response.headers.len()));
-        
+
         // Check for all AWS-related headers
         report.push_str("=== AWS Header Analysis ===\n");
-        let aws_header_patterns = [
-            "x-amz", "x-amzn", "cloudfront", "amazon", "aws"
-        ];
-        
+        let aws_header_patterns = ["x-amz", "x-amzn", "cloudfront", "amazon", "aws"];
+
         let mut found_aws_headers = Vec::new();
         for (key, value) in &response.headers {
             let key_lower = key.to_lowercase();
@@ -447,17 +490,17 @@ impl AwsProvider {
                 }
             }
         }
-        
+
         if found_aws_headers.is_empty() {
             report.push_str("❌ No obvious AWS/CloudFront headers found\n\n");
         } else {
             report.push_str("✅ Found AWS-related headers:\n");
             for (key, value) in found_aws_headers {
-                report.push_str(&format!("  {}: {}\n", key, value));
+                report.push_str(&format!("  {key}: {value}\n"));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
-        
+
         // Check standard CloudFront headers
         report.push_str("=== CloudFront Header Checks ===\n");
         let cf_checks = [
@@ -468,51 +511,54 @@ impl AwsProvider {
             ("server", "Server header"),
             ("age", "Cache age"),
         ];
-        
+
         for (header, description) in cf_checks {
             if let Some(value) = response.headers.get(header) {
-                report.push_str(&format!("✅ {}: {} = '{}'\n", header, description, value));
+                report.push_str(&format!("✅ {header}: {description} = '{value}'\n"));
             } else {
-                report.push_str(&format!("❌ {}: {} = NOT FOUND\n", header, description));
+                report.push_str(&format!("❌ {header}: {description} = NOT FOUND\n"));
             }
         }
-        
+
         // Check Via header specifically
         if let Some(via) = response.headers.get("via") {
-            report.push_str(&format!("\n=== Via Header Analysis ===\n"));
-            report.push_str(&format!("Via value: '{}'\n", via));
+            report.push_str("\n=== Via Header Analysis ===\n");
+            report.push_str(&format!("Via value: '{via}'\n"));
             if Self::cloudfront_via_pattern().is_match(via) {
                 report.push_str("✅ Via header matches CloudFront pattern\n");
             } else {
                 report.push_str("❌ Via header does NOT match CloudFront pattern\n");
             }
         }
-        
+
         // Check all headers for anything CloudFront-y
         report.push_str("\n=== All Headers Scan ===\n");
         let mut cloudfront_hints = Vec::new();
         for (key, value) in &response.headers {
-            let combined = format!("{}: {}", key, value).to_lowercase();
-            if combined.contains("cloudfront") || combined.contains("amazon") || 
-               combined.contains("aws") || combined.contains("amz") {
+            let combined = format!("{key}: {value}").to_lowercase();
+            if combined.contains("cloudfront")
+                || combined.contains("amazon")
+                || combined.contains("aws")
+                || combined.contains("amz")
+            {
                 cloudfront_hints.push((key.clone(), value.clone()));
             }
         }
-        
+
         if cloudfront_hints.is_empty() {
             report.push_str("❌ No CloudFront hints in any headers\n");
         } else {
             report.push_str("✅ Found potential CloudFront hints:\n");
             for (key, value) in cloudfront_hints {
-                report.push_str(&format!("  {}: {}\n", key, value));
+                report.push_str(&format!("  {key}: {value}\n"));
             }
         }
-        
+
         report.push_str("\n=== All Response Headers ===\n");
         for (key, value) in &response.headers {
-            report.push_str(&format!("{}: {}\n", key, value));
+            report.push_str(&format!("{key}: {value}\n"));
         }
-        
+
         report
     }
 }
@@ -569,22 +615,26 @@ impl DetectionProvider for AwsProvider {
 
     async fn passive_detect(&self, response: &crate::http::HttpResponse) -> Result<Vec<Evidence>> {
         let mut all_evidence = Vec::new();
-        
+
         // Check headers
         all_evidence.extend(self.check_headers(response).await);
-        
+
         // Check body patterns
         all_evidence.extend(self.check_body_patterns(response).await);
-        
+
         // Check status codes
         all_evidence.extend(self.check_status_codes(response).await);
-        
+
         Ok(all_evidence)
     }
 
-    async fn active_detect(&self, client: &crate::http::HttpClient, url: &str) -> Result<Vec<Evidence>> {
+    async fn active_detect(
+        &self,
+        client: &crate::http::HttpClient,
+        url: &str,
+    ) -> Result<Vec<Evidence>> {
         let mut evidence = Vec::new();
-        
+
         // Try to trigger AWS WAF with suspicious requests
         let test_paths = [
             "/.aws/config",
@@ -592,16 +642,18 @@ impl DetectionProvider for AwsProvider {
             "/../etc/passwd",
             "/api/v1/admin/users",
         ];
-        
+
         for path in test_paths {
             let test_url = format!("{url}{path}");
             if let Ok(response) = client.get(&test_url).await {
-                if (response.status == 403 || response.status == 429) && 
-                   (response.headers.get("x-amzn-requestid").is_some() || response.headers.contains_key("x-amz-cf-id")) {
+                if (response.status == 403 || response.status == 429)
+                    && (response.headers.contains_key("x-amzn-requestid")
+                        || response.headers.contains_key("x-amz-cf-id"))
+                {
                     evidence.push(Evidence {
                         method_type: MethodType::Body(format!("test-path-{path}")),
                         confidence: 0.70,
-                        description: format!("AWS WAF blocked test path: {}", path),
+                        description: format!("AWS WAF blocked test path: {path}"),
                         raw_data: response.status.to_string(),
                         signature_matched: "aws-active-detection".to_string(),
                     });
@@ -609,7 +661,7 @@ impl DetectionProvider for AwsProvider {
                 }
             }
         }
-        
+
         Ok(evidence)
     }
 }
@@ -618,4 +670,4 @@ impl Default for AwsProvider {
     fn default() -> Self {
         Self::new()
     }
-} 
+}

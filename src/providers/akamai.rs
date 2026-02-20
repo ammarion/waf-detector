@@ -1,9 +1,9 @@
 //! Akamai WAF/CDN Detection Provider
 
-use crate::{DetectionProvider, DetectionContext, Evidence, ProviderType, MethodType};
+use crate::{DetectionContext, DetectionProvider, Evidence, MethodType, ProviderType};
+use anyhow::Result;
 use regex::Regex;
 use std::sync::OnceLock;
-use anyhow::Result;
 
 /// Akamai detection provider
 #[derive(Debug, Clone)]
@@ -19,7 +19,9 @@ impl AkamaiProvider {
         Self {
             name: "Akamai".to_string(),
             version: "1.0.0".to_string(),
-            description: "Akamai CDN/WAF detection provider - one of the largest CDN networks globally".to_string(),
+            description:
+                "Akamai CDN/WAF detection provider - one of the largest CDN networks globally"
+                    .to_string(),
             enabled: true,
         }
     }
@@ -73,7 +75,7 @@ impl AkamaiProvider {
                     evidence.push(Evidence {
                         method_type: MethodType::Header(cache_header.to_string()),
                         confidence: 0.90,
-                        description: format!("Akamai {} header detected", cache_header),
+                        description: format!("Akamai {cache_header} header detected"),
                         raw_data: cache_value.clone(),
                         signature_matched: "akamai-cache-pattern".to_string(),
                     });
@@ -95,9 +97,9 @@ impl AkamaiProvider {
                 evidence.push(Evidence {
                     method_type: MethodType::Header(header_name.clone()),
                     confidence,
-                    description: format!("Akamai {} header detected", header_name),
+                    description: format!("Akamai {header_name} header detected"),
                     raw_data: header_value.clone(),
-                    signature_matched: "akamai-x-header-pattern".to_string(),
+                    signature_matched: "x-akamai-header".to_string(),
                 });
             }
         }
@@ -109,13 +111,13 @@ impl AkamaiProvider {
         ];
 
         for (header_name, description, confidence) in akamai_headers {
-            if response.headers.contains_key(header_name) {
+            if let Some(value) = response.headers.get(header_name) {
                 evidence.push(Evidence {
                     method_type: MethodType::Header(header_name.to_string()),
                     confidence,
                     description: description.to_string(),
-                    raw_data: response.headers.get(header_name).unwrap().clone(),
-                    signature_matched: format!("{}-pattern", header_name),
+                    raw_data: value.clone(),
+                    signature_matched: format!("{header_name}-pattern"),
                 });
             }
         }
@@ -168,8 +170,12 @@ impl AkamaiProvider {
         match response.status {
             403 => {
                 // Check if it's an Akamai 403
-                if response.headers.iter().any(|(k, _)| k.starts_with("x-akamai-")) ||
-                   Self::akamai_reference_pattern().is_match(&response.body) {
+                if response
+                    .headers
+                    .iter()
+                    .any(|(k, _)| k.starts_with("x-akamai-"))
+                    || Self::akamai_reference_pattern().is_match(&response.body)
+                {
                     evidence.push(Evidence {
                         method_type: MethodType::StatusCode(403),
                         confidence: 0.80,

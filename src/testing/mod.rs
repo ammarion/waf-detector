@@ -1,11 +1,6 @@
 pub mod validation_framework;
 
 pub use validation_framework::{
-    ValidationFramework,
-    GroundTruth,
-    ValidationResult,
-    TestOutcome,
-    ValidationReport,
-    ConfidenceAnalysis,
-    ProviderMetrics
-}; 
+    ConfidenceAnalysis, GroundTruth, ProviderMetrics, TestOutcome, ValidationFramework,
+    ValidationReport, ValidationResult,
+};

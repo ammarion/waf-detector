@@ -1,10 +1,18 @@
-pub mod cloudflare;
 pub mod akamai;
 pub mod aws;
+pub mod azure;
+pub mod cloudflare;
+pub mod error_profiles;
+pub mod f5;
 pub mod fastly;
+pub mod fortiweb;
+pub mod imperva;
+pub mod modsecurity;
+pub mod radware;
+pub mod sucuri;
 pub mod vercel;
 
-use crate::{DetectionContext, Evidence, http::HttpClient, ProviderType, DetectionProvider};
+use crate::{http::HttpClient, DetectionContext, DetectionProvider, Evidence, ProviderType};
 use anyhow::Result;
 
 /// Provider enum to solve async trait object issue
@@ -15,6 +23,13 @@ pub enum Provider {
     AWS(aws::AwsProvider),
     Fastly(fastly::FastlyProvider),
     Vercel(vercel::VercelProvider),
+    Azure(azure::AzureProvider),
+    F5(f5::F5Provider),
+    Imperva(imperva::ImpervaProvider),
+    ModSecurity(modsecurity::ModSecurityProvider),
+    Sucuri(sucuri::SucuriProvider),
+    Radware(radware::RadwareProvider),
+    FortiWeb(fortiweb::FortiWebProvider),
 }
 
 impl Provider {
@@ -25,6 +40,13 @@ impl Provider {
             Provider::AWS(p) => p.name(),
             Provider::Fastly(p) => p.name(),
             Provider::Vercel(p) => p.name(),
+            Provider::Azure(p) => p.name(),
+            Provider::F5(p) => p.name(),
+            Provider::Imperva(p) => p.name(),
+            Provider::ModSecurity(p) => p.name(),
+            Provider::Sucuri(p) => p.name(),
+            Provider::Radware(p) => p.name(),
+            Provider::FortiWeb(p) => p.name(),
         }
     }
 
@@ -35,6 +57,13 @@ impl Provider {
             Provider::AWS(p) => p.version(),
             Provider::Fastly(p) => p.version(),
             Provider::Vercel(p) => p.version(),
+            Provider::Azure(p) => p.version(),
+            Provider::F5(p) => p.version(),
+            Provider::Imperva(p) => p.version(),
+            Provider::ModSecurity(p) => p.version(),
+            Provider::Sucuri(p) => p.version(),
+            Provider::Radware(p) => p.version(),
+            Provider::FortiWeb(p) => p.version(),
         }
     }
 
@@ -45,6 +74,13 @@ impl Provider {
             Provider::AWS(p) => p.description(),
             Provider::Fastly(p) => p.description(),
             Provider::Vercel(p) => p.description(),
+            Provider::Azure(p) => p.description(),
+            Provider::F5(p) => p.description(),
+            Provider::Imperva(p) => p.description(),
+            Provider::ModSecurity(p) => p.description(),
+            Provider::Sucuri(p) => p.description(),
+            Provider::Radware(p) => p.description(),
+            Provider::FortiWeb(p) => p.description(),
         }
     }
 
@@ -55,6 +91,13 @@ impl Provider {
             Provider::AWS(p) => p.provider_type(),
             Provider::Fastly(p) => p.provider_type(),
             Provider::Vercel(p) => p.provider_type(),
+            Provider::Azure(p) => p.provider_type(),
+            Provider::F5(p) => p.provider_type(),
+            Provider::Imperva(p) => p.provider_type(),
+            Provider::ModSecurity(p) => p.provider_type(),
+            Provider::Sucuri(p) => p.provider_type(),
+            Provider::Radware(p) => p.provider_type(),
+            Provider::FortiWeb(p) => p.provider_type(),
         }
     }
 
@@ -65,6 +108,13 @@ impl Provider {
             Provider::AWS(p) => p.confidence_base(),
             Provider::Fastly(p) => p.confidence_base(),
             Provider::Vercel(p) => p.confidence_base(),
+            Provider::Azure(p) => p.confidence_base(),
+            Provider::F5(p) => p.confidence_base(),
+            Provider::Imperva(p) => p.confidence_base(),
+            Provider::ModSecurity(p) => p.confidence_base(),
+            Provider::Sucuri(p) => p.confidence_base(),
+            Provider::Radware(p) => p.confidence_base(),
+            Provider::FortiWeb(p) => p.confidence_base(),
         }
     }
 
@@ -75,6 +125,13 @@ impl Provider {
             Provider::AWS(p) => p.priority(),
             Provider::Fastly(p) => p.priority(),
             Provider::Vercel(p) => p.priority(),
+            Provider::Azure(p) => p.priority(),
+            Provider::F5(p) => p.priority(),
+            Provider::Imperva(p) => p.priority(),
+            Provider::ModSecurity(p) => p.priority(),
+            Provider::Sucuri(p) => p.priority(),
+            Provider::Radware(p) => p.priority(),
+            Provider::FortiWeb(p) => p.priority(),
         }
     }
 
@@ -85,6 +142,13 @@ impl Provider {
             Provider::AWS(p) => p.enabled(),
             Provider::Fastly(p) => p.enabled(),
             Provider::Vercel(p) => p.enabled(),
+            Provider::Azure(p) => p.enabled(),
+            Provider::F5(p) => p.enabled(),
+            Provider::Imperva(p) => p.enabled(),
+            Provider::ModSecurity(p) => p.enabled(),
+            Provider::Sucuri(p) => p.enabled(),
+            Provider::Radware(p) => p.enabled(),
+            Provider::FortiWeb(p) => p.enabled(),
         }
     }
 
@@ -95,16 +159,33 @@ impl Provider {
             Provider::AWS(p) => p.detect(context).await,
             Provider::Fastly(p) => p.detect(context).await,
             Provider::Vercel(p) => p.detect(context).await,
+            Provider::Azure(p) => p.detect(context).await,
+            Provider::F5(p) => p.detect(context).await,
+            Provider::Imperva(p) => p.detect(context).await,
+            Provider::ModSecurity(p) => p.detect(context).await,
+            Provider::Sucuri(p) => p.detect(context).await,
+            Provider::Radware(p) => p.detect(context).await,
+            Provider::FortiWeb(p) => p.detect(context).await,
         }
     }
 
-    pub async fn passive_detect(&self, response: &crate::http::HttpResponse) -> Result<Vec<Evidence>> {
+    pub async fn passive_detect(
+        &self,
+        response: &crate::http::HttpResponse,
+    ) -> Result<Vec<Evidence>> {
         match self {
             Provider::CloudFlare(p) => p.passive_detect(response).await,
             Provider::Akamai(p) => p.passive_detect(response).await,
             Provider::AWS(p) => p.passive_detect(response).await,
             Provider::Fastly(p) => p.passive_detect(response).await,
             Provider::Vercel(p) => p.passive_detect(response).await,
+            Provider::Azure(p) => p.passive_detect(response).await,
+            Provider::F5(p) => p.passive_detect(response).await,
+            Provider::Imperva(p) => p.passive_detect(response).await,
+            Provider::ModSecurity(p) => p.passive_detect(response).await,
+            Provider::Sucuri(p) => p.passive_detect(response).await,
+            Provider::Radware(p) => p.passive_detect(response).await,
+            Provider::FortiWeb(p) => p.passive_detect(response).await,
         }
     }
 
@@ -115,6 +196,13 @@ impl Provider {
             Provider::AWS(p) => p.active_detect(client, url).await,
             Provider::Fastly(p) => p.active_detect(client, url).await,
             Provider::Vercel(p) => p.active_detect(client, url).await,
+            Provider::Azure(p) => p.active_detect(client, url).await,
+            Provider::F5(p) => p.active_detect(client, url).await,
+            Provider::Imperva(p) => p.active_detect(client, url).await,
+            Provider::ModSecurity(p) => p.active_detect(client, url).await,
+            Provider::Sucuri(p) => p.active_detect(client, url).await,
+            Provider::Radware(p) => p.active_detect(client, url).await,
+            Provider::FortiWeb(p) => p.active_detect(client, url).await,
         }
     }
 }

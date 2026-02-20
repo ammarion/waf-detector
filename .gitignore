@@ -1,0 +1,21 @@
+# Rust
+target/
+**/*.rs.bk
+integration_test_report.txt
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Node (just in case)
+node_modules/
+
+# Local keys or binaries
+waf-detect
+waf-detect.pub
+
+# Local docs
+PRD_*.md

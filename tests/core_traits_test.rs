@@ -10,16 +10,16 @@ async fn test_detection_provider_interface() {
         dns_info: None,
         user_agent: "test-agent".to_string(),
     };
-    
+
     let _evidence = provider.detect(&context).await.unwrap();
-    
+
     assert_eq!(provider.name(), "MockProvider");
     assert_eq!(provider.provider_type(), ProviderType::WAF);
     assert!(provider.confidence_base() > 0.0);
     assert!(provider.confidence_base() <= 1.0);
 }
 
-#[tokio::test] 
+#[tokio::test]
 async fn test_evidence_structure() {
     let evidence = Evidence {
         method_type: DetectionMethod::Header("server".to_string()),
@@ -28,11 +28,11 @@ async fn test_evidence_structure() {
         raw_data: "nginx".to_string(),
         signature_matched: "server-pattern".to_string(),
     };
-    
+
     assert_eq!(evidence.confidence, 0.9);
     assert_eq!(evidence.description, "Test evidence");
     assert_eq!(evidence.raw_data, "nginx".to_string());
-    
+
     match evidence.method_type {
         DetectionMethod::Header(ref header) => assert_eq!(header, "server"),
         _ => panic!("Expected Header detection method"),
@@ -52,14 +52,14 @@ fn test_detection_method_variants() {
     let header_method = DetectionMethod::Header("cf-ray".to_string());
     let body_method = DetectionMethod::Body("pattern".to_string());
     let status_method = DetectionMethod::StatusCode(403);
-    
+
     assert_ne!(header_method, body_method);
-    
+
     match header_method {
         DetectionMethod::Header(ref h) => assert_eq!(h, "cf-ray"),
         _ => panic!("Expected Header variant"),
     }
-    
+
     match status_method {
         DetectionMethod::StatusCode(code) => assert_eq!(code, 403),
         _ => panic!("Expected StatusCode variant"),
@@ -77,15 +77,29 @@ impl MockProvider {
 
 #[async_trait::async_trait]
 impl DetectionProvider for MockProvider {
-    fn name(&self) -> &str { "MockProvider" }
-    fn version(&self) -> &str { "1.0.0" }
-    fn description(&self) -> Option<String> { Some("Mock provider".to_string()) }
-    fn provider_type(&self) -> ProviderType { ProviderType::WAF }
-    fn confidence_base(&self) -> f64 { 0.8 }
-    fn priority(&self) -> u32 { 50 }
-    fn enabled(&self) -> bool { true }
-    
+    fn name(&self) -> &str {
+        "MockProvider"
+    }
+    fn version(&self) -> &str {
+        "1.0.0"
+    }
+    fn description(&self) -> Option<String> {
+        Some("Mock provider".to_string())
+    }
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::WAF
+    }
+    fn confidence_base(&self) -> f64 {
+        0.8
+    }
+    fn priority(&self) -> u32 {
+        50
+    }
+    fn enabled(&self) -> bool {
+        true
+    }
+
     async fn detect(&self, _context: &DetectionContext) -> anyhow::Result<Vec<Evidence>> {
         Ok(vec![])
     }
-} 
+}

@@ -1,0 +1,91 @@
+# Cross-Site Scripting (XSS) Payloads
+
+[[payloads]]
+id = "xss-001"
+name = "Basic Script Tag"
+category = "XSS"
+pattern = "<script>alert('XSS')</script>"
+description = "Simple XSS using script tags"
+risk_level = "HIGH"
+cwe_id = "CWE-79"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "xss-002"
+name = "Image onerror Event Handler"
+category = "XSS"
+pattern = "<img src=x onerror=alert('XSS')>"
+description = "XSS using event handlers"
+risk_level = "HIGH"
+cwe_id = "CWE-79"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "xss-003"
+name = "JavaScript URI"
+category = "XSS"
+pattern = "javascript:alert('XSS')"
+description = "JavaScript URI XSS"
+risk_level = "HIGH"
+cwe_id = "CWE-79"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "xss-004"
+name = "SVG-based XSS"
+category = "XSS"
+pattern = "<svg onload=alert('XSS')>"
+description = "XSS using SVG elements"
+risk_level = "HIGH"
+cwe_id = "CWE-79"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "xss-005"
+name = "Escaped Quote XSS"
+category = "XSS"
+pattern = "\"><script>alert('XSS')</script>"
+description = "XSS with quote escape"
+risk_level = "HIGH"
+cwe_id = "CWE-79"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "xss-006"
+name = "Comment-based XSS"
+category = "XSS"
+pattern = "';alert('XSS');//"
+description = "XSS using JavaScript comments"
+risk_level = "HIGH"
+cwe_id = "CWE-79"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "xss-007"
+name = "Iframe JavaScript XSS"
+category = "XSS"
+pattern = "<iframe src=javascript:alert('XSS')>"
+description = "XSS using iframe with JavaScript URI"
+risk_level = "HIGH"
+cwe_id = "CWE-79"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "xss-008"
+name = "Body onload XSS"
+category = "XSS"
+pattern = "<body onload=alert('XSS')>"
+description = "XSS using body onload event"
+risk_level = "HIGH"
+cwe_id = "CWE-79"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "xss-009"
+name = "Double Script Tag"
+category = "XSS"
+pattern = "<<SCRIPT>alert('XSS')//<</SCRIPT>"
+description = "XSS with malformed double script tags"
+risk_level = "HIGH"
+cwe_id = "CWE-79"
+owasp_category = "A03:2021"

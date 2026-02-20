@@ -1,12 +1,13 @@
 //! Payload-based probing for WAF detection
-//! 
+//!
 //! This module implements wafw00f-style detection using malicious payloads
 //! to trigger WAF responses and analyze the differences.
 
+pub mod loader;
 pub mod waf_smoke_test;
 
-use crate::{Evidence, MethodType};
 use crate::http::HttpClient;
+use crate::{Evidence, MethodType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -96,8 +97,12 @@ impl Default for PayloadConfig {
 
 impl PayloadAnalyzer {
     pub fn new() -> Self {
+        let http_client = HttpClient::new().unwrap_or_else(|err| {
+            eprintln!("⚠️  Failed to initialize HTTP client: {err}. Falling back to defaults.");
+            HttpClient::default()
+        });
         Self {
-            http_client: Arc::new(HttpClient::default()),
+            http_client: Arc::new(http_client),
             config: PayloadConfig::default(),
         }
     }
@@ -134,7 +139,7 @@ impl PayloadAnalyzer {
     /// Get baseline response for comparison
     async fn get_baseline_response(&self, url: &str) -> Result<BaselineInfo, anyhow::Error> {
         let start_time = Instant::now();
-        
+
         let response = self.http_client.get(url).await?;
         let response_time = start_time.elapsed().as_millis() as u64;
 
@@ -147,7 +152,11 @@ impl PayloadAnalyzer {
     }
 
     /// Test various payloads against the target
-    async fn test_payloads(&self, base_url: &str, baseline: &BaselineInfo) -> Result<Vec<BlockedPayload>, anyhow::Error> {
+    async fn test_payloads(
+        &self,
+        base_url: &str,
+        baseline: &BaselineInfo,
+    ) -> Result<Vec<BlockedPayload>, anyhow::Error> {
         let mut blocked_payloads = Vec::new();
         let payloads = self.get_test_payloads();
 
@@ -155,10 +164,9 @@ impl PayloadAnalyzer {
             // Add delay to avoid overwhelming the server
             tokio::time::sleep(self.config.request_delay).await;
 
-            if let Ok(blocked_payload) = self.test_single_payload(base_url, &payload, baseline).await {
-                if let Some(blocked) = blocked_payload {
-                    blocked_payloads.push(blocked);
-                }
+            if let Ok(Some(blocked)) = self.test_single_payload(base_url, &payload, baseline).await
+            {
+                blocked_payloads.push(blocked);
             }
         }
 
@@ -172,16 +180,19 @@ impl PayloadAnalyzer {
         payload: &Payload,
         baseline: &BaselineInfo,
     ) -> Result<Option<BlockedPayload>, anyhow::Error> {
-        
         // Construct URL with payload as query parameter
-        let test_url = format!("{}?test={}", base_url, urlencoding::encode(&payload.payload));
+        let test_url = format!(
+            "{}?test={}",
+            base_url,
+            urlencoding::encode(&payload.payload)
+        );
 
         match self.http_client.get(&test_url).await {
             Ok(response) => {
                 // Check if response indicates blocking
                 if self.is_blocked_response(&response, baseline, payload) {
                     let block_reason = self.determine_block_reason(&response, payload);
-                    
+
                     let blocked = BlockedPayload {
                         category: payload.category.clone(),
                         payload: payload.payload.clone(),
@@ -190,7 +201,7 @@ impl PayloadAnalyzer {
                         response_body_sample: response.body.chars().take(200).collect(),
                         block_reason,
                     };
-                    
+
                     return Ok(Some(blocked));
                 }
             }
@@ -205,7 +216,7 @@ impl PayloadAnalyzer {
                         response_body_sample: "Connection refused".to_string(),
                         block_reason: "Connection refused - likely blocked".to_string(),
                     };
-                    
+
                     return Ok(Some(blocked));
                 }
             }
@@ -222,9 +233,12 @@ impl PayloadAnalyzer {
         payload: &Payload,
     ) -> bool {
         // Status code differences
-        if response.status != baseline.status && 
-           (response.status == 403 || response.status == 406 || 
-            response.status == 429 || response.status == 503) {
+        if response.status != baseline.status
+            && (response.status == 403
+                || response.status == 406
+                || response.status == 429
+                || response.status == 503)
+        {
             return true;
         }
 
@@ -232,10 +246,14 @@ impl PayloadAnalyzer {
         for (key, value) in &response.headers {
             let key_lower = key.to_lowercase();
             let value_lower = value.to_lowercase();
-            
-            if key_lower.contains("blocked") || key_lower.contains("security") ||
-               value_lower.contains("blocked") || value_lower.contains("forbidden") ||
-               value_lower.contains("violation") || value_lower.contains("waf") {
+
+            if key_lower.contains("blocked")
+                || key_lower.contains("security")
+                || value_lower.contains("blocked")
+                || value_lower.contains("forbidden")
+                || value_lower.contains("violation")
+                || value_lower.contains("waf")
+            {
                 return true;
             }
         }
@@ -243,9 +261,16 @@ impl PayloadAnalyzer {
         // Check for blocking patterns in response body
         let body_lower = response.body.to_lowercase();
         let blocking_indicators = [
-            "access denied", "blocked", "forbidden", "security violation",
-            "malicious request", "attack detected", "suspicious activity",
-            "request blocked", "security alert", "threat detected"
+            "access denied",
+            "blocked",
+            "forbidden",
+            "security violation",
+            "malicious request",
+            "attack detected",
+            "suspicious activity",
+            "request blocked",
+            "security alert",
+            "threat detected",
         ];
 
         for indicator in &blocking_indicators {
@@ -279,7 +304,7 @@ impl PayloadAnalyzer {
         if response.status == 403 {
             return "HTTP 403 Forbidden - Access blocked".to_string();
         }
-        
+
         if response.status == 406 {
             return "HTTP 406 Not Acceptable - Request blocked".to_string();
         }
@@ -300,18 +325,20 @@ impl PayloadAnalyzer {
             return "AWS WAF block".to_string();
         }
 
-        format!("Payload blocked: {} attack detected", 
-                format!("{:?}", payload.category))
+        format!("Payload blocked: {:?} attack detected", payload.category)
     }
 
     /// Analyze blocked payloads to determine WAF type
-    fn analyze_blocked_payloads(&self, blocked_payloads: &[BlockedPayload]) -> (Option<String>, f64) {
+    fn analyze_blocked_payloads(
+        &self,
+        blocked_payloads: &[BlockedPayload],
+    ) -> (Option<String>, f64) {
         if blocked_payloads.is_empty() {
             return (None, 0.0);
         }
 
         let mut waf_indicators: HashMap<String, f64> = HashMap::new();
-        
+
         for blocked in blocked_payloads {
             // Analyze response headers for WAF signatures
             for (key, value) in &blocked.response_headers {
@@ -320,15 +347,23 @@ impl PayloadAnalyzer {
                 }
             }
 
-            // Analyze response body for WAF signatures  
+            // Analyze response body for WAF signatures
             if let Some(waf) = self.identify_waf_from_body(&blocked.response_body_sample) {
                 *waf_indicators.entry(waf).or_insert(0.0) += 0.2;
             }
 
             // Analyze status codes
             match blocked.response_status {
-                403 => *waf_indicators.entry("Generic WAF".to_string()).or_insert(0.0) += 0.1,
-                406 => *waf_indicators.entry("ModSecurity".to_string()).or_insert(0.0) += 0.15,
+                403 => {
+                    *waf_indicators
+                        .entry("Generic WAF".to_string())
+                        .or_insert(0.0) += 0.1
+                }
+                406 => {
+                    *waf_indicators
+                        .entry("ModSecurity".to_string())
+                        .or_insert(0.0) += 0.15
+                }
                 _ => {}
             }
         }
@@ -340,8 +375,10 @@ impl PayloadAnalyzer {
         }
 
         // Find the most likely WAF
-        if let Some((waf, confidence)) = waf_indicators.iter()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)) {
+        if let Some((waf, confidence)) = waf_indicators
+            .iter()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        {
             (Some(waf.clone()), *confidence)
         } else {
             (Some("Unknown WAF".to_string()), 0.3)
@@ -443,7 +480,7 @@ impl PayloadAnalyzer {
             },
         ]);
 
-        // Command Injection payloads  
+        // Command Injection payloads
         payloads.extend(vec![
             Payload {
                 category: PayloadCategory::CommandInjection,
@@ -521,27 +558,41 @@ impl PayloadAnalyzer {
             evidence.push(Evidence {
                 method_type: MethodType::Payload,
                 confidence: analysis.confidence,
-                description: format!("Payload-based detection: {} blocked {} payloads", 
-                                   waf_name, analysis.blocked_payloads.len()),
-                raw_data: format!("Blocked categories: {:?}", 
-                                analysis.blocked_payloads.iter()
-                                .map(|b| &b.category)
-                                .collect::<Vec<_>>()),
-                signature_matched: format!("payload_detection_{}", 
-                                         waf_name.to_lowercase().replace(" ", "_")),
+                description: format!(
+                    "Payload-based detection: {} blocked {} payloads",
+                    waf_name,
+                    analysis.blocked_payloads.len()
+                ),
+                raw_data: format!(
+                    "Blocked categories: {:?}",
+                    analysis
+                        .blocked_payloads
+                        .iter()
+                        .map(|b| &b.category)
+                        .collect::<Vec<_>>()
+                ),
+                signature_matched: format!(
+                    "payload_detection_{}",
+                    waf_name.to_lowercase().replace(" ", "_")
+                ),
             });
 
             // Add specific evidence for each blocked payload
             for (i, blocked) in analysis.blocked_payloads.iter().enumerate() {
-                if i < 3 { // Limit to first 3 for brevity
+                if i < 3 {
+                    // Limit to first 3 for brevity
                     evidence.push(Evidence {
                         method_type: MethodType::Payload,
                         confidence: 0.7,
-                        description: format!("Blocked {:?} payload: {}", 
-                                           blocked.category, blocked.block_reason),
-                        raw_data: format!("Status: {}, Payload: {}", 
-                                        blocked.response_status, 
-                                        blocked.payload.chars().take(50).collect::<String>()),
+                        description: format!(
+                            "Blocked {:?} payload: {}",
+                            blocked.category, blocked.block_reason
+                        ),
+                        raw_data: format!(
+                            "Status: {}, Payload: {}",
+                            blocked.response_status,
+                            blocked.payload.chars().take(50).collect::<String>()
+                        ),
                         signature_matched: format!("blocked_{:?}_payload", blocked.category)
                             .to_lowercase(),
                     });

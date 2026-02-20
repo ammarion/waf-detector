@@ -1,15 +1,20 @@
 //! Provider registry for managing detection providers
 
-use crate::providers::{Provider, ProviderMetadata};
-use crate::{DetectionContext, DetectionResult, ProviderDetection, DetectionMetadata};
 use crate::confidence::AdvancedScoring; // NEW: Import advanced scoring
-use crate::timing::{TimingAnalyzer, TimingConfig}; // NEW: Import timing analysis
 use crate::dns::DnsAnalyzer; // NEW: Import DNS analysis
+use crate::http2::H2FingerprintAnalyzer; // NEW: Import HTTP/2 fingerprinting
 use crate::payload::PayloadAnalyzer; // NEW: Import payload analysis
-use dashmap::DashMap;
-use std::sync::Arc;
-use std::collections::HashMap;
+use crate::providers::error_profiles::ErrorProfileDatabase; // NEW: Import error profiles
+use crate::providers::{Provider, ProviderMetadata};
+use crate::timing::connection_behavior::ConnectionBehaviorAnalyzer; // NEW: Import connection behavior analysis
+use crate::timing::{TimingAnalyzer, TimingConfig}; // NEW: Import timing analysis
+use crate::tls::TlsAnalyzer;
+use crate::{DetectionContext, DetectionMetadata, DetectionResult, ProviderDetection};
 use anyhow::Result;
+use dashmap::DashMap;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Registry for managing detection providers
 #[derive(Debug, Clone)]
@@ -17,9 +22,14 @@ pub struct ProviderRegistry {
     providers: Arc<DashMap<String, Provider>>,
     provider_metadata: Arc<DashMap<String, ProviderMetadata>>,
     advanced_scoring: Arc<AdvancedScoring>, // NEW: Advanced confidence scoring
-    timing_analyzer: Arc<TimingAnalyzer>, // NEW: Timing analysis
-    dns_analyzer: Arc<DnsAnalyzer>, // NEW: DNS analysis
+    timing_analyzer: Arc<TimingAnalyzer>,   // NEW: Timing analysis
+    dns_analyzer: Arc<DnsAnalyzer>,         // NEW: DNS analysis
     payload_analyzer: Arc<PayloadAnalyzer>, // NEW: Payload analysis
+    tls_analyzer: Arc<TlsAnalyzer>,
+    h2_analyzer: Arc<H2FingerprintAnalyzer>, // NEW: HTTP/2 fingerprinting
+    error_profile_db: Arc<ErrorProfileDatabase>, // NEW: Error profile analysis
+    connection_behavior_analyzer: Arc<ConnectionBehaviorAnalyzer>, // NEW: Connection behavior analysis
+    payload_analysis_enabled: Arc<AtomicBool>,
 }
 
 impl ProviderRegistry {
@@ -31,12 +41,26 @@ impl ProviderRegistry {
             timing_analyzer: Arc::new(TimingAnalyzer::new(TimingConfig::default())), // NEW: Initialize timing analysis
             dns_analyzer: Arc::new(DnsAnalyzer::new()), // NEW: Initialize DNS analysis
             payload_analyzer: Arc::new(PayloadAnalyzer::new()), // NEW: Initialize payload analysis
+            tls_analyzer: Arc::new(TlsAnalyzer::new()),
+            h2_analyzer: Arc::new(H2FingerprintAnalyzer::new()), // NEW: Initialize HTTP/2 fingerprinting
+            error_profile_db: Arc::new(ErrorProfileDatabase::new()), // NEW: Initialize error profile database
+            connection_behavior_analyzer: Arc::new(ConnectionBehaviorAnalyzer::new()), // NEW: Initialize connection behavior analyzer
+            payload_analysis_enabled: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn set_payload_analysis_enabled(&self, enabled: bool) {
+        self.payload_analysis_enabled
+            .store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn payload_analysis_enabled(&self) -> bool {
+        self.payload_analysis_enabled.load(Ordering::Relaxed)
     }
 
     pub fn register_provider(&self, provider: Provider) -> Result<()> {
         let name = provider.name().to_string();
-        
+
         if self.providers.contains_key(&name) {
             return Err(anyhow::anyhow!("Provider '{}' is already registered", name));
         }
@@ -44,7 +68,7 @@ impl ProviderRegistry {
         let metadata = ProviderMetadata::from(&provider);
         self.providers.insert(name.clone(), provider);
         self.provider_metadata.insert(name, metadata);
-        
+
         Ok(())
     }
 
@@ -55,9 +79,10 @@ impl ProviderRegistry {
     /// Detect using all registered providers - matches working binary structure
     pub async fn detect_all(&self, context: &DetectionContext) -> Result<DetectionResult> {
         let start_time = std::time::Instant::now();
-        
+
         // Filter enabled providers and sort by priority
-        let mut providers: Vec<_> = self.providers
+        let mut providers: Vec<_> = self
+            .providers
             .iter()
             .filter(|entry| {
                 self.provider_metadata
@@ -68,17 +93,18 @@ impl ProviderRegistry {
             .map(|entry| {
                 let provider = entry.value().clone();
                 let name = entry.key().clone();
-                let priority = self.provider_metadata
+                let priority = self
+                    .provider_metadata
                     .get(&name)
                     .map(|meta| meta.priority)
                     .unwrap_or(0);
                 (name, provider, priority)
             })
             .collect();
-        
+
         providers.sort_by(|a, b| b.2.cmp(&a.2)); // Sort by priority descending
 
-        let futures: Vec<_> = providers
+        let provider_futures: Vec<_> = providers
             .into_iter()
             .map(|(name, provider, _)| {
                 let context = context.clone();
@@ -86,7 +112,7 @@ impl ProviderRegistry {
                     match provider.detect(&context).await {
                         Ok(evidence) => Some((name, evidence, provider.confidence_base())),
                         Err(e) => {
-                            eprintln!("Provider '{}' failed: {}", name, e);
+                            eprintln!("Provider '{name}' failed: {e}");
                             None
                         }
                     }
@@ -108,7 +134,7 @@ impl ProviderRegistry {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Timing analysis failed: {}", e);
+                        eprintln!("Timing analysis failed: {e}");
                         None
                     }
                 }
@@ -117,142 +143,274 @@ impl ProviderRegistry {
 
         // NEW: Run DNS analysis in parallel with provider detection
         let dns_future = {
-            let url = context.url.clone();
+            let dns_info = context.dns_info.clone();
             let dns_analyzer = Arc::clone(&self.dns_analyzer);
             async move {
-                match dns_analyzer.analyze(&url).await {
-                    Ok(dns_evidence) => {
-                        if !dns_evidence.is_empty() {
-                            Some(("DnsAnalysis".to_string(), dns_evidence, 0.95))
+                if let Some(info) = dns_info {
+                    let dns_evidence = dns_analyzer.analyze_from_info(&info);
+                    if !dns_evidence.is_empty() {
+                        Some(("DnsAnalysis".to_string(), dns_evidence, 0.95))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+
+        // NEW: Run payload analysis in parallel with provider detection (opt-in)
+        let payload_future = {
+            let url = context.url.clone();
+            let payload_analyzer = Arc::clone(&self.payload_analyzer);
+            async move {
+                if !self.payload_analysis_enabled() {
+                    return None;
+                }
+                match payload_analyzer.analyze(&url).await {
+                    Ok(payload_result) => {
+                        let evidence = payload_analyzer.to_evidence(&payload_result);
+                        if !evidence.is_empty() {
+                            Some((
+                                "PayloadAnalysis".to_string(),
+                                evidence,
+                                payload_result.confidence,
+                            ))
                         } else {
                             None
                         }
                     }
                     Err(e) => {
-                        eprintln!("DNS analysis failed: {}", e);
+                        eprintln!("Payload analysis failed: {e}");
                         None
                     }
                 }
             }
         };
 
-        // NEW: Run payload analysis in parallel with provider detection
-        let payload_future = {
+        // NEW: Run TLS analysis in parallel with provider detection
+        let tls_future = {
             let url = context.url.clone();
-            let payload_analyzer = Arc::clone(&self.payload_analyzer);
+            let tls_analyzer = Arc::clone(&self.tls_analyzer);
             async move {
-                match payload_analyzer.analyze(&url).await {
-                    Ok(payload_result) => {
-                        let evidence = payload_analyzer.to_evidence(&payload_result);
-                        if !evidence.is_empty() {
-                            Some(("PayloadAnalysis".to_string(), evidence, payload_result.confidence))
+                match tls_analyzer.analyze(&url).await {
+                    Ok(tls_evidence) => {
+                        if !tls_evidence.is_empty() {
+                            Some(("TlsAnalysis".to_string(), tls_evidence, 0.95))
                         } else {
                             None
                         }
                     }
                     Err(e) => {
-                        eprintln!("Payload analysis failed: {}", e);
+                        eprintln!("TLS analysis failed: {e}");
                         None
                     }
+                }
+            }
+        };
+
+        // NEW: Run HTTP/2 fingerprinting in parallel with provider detection
+        let h2_future = {
+            let url = context.url.clone();
+            let h2_analyzer = Arc::clone(&self.h2_analyzer);
+            async move {
+                match h2_analyzer.analyze(&url).await {
+                    Ok(h2_evidence) => {
+                        if !h2_evidence.is_empty() {
+                            Some(("H2Fingerprinting".to_string(), h2_evidence, 0.93))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("HTTP/2 fingerprinting failed: {e}");
+                        None
+                    }
+                }
+            }
+        };
+
+        // NEW: Run error profile analysis on existing response (passive analysis)
+        let error_profile_future = {
+            let response = context.response.clone();
+            let error_profile_db = Arc::clone(&self.error_profile_db);
+            async move {
+                if let Some(resp) = response {
+                    let error_evidence =
+                        error_profile_db.match_response(resp.status, &resp.body, &resp.headers);
+                    if !error_evidence.is_empty() {
+                        Some(("ErrorProfileAnalysis".to_string(), error_evidence, 0.90))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+
+        // NEW: Run connection behavior analysis on existing response headers (passive analysis)
+        let connection_behavior_future = {
+            let response = context.response.clone();
+            let connection_behavior_analyzer = Arc::clone(&self.connection_behavior_analyzer);
+            async move {
+                if let Some(resp) = response {
+                    let connection_evidence =
+                        connection_behavior_analyzer.analyze_response_headers(&resp.headers);
+                    if !connection_evidence.is_empty() {
+                        Some((
+                            "ConnectionBehaviorAnalysis".to_string(),
+                            connection_evidence,
+                            0.78,
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
                 }
             }
         };
 
         // Run all detection techniques in parallel
-        let (provider_results, timing_result, dns_result, payload_result) = futures::future::join4(
-            futures::future::join_all(futures),
+        let (provider_results, timing_result, dns_result, payload_result, tls_result, h2_result, error_profile_result, connection_behavior_result) = tokio::join!(
+            futures::future::join_all(provider_futures),
             timing_future,
             dns_future,
-            payload_future
-        ).await;
+            payload_future,
+            tls_future,
+            h2_future,
+            error_profile_future,
+            connection_behavior_future
+        );
 
-        let mut results = provider_results;
-        if let Some(timing_result) = timing_result {
-            results.push(Some(timing_result));
-        }
-        if let Some(dns_result) = dns_result {
-            results.push(Some(dns_result));
-        }
-        if let Some(payload_result) = payload_result {
-            results.push(Some(payload_result));
-        }
-        
         let mut provider_scores = HashMap::new();
-        let mut evidence_map = HashMap::new();
+        let mut evidence_map: HashMap<String, Vec<crate::Evidence>> = HashMap::new();
         let mut best_waf = None;
         let mut best_cdn = None;
-        let mut max_confidence = 0.0;
 
         // Initialize evidence map for all providers (matches working binary)
         for provider_name in self.providers.iter().map(|entry| entry.key().clone()) {
             evidence_map.insert(provider_name, Vec::new());
         }
-        
+
         // Initialize evidence map for additional analysis types
         evidence_map.insert("TimingAnalysis".to_string(), Vec::new());
         evidence_map.insert("DnsAnalysis".to_string(), Vec::new());
         evidence_map.insert("PayloadAnalysis".to_string(), Vec::new());
+        evidence_map.insert("TlsAnalysis".to_string(), Vec::new());
+        evidence_map.insert("H2Fingerprinting".to_string(), Vec::new());
+        evidence_map.insert("ErrorProfileAnalysis".to_string(), Vec::new());
+        evidence_map.insert("ConnectionBehaviorAnalysis".to_string(), Vec::new());
+        evidence_map.insert("GenericWAF".to_string(), Vec::new());
 
         // Track best WAF and CDN separately to support multi-vendor scenarios
         let mut best_waf_confidence = 0.0;
         let mut best_cdn_confidence = 0.0;
 
-        for result in results.into_iter().flatten() {
+        // Add provider evidence
+        for result in provider_results.into_iter().flatten() {
             let (name, evidence, _base_confidence) = result;
-            
-            // Always insert evidence (even if empty) to match working binary structure
-            evidence_map.insert(name.clone(), evidence.clone());
-            
-            if !evidence.is_empty() {
-                // NEW: Use advanced confidence scoring instead of simple average
-                let response_headers = context.response
-                    .as_ref()
-                    .map(|r| r.headers.clone())
-                    .unwrap_or_default();
-                let confidence_result = self.advanced_scoring.calculate_confidence(&name, &evidence, &response_headers);
-                let final_confidence = confidence_result.score;
-                
-                provider_scores.insert(name.clone(), final_confidence);
-                
-                // Update max_confidence for backward compatibility
-                if final_confidence > max_confidence {
-                    max_confidence = final_confidence;
+            evidence_map.insert(name, evidence);
+        }
+
+        // Add analysis evidence and map to providers
+        let mut analysis_results = Vec::new();
+        if let Some(timing_result) = timing_result {
+            analysis_results.push(timing_result);
+        }
+        if let Some(dns_result) = dns_result {
+            analysis_results.push(dns_result);
+        }
+        if let Some(payload_result) = payload_result {
+            analysis_results.push(payload_result);
+        }
+        if let Some(tls_result) = tls_result {
+            analysis_results.push(tls_result);
+        }
+        if let Some(h2_result) = h2_result {
+            analysis_results.push(h2_result);
+        }
+        if let Some(error_profile_result) = error_profile_result {
+            analysis_results.push(error_profile_result);
+        }
+        if let Some(connection_behavior_result) = connection_behavior_result {
+            analysis_results.push(connection_behavior_result);
+        }
+
+        for (analysis_name, evidence, _confidence) in analysis_results {
+            evidence_map.insert(analysis_name, evidence.clone());
+            self.map_analysis_evidence(&mut evidence_map, &evidence);
+        }
+
+        // Compute scores per provider using merged evidence (provider + analysis)
+        let response_headers = context
+            .response
+            .as_ref()
+            .map(|r| r.headers.clone())
+            .unwrap_or_default();
+
+        for provider_name in self.providers.iter().map(|entry| entry.key().clone()) {
+            if let Some(evidence) = evidence_map.get(&provider_name) {
+                if evidence.is_empty() {
+                    continue;
                 }
-                
-                // Determine best WAF and CDN providers separately
-                if let Some(metadata) = self.provider_metadata.get(&name) {
+
+                let has_tier1 = Self::has_tier1_evidence(&provider_name, evidence);
+                let passes_correlation = Self::passes_correlation(evidence);
+                let confidence_result = self.advanced_scoring.calculate_confidence(
+                    &provider_name,
+                    evidence,
+                    &response_headers,
+                );
+                let final_confidence = confidence_result.score;
+
+                provider_scores.insert(provider_name.clone(), final_confidence);
+
+                if let Some(metadata) = self.provider_metadata.get(&provider_name) {
                     match metadata.provider_type.as_str() {
                         "WAF Only" => {
-                            if final_confidence > best_waf_confidence {
+                            if has_tier1
+                                && passes_correlation
+                                && final_confidence > best_waf_confidence
+                            {
                                 best_waf_confidence = final_confidence;
                                 best_waf = Some(ProviderDetection {
-                                    name: name.clone(),
+                                    name: provider_name.clone(),
                                     confidence: final_confidence,
                                 });
                             }
                         }
                         "CDN Only" => {
-                            if final_confidence > best_cdn_confidence {
+                            if has_tier1
+                                && passes_correlation
+                                && final_confidence > best_cdn_confidence
+                            {
                                 best_cdn_confidence = final_confidence;
                                 best_cdn = Some(ProviderDetection {
-                                    name: name.clone(),
+                                    name: provider_name.clone(),
                                     confidence: final_confidence,
                                 });
                             }
                         }
                         "Both" => {
-                            // Provider that can do both - compete for both roles
-                            if final_confidence > best_waf_confidence {
+                            if has_tier1
+                                && passes_correlation
+                                && final_confidence > best_waf_confidence
+                            {
                                 best_waf_confidence = final_confidence;
                                 best_waf = Some(ProviderDetection {
-                                    name: name.clone(),
+                                    name: provider_name.clone(),
                                     confidence: final_confidence,
                                 });
                             }
-                            if final_confidence > best_cdn_confidence {
+                            if has_tier1
+                                && passes_correlation
+                                && final_confidence > best_cdn_confidence
+                            {
                                 best_cdn_confidence = final_confidence;
                                 best_cdn = Some(ProviderDetection {
-                                    name: name.clone(),
+                                    name: provider_name.clone(),
                                     confidence: final_confidence,
                                 });
                             }
@@ -263,7 +421,27 @@ impl ProviderRegistry {
             }
         }
 
+        // Generic WAF fallback if we have behavioral evidence but no provider match
+        if best_waf.is_none() {
+            if let Some(generic_evidence) = evidence_map.get("GenericWAF") {
+                if !generic_evidence.is_empty() {
+                    let generic_confidence = self
+                        .advanced_scoring
+                        .calculate_confidence("Generic WAF", generic_evidence, &response_headers)
+                        .score;
+                    if generic_confidence >= 0.60 {
+                        best_waf = Some(ProviderDetection {
+                            name: "Generic WAF".to_string(),
+                            confidence: generic_confidence,
+                        });
+                    }
+                }
+            }
+        }
+
         let detection_time = start_time.elapsed().as_millis() as u64;
+        let flat_evidence: Vec<crate::Evidence> =
+            evidence_map.values().flatten().cloned().collect();
 
         // Create metadata matching working binary
         let metadata = DetectionMetadata {
@@ -278,17 +456,19 @@ impl ProviderRegistry {
             detected_cdn: best_cdn,
             provider_scores,
             evidence_map,
+            evidence: flat_evidence,
             detection_time_ms: detection_time,
             metadata,
         })
     }
 
     pub fn list_providers(&self) -> Vec<ProviderMetadata> {
-        let mut providers: Vec<_> = self.provider_metadata
+        let mut providers: Vec<_> = self
+            .provider_metadata
             .iter()
             .map(|entry| entry.value().clone())
             .collect();
-        
+
         providers.sort_by(|a, b| b.priority.cmp(&a.priority));
         providers
     }
@@ -300,10 +480,302 @@ impl ProviderRegistry {
     pub fn is_provider_registered(&self, name: &str) -> bool {
         self.providers.contains_key(name)
     }
+
+    fn map_analysis_evidence(
+        &self,
+        evidence_map: &mut HashMap<String, Vec<crate::Evidence>>,
+        evidence: &[crate::Evidence],
+    ) {
+        for ev in evidence {
+            if let Some(provider_name) = self.provider_from_signature(&ev.signature_matched) {
+                if provider_name == "Generic WAF" {
+                    evidence_map
+                        .entry("GenericWAF".to_string())
+                        .or_default()
+                        .push(ev.clone());
+                    continue;
+                }
+
+                if evidence_map.contains_key(&provider_name) {
+                    evidence_map
+                        .entry(provider_name)
+                        .or_default()
+                        .push(ev.clone());
+                }
+            }
+        }
+    }
+
+    fn provider_from_signature(&self, signature: &str) -> Option<String> {
+        let sig = signature.to_lowercase();
+
+        if sig.starts_with("timing-") {
+            return Some("Generic WAF".to_string());
+        }
+
+        let provider_key = if let Some(rest) = sig.strip_prefix("dns-cname-") {
+            Some(rest)
+        } else if let Some(rest) = sig.strip_prefix("dns-ns-") {
+            Some(rest)
+        } else if let Some(rest) = sig.strip_prefix("tls-") {
+            rest.split('-').next()
+        } else if let Some(rest) = sig.strip_prefix("h2-fingerprint-") {
+            Some(rest)
+        } else if let Some(rest) = sig.strip_prefix("error-profile-") {
+            // Extract provider name from error-profile-<provider>-*
+            rest.split('-').next()
+        } else if let Some(rest) = sig.strip_prefix("connection-behavior-") {
+            Some(rest)
+        } else {
+            sig.strip_prefix("payload_detection_")
+        }?;
+
+        let normalized = match provider_key {
+            "cloudflare" => "CloudFlare",
+            "aws" => "AWS",
+            "aws_waf" => "AWS",
+            "akamai" => "Akamai",
+            "fastly" => "Fastly",
+            "vercel" => "Vercel",
+            "azure" => "Azure",
+            "f5" => "F5",
+            "imperva" => "Imperva",
+            "modsecurity" => "ModSecurity",
+            "sucuri" => "Sucuri",
+            "radware" => "Radware",
+            "fortiweb" => "FortiWeb",
+            "generic_waf" => "Generic WAF",
+            _ => return None,
+        };
+
+        Some(normalized.to_string())
+    }
+
+    fn has_tier1_evidence(_provider_name: &str, evidence: &[crate::Evidence]) -> bool {
+        let strong_signatures = [
+            // Cloudflare
+            "cf-ray-header",
+            "cf-cache-status-header",
+            "cloudflare-server-header",
+            // AWS/CloudFront
+            "x-amz-cf-id-header",
+            "x-amz-cf-pop-header",
+            "cloudfront-via-header",
+            "cloudfront-server-header",
+            // Akamai
+            "akamai-server-pattern",
+            "x-akamai-header",
+            // Fastly
+            "fastly-header",
+            "x-served-by-fastly",
+            // Vercel
+            "vercel-server-header",
+            "x-vercel-id-header",
+            // Azure
+            "x-azure-fdid-header",
+            "x-azure-ref-header",
+            "x-ms-edge-server-header",
+            // F5
+            "f5-asm-pattern",
+            "f5-asm-block-behavior",
+            "f5-block-pattern",
+            "f5-support-id-pattern",
+            // Imperva
+            "imperva-x-iinfo-header",
+            "imperva-incap-cookie",
+            "imperva-visid-cookie",
+            // ModSecurity
+            "modsecurity-server-header",
+            "modsecurity-header",
+            "modsecurity-error-body",
+            // Sucuri
+            "sucuri-id-header",
+            "sucuri-cookie",
+            "sucuri-server-header",
+            // Radware
+            "radware-compstate-header",
+            "radware-requestid-header",
+            "radware-cookie",
+            // FortiWeb
+            "fortiweb-server-header",
+            "fortiweb-nonce-header",
+            "fortiweb-cookie",
+        ];
+
+        evidence.iter().any(|ev| match ev.method_type {
+            crate::MethodType::DNS(_) | crate::MethodType::Certificate => true,
+            crate::MethodType::Header(_) => {
+                strong_signatures.contains(&ev.signature_matched.as_str())
+            }
+            _ => false,
+        })
+    }
+
+    fn passes_correlation(evidence: &[crate::Evidence]) -> bool {
+        if evidence.iter().any(|ev| {
+            matches!(
+                ev.method_type,
+                crate::MethodType::DNS(_) | crate::MethodType::Certificate
+            )
+        }) {
+            return true;
+        }
+
+        let mut signatures = std::collections::HashSet::new();
+        let mut method_types = std::collections::HashSet::new();
+
+        for ev in evidence {
+            signatures.insert(ev.signature_matched.as_str());
+            method_types.insert(std::mem::discriminant(&ev.method_type));
+        }
+
+        signatures.len() >= 2 || method_types.len() >= 2
+    }
 }
 
 impl Default for ProviderRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Evidence, MethodType};
+
+    #[test]
+    fn test_provider_from_signature_mapping() {
+        let registry = ProviderRegistry::new();
+
+        assert_eq!(
+            registry.provider_from_signature("dns-cname-cloudflare"),
+            Some("CloudFlare".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("dns-ns-akamai"),
+            Some("Akamai".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("tls-aws-issuer"),
+            Some("AWS".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("h2-fingerprint-cloudflare"),
+            Some("CloudFlare".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("h2-fingerprint-aws"),
+            Some("AWS".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("payload_detection_aws_waf"),
+            Some("AWS".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("timing-waf-delay"),
+            Some("Generic WAF".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("connection-behavior-cloudflare"),
+            Some("CloudFlare".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("connection-behavior-aws"),
+            Some("AWS".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("connection-behavior-akamai"),
+            Some("Akamai".to_string())
+        );
+    }
+
+    #[test]
+    fn test_map_analysis_evidence_routes_to_provider() {
+        let registry = ProviderRegistry::new();
+        let mut evidence_map: HashMap<String, Vec<Evidence>> = HashMap::new();
+
+        evidence_map.insert("CloudFlare".to_string(), Vec::new());
+        evidence_map.insert("AWS".to_string(), Vec::new());
+        evidence_map.insert("Akamai".to_string(), Vec::new());
+        evidence_map.insert("GenericWAF".to_string(), Vec::new());
+
+        let evidence = vec![
+            Evidence {
+                method_type: MethodType::DNS("cname".to_string()),
+                confidence: 0.98,
+                description: "CloudFlare CNAME".to_string(),
+                raw_data: "CNAME -> example.cloudflare.net".to_string(),
+                signature_matched: "dns-cname-cloudflare".to_string(),
+            },
+            Evidence {
+                method_type: MethodType::Payload,
+                confidence: 0.70,
+                description: "Generic WAF timing".to_string(),
+                raw_data: "timing".to_string(),
+                signature_matched: "timing-waf-delay".to_string(),
+            },
+            Evidence {
+                method_type: MethodType::Payload,
+                confidence: 0.80,
+                description: "AWS WAF payload detection".to_string(),
+                raw_data: "blocked".to_string(),
+                signature_matched: "payload_detection_aws_waf".to_string(),
+            },
+        ];
+
+        registry.map_analysis_evidence(&mut evidence_map, &evidence);
+
+        assert_eq!(evidence_map.get("CloudFlare").unwrap().len(), 1);
+        assert_eq!(evidence_map.get("AWS").unwrap().len(), 1);
+        assert_eq!(evidence_map.get("GenericWAF").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_tier1_evidence_detection() {
+        let evidence = vec![Evidence {
+            method_type: MethodType::Header("cf-ray".to_string()),
+            confidence: 0.95,
+            description: "CF-Ray header detected".to_string(),
+            raw_data: "abcd1234-SEA".to_string(),
+            signature_matched: "cf-ray-header".to_string(),
+        }];
+
+        assert!(ProviderRegistry::has_tier1_evidence(
+            "CloudFlare",
+            &evidence
+        ));
+    }
+
+    #[test]
+    fn test_correlation_requires_multiple_signals_without_dns_tls() {
+        let single = vec![Evidence {
+            method_type: MethodType::Header("cf-ray".to_string()),
+            confidence: 0.95,
+            description: "CF-Ray header detected".to_string(),
+            raw_data: "abcd1234-SEA".to_string(),
+            signature_matched: "cf-ray-header".to_string(),
+        }];
+
+        assert!(!ProviderRegistry::passes_correlation(&single));
+
+        let multi = vec![
+            Evidence {
+                method_type: MethodType::Header("cf-ray".to_string()),
+                confidence: 0.95,
+                description: "CF-Ray header detected".to_string(),
+                raw_data: "abcd1234-SEA".to_string(),
+                signature_matched: "cf-ray-header".to_string(),
+            },
+            Evidence {
+                method_type: MethodType::Header("cf-cache-status".to_string()),
+                confidence: 0.90,
+                description: "CF cache status".to_string(),
+                raw_data: "HIT".to_string(),
+                signature_matched: "cf-cache-status-header".to_string(),
+            },
+        ];
+
+        assert!(ProviderRegistry::passes_correlation(&multi));
     }
 }

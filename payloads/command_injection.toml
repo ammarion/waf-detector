@@ -1,0 +1,61 @@
+# Command Injection Payloads
+
+[[payloads]]
+id = "cmdi-001"
+name = "Semicolon Command Injection"
+category = "CommandInjection"
+pattern = "; cat /etc/passwd"
+description = "Unix command injection using semicolon"
+risk_level = "CRITICAL"
+cwe_id = "CWE-78"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "cmdi-002"
+name = "Pipe Command Injection"
+category = "CommandInjection"
+pattern = "| whoami"
+description = "Command injection using pipe operator"
+risk_level = "CRITICAL"
+cwe_id = "CWE-78"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "cmdi-003"
+name = "Backtick Command Injection"
+category = "CommandInjection"
+pattern = "`id`"
+description = "Command injection using backticks"
+risk_level = "CRITICAL"
+cwe_id = "CWE-78"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "cmdi-004"
+name = "Dollar Parentheses Command Injection"
+category = "CommandInjection"
+pattern = "$(whoami)"
+description = "Command injection using $() syntax"
+risk_level = "CRITICAL"
+cwe_id = "CWE-78"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "cmdi-005"
+name = "Windows AND Command Injection"
+category = "CommandInjection"
+pattern = "&& dir"
+description = "Windows command injection using AND operator"
+risk_level = "CRITICAL"
+cwe_id = "CWE-78"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "cmdi-006"
+name = "List Directory Command"
+category = "CommandInjection"
+pattern = "; ls -la"
+description = "Directory listing command injection"
+risk_level = "CRITICAL"
+cwe_id = "CWE-78"
+owasp_category = "A03:2021"
