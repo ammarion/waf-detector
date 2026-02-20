@@ -2,6 +2,7 @@
 
 use crate::confidence::AdvancedScoring; // NEW: Import advanced scoring
 use crate::dns::DnsAnalyzer; // NEW: Import DNS analysis
+use crate::http2::H2FingerprintAnalyzer; // NEW: Import HTTP/2 fingerprinting
 use crate::payload::PayloadAnalyzer; // NEW: Import payload analysis
 use crate::providers::error_profiles::ErrorProfileDatabase; // NEW: Import error profiles
 use crate::providers::{Provider, ProviderMetadata};
@@ -24,6 +25,7 @@ pub struct ProviderRegistry {
     dns_analyzer: Arc<DnsAnalyzer>,         // NEW: DNS analysis
     payload_analyzer: Arc<PayloadAnalyzer>, // NEW: Payload analysis
     tls_analyzer: Arc<TlsAnalyzer>,
+    h2_analyzer: Arc<H2FingerprintAnalyzer>, // NEW: HTTP/2 fingerprinting
     error_profile_db: Arc<ErrorProfileDatabase>, // NEW: Error profile analysis
     payload_analysis_enabled: Arc<AtomicBool>,
 }
@@ -38,6 +40,7 @@ impl ProviderRegistry {
             dns_analyzer: Arc::new(DnsAnalyzer::new()), // NEW: Initialize DNS analysis
             payload_analyzer: Arc::new(PayloadAnalyzer::new()), // NEW: Initialize payload analysis
             tls_analyzer: Arc::new(TlsAnalyzer::new()),
+            h2_analyzer: Arc::new(H2FingerprintAnalyzer::new()), // NEW: Initialize HTTP/2 fingerprinting
             error_profile_db: Arc::new(ErrorProfileDatabase::new()), // NEW: Initialize error profile database
             payload_analysis_enabled: Arc::new(AtomicBool::new(false)),
         }
@@ -203,6 +206,27 @@ impl ProviderRegistry {
             }
         };
 
+        // NEW: Run HTTP/2 fingerprinting in parallel with provider detection
+        let h2_future = {
+            let url = context.url.clone();
+            let h2_analyzer = Arc::clone(&self.h2_analyzer);
+            async move {
+                match h2_analyzer.analyze(&url).await {
+                    Ok(h2_evidence) => {
+                        if !h2_evidence.is_empty() {
+                            Some(("H2Fingerprinting".to_string(), h2_evidence, 0.93))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("HTTP/2 fingerprinting failed: {e}");
+                        None
+                    }
+                }
+            }
+        };
+
         // NEW: Run error profile analysis on existing response (passive analysis)
         let error_profile_future = {
             let response = context.response.clone();
@@ -223,12 +247,13 @@ impl ProviderRegistry {
         };
 
         // Run all detection techniques in parallel
-        let (provider_results, timing_result, dns_result, payload_result, tls_result, error_profile_result) = tokio::join!(
+        let (provider_results, timing_result, dns_result, payload_result, tls_result, h2_result, error_profile_result) = tokio::join!(
             futures::future::join_all(provider_futures),
             timing_future,
             dns_future,
             payload_future,
             tls_future,
+            h2_future,
             error_profile_future
         );
 
@@ -247,6 +272,7 @@ impl ProviderRegistry {
         evidence_map.insert("DnsAnalysis".to_string(), Vec::new());
         evidence_map.insert("PayloadAnalysis".to_string(), Vec::new());
         evidence_map.insert("TlsAnalysis".to_string(), Vec::new());
+        evidence_map.insert("H2Fingerprinting".to_string(), Vec::new());
         evidence_map.insert("ErrorProfileAnalysis".to_string(), Vec::new());
         evidence_map.insert("GenericWAF".to_string(), Vec::new());
 
@@ -273,6 +299,9 @@ impl ProviderRegistry {
         }
         if let Some(tls_result) = tls_result {
             analysis_results.push(tls_result);
+        }
+        if let Some(h2_result) = h2_result {
+            analysis_results.push(h2_result);
         }
         if let Some(error_profile_result) = error_profile_result {
             analysis_results.push(error_profile_result);
@@ -459,6 +488,8 @@ impl ProviderRegistry {
             Some(rest)
         } else if let Some(rest) = sig.strip_prefix("tls-") {
             rest.split('-').next()
+        } else if let Some(rest) = sig.strip_prefix("h2-fingerprint-") {
+            Some(rest)
         } else if let Some(rest) = sig.strip_prefix("error-profile-") {
             // Extract provider name from error-profile-<provider>-*
             rest.split('-').next()
@@ -594,6 +625,14 @@ mod tests {
         );
         assert_eq!(
             registry.provider_from_signature("tls-aws-issuer"),
+            Some("AWS".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("h2-fingerprint-cloudflare"),
+            Some("CloudFlare".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("h2-fingerprint-aws"),
             Some("AWS".to_string())
         );
         assert_eq!(

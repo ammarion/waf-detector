@@ -57,6 +57,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # HTTP types
 http = "0.2"
+http1 = { package = "http", version = "1.0" }
+bytes = "1.0"
 
 # URL encoding for WAF mode detection
 urlencoding = "2.1"
@@ -77,6 +79,7 @@ hickory-resolver = "0.24"
 tokio-rustls = { version = "0.26", features = ["ring"] }
 x509-parser = "0.16"
 md5 = "0.7"
+h2 = "0.4"
 
 [dev-dependencies]
 tokio-test = "0.4"
