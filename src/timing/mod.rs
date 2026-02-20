@@ -3,6 +3,8 @@
 //! Detects WAF presence by measuring processing delays introduced by WAF inspection.
 //! Research shows WAFs typically add 50-200ms processing delays compared to direct responses.
 
+pub mod connection_behavior;
+
 use crate::{Evidence, MethodType};
 use anyhow::Result;
 use std::time::{Duration, Instant};

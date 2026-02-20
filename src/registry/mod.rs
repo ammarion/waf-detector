@@ -6,6 +6,7 @@ use crate::http2::H2FingerprintAnalyzer; // NEW: Import HTTP/2 fingerprinting
 use crate::payload::PayloadAnalyzer; // NEW: Import payload analysis
 use crate::providers::error_profiles::ErrorProfileDatabase; // NEW: Import error profiles
 use crate::providers::{Provider, ProviderMetadata};
+use crate::timing::connection_behavior::ConnectionBehaviorAnalyzer; // NEW: Import connection behavior analysis
 use crate::timing::{TimingAnalyzer, TimingConfig}; // NEW: Import timing analysis
 use crate::tls::TlsAnalyzer;
 use crate::{DetectionContext, DetectionMetadata, DetectionResult, ProviderDetection};
@@ -27,6 +28,7 @@ pub struct ProviderRegistry {
     tls_analyzer: Arc<TlsAnalyzer>,
     h2_analyzer: Arc<H2FingerprintAnalyzer>, // NEW: HTTP/2 fingerprinting
     error_profile_db: Arc<ErrorProfileDatabase>, // NEW: Error profile analysis
+    connection_behavior_analyzer: Arc<ConnectionBehaviorAnalyzer>, // NEW: Connection behavior analysis
     payload_analysis_enabled: Arc<AtomicBool>,
 }
 
@@ -42,6 +44,7 @@ impl ProviderRegistry {
             tls_analyzer: Arc::new(TlsAnalyzer::new()),
             h2_analyzer: Arc::new(H2FingerprintAnalyzer::new()), // NEW: Initialize HTTP/2 fingerprinting
             error_profile_db: Arc::new(ErrorProfileDatabase::new()), // NEW: Initialize error profile database
+            connection_behavior_analyzer: Arc::new(ConnectionBehaviorAnalyzer::new()), // NEW: Initialize connection behavior analyzer
             payload_analysis_enabled: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -246,15 +249,39 @@ impl ProviderRegistry {
             }
         };
 
+        // NEW: Run connection behavior analysis on existing response headers (passive analysis)
+        let connection_behavior_future = {
+            let response = context.response.clone();
+            let connection_behavior_analyzer = Arc::clone(&self.connection_behavior_analyzer);
+            async move {
+                if let Some(resp) = response {
+                    let connection_evidence =
+                        connection_behavior_analyzer.analyze_response_headers(&resp.headers);
+                    if !connection_evidence.is_empty() {
+                        Some((
+                            "ConnectionBehaviorAnalysis".to_string(),
+                            connection_evidence,
+                            0.78,
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+
         // Run all detection techniques in parallel
-        let (provider_results, timing_result, dns_result, payload_result, tls_result, h2_result, error_profile_result) = tokio::join!(
+        let (provider_results, timing_result, dns_result, payload_result, tls_result, h2_result, error_profile_result, connection_behavior_result) = tokio::join!(
             futures::future::join_all(provider_futures),
             timing_future,
             dns_future,
             payload_future,
             tls_future,
             h2_future,
-            error_profile_future
+            error_profile_future,
+            connection_behavior_future
         );
 
         let mut provider_scores = HashMap::new();
@@ -274,6 +301,7 @@ impl ProviderRegistry {
         evidence_map.insert("TlsAnalysis".to_string(), Vec::new());
         evidence_map.insert("H2Fingerprinting".to_string(), Vec::new());
         evidence_map.insert("ErrorProfileAnalysis".to_string(), Vec::new());
+        evidence_map.insert("ConnectionBehaviorAnalysis".to_string(), Vec::new());
         evidence_map.insert("GenericWAF".to_string(), Vec::new());
 
         // Track best WAF and CDN separately to support multi-vendor scenarios
@@ -305,6 +333,9 @@ impl ProviderRegistry {
         }
         if let Some(error_profile_result) = error_profile_result {
             analysis_results.push(error_profile_result);
+        }
+        if let Some(connection_behavior_result) = connection_behavior_result {
+            analysis_results.push(connection_behavior_result);
         }
 
         for (analysis_name, evidence, _confidence) in analysis_results {
@@ -493,6 +524,8 @@ impl ProviderRegistry {
         } else if let Some(rest) = sig.strip_prefix("error-profile-") {
             // Extract provider name from error-profile-<provider>-*
             rest.split('-').next()
+        } else if let Some(rest) = sig.strip_prefix("connection-behavior-") {
+            Some(rest)
         } else {
             sig.strip_prefix("payload_detection_")
         }?;
@@ -642,6 +675,18 @@ mod tests {
         assert_eq!(
             registry.provider_from_signature("timing-waf-delay"),
             Some("Generic WAF".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("connection-behavior-cloudflare"),
+            Some("CloudFlare".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("connection-behavior-aws"),
+            Some("AWS".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("connection-behavior-akamai"),
+            Some("Akamai".to_string())
         );
     }
 
