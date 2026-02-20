@@ -1,4 +1,42 @@
-pub const DASHBOARD_HTML: &str = include_str!("templates/dashboard.html");
+use std::fs;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+
+pub const DASHBOARD_HTML_EMBEDDED: &str = include_str!("templates/dashboard.html");
+
+static DASHBOARD_HTML_CACHE: OnceLock<String> = OnceLock::new();
+
+pub fn dashboard_html() -> &'static str {
+    DASHBOARD_HTML_CACHE
+        .get_or_init(load_dashboard_html)
+        .as_str()
+}
+
+fn load_dashboard_html() -> String {
+    if let Some(path) = resolve_dashboard_template_path() {
+        if let Ok(contents) = fs::read_to_string(&path) {
+            return contents;
+        }
+    }
+
+    DASHBOARD_HTML_EMBEDDED.to_string()
+}
+
+fn resolve_dashboard_template_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("WAF_DETECTOR_DASHBOARD_TEMPLATE") {
+        if !path.trim().is_empty() {
+            return Some(PathBuf::from(path));
+        }
+    }
+
+    if let Ok(dir) = std::env::var("WAF_DETECTOR_TEMPLATE_DIR") {
+        if !dir.trim().is_empty() {
+            return Some(PathBuf::from(dir).join("dashboard.html"));
+        }
+    }
+
+    None
+}
 
 pub const API_DOCS_HTML: &str = r#"
 <!DOCTYPE html>
@@ -611,7 +649,7 @@ va-20260203T120000-example.com.json,https://example.com,2026-02-03T12:00:00Z,1,S
 
 #[cfg(test)]
 mod tests {
-    use super::DASHBOARD_HTML;
+    use super::dashboard_html;
 
     #[test]
     fn dashboard_html_contains_va_placeholder() {
@@ -639,5 +677,13 @@ mod tests {
         assert!(DASHBOARD_HTML.contains("vaReplayChannelFilter"));
         assert!(DASHBOARD_HTML.contains("vaReplayMethodFilter"));
         assert!(DASHBOARD_HTML.contains("vaReplayOutcomeFilter"));
+    fn dashboard_html_contains_smoke_test_controls() {
+        let html = dashboard_html();
+        assert!(html.contains("WAF Smoke Test"));
+        assert!(html.contains("smokeTestForm"));
+        assert!(html.contains("smokeTestUrl"));
+        assert!(html.contains("smokeTestText"));
+        assert!(html.contains("singleScanForm"));
+        assert!(html.contains("batchScanForm"));
     }
 }

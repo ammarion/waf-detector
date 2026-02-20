@@ -47,6 +47,13 @@ pub enum PayloadType {
     FileUpload,
     ScannerDetection,
     Enumeration,
+    HttpRequestSmuggling,
+    GraphQLInjection,
+    SSTI,
+    PrototypePollution,
+    SSRF,
+    Log4Shell,
+    WebSocketInjection,
 }
 
 impl std::fmt::Display for PayloadType {
@@ -61,6 +68,13 @@ impl std::fmt::Display for PayloadType {
             PayloadType::FileUpload => write!(f, "File Upload"),
             PayloadType::ScannerDetection => write!(f, "Scanner Detection"),
             PayloadType::Enumeration => write!(f, "Enumeration"),
+            PayloadType::HttpRequestSmuggling => write!(f, "HTTP Request Smuggling"),
+            PayloadType::GraphQLInjection => write!(f, "GraphQL Injection"),
+            PayloadType::SSTI => write!(f, "Server-Side Template Injection"),
+            PayloadType::PrototypePollution => write!(f, "Prototype Pollution"),
+            PayloadType::SSRF => write!(f, "Server-Side Request Forgery"),
+            PayloadType::Log4Shell => write!(f, "Log4Shell"),
+            PayloadType::WebSocketInjection => write!(f, "WebSocket Injection"),
         }
     }
 }

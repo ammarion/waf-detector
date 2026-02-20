@@ -100,6 +100,9 @@ pub async fn analyze_static_page(url: &str) -> Result<StaticPageAnalysis> {
         Ok(Err(err)) => return Err(err.into()),
         Err(_) => {
             eprintln!("⚠️  Static detection HTTP client init panicked; retrying without system proxy.");
+            eprintln!(
+                "⚠️  Static detection HTTP client init panicked; retrying without system proxy."
+            );
             make_builder(true).build()?
         }
     };

@@ -6,6 +6,7 @@ pub mod cli;
 pub mod confidence;
 pub mod engine;
 pub mod http;
+pub mod ai;
 pub mod providers;
 pub mod registry;
 pub mod script_executor;
@@ -17,6 +18,7 @@ mod test_utils;
 
 // NEW: Advanced confidence and validation modules
 pub mod dns;
+pub mod http2;
 pub mod payload;
 pub mod testing;
 pub mod timing;

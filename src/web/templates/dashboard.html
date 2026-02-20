@@ -636,6 +636,7 @@
                 const data = await response.json();
 
                 if (data.success && data.result) {
+                    data.result._ai_context = 'single';
                     allResults.unshift(data.result);
                     displayResults();
                     showSuccessMessage(`Successfully scanned ${url}`);
@@ -666,7 +667,11 @@
                 const data = await response.json();
 
                 if (data.success && data.results) {
-                    allResults.unshift(...data.results.reverse());
+                    const results = data.results.map(result => ({
+                        ...result,
+                        _ai_context: 'batch'
+                    }));
+                    allResults.unshift(...results.reverse());
                     displayResults();
                     showSuccessMessage(`Successfully scanned ${urls.length} URLs`);
                 } else {
@@ -698,6 +703,7 @@
                 if (data.success && data.result) {
                     // Mark this as a smoke test result explicitly
                     data.result.is_smoke_test = true;
+                    data.result._ai_context = 'smoke';
                     allResults.unshift(data.result);
                     displayResults();
                     showSuccessMessage(`Smoke test completed for ${url} - ${data.result.test_results ? data.result.test_results.length : 0} payloads tested`);
@@ -1075,82 +1081,24 @@
             targetsList.innerHTML = '';
             if (targets.length === 0) {
                 targetsEmpty.style.display = 'block';
+        function setButtonLoading(btn, icon, text, loading, customText = null) {
+            if (loading) {
+                btn.disabled = true;
+                icon.innerHTML = '<div class="spinner"></div>';
+                text.textContent = customText || 'Scanning...';
             } else {
-                targetsEmpty.style.display = 'none';
-                targets.forEach(target => {
-                    const li = document.createElement('li');
-                    li.className = 'consent-target-item';
-                    const span = document.createElement('span');
-                    span.textContent = target;
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'consent-remove';
-                    btn.textContent = 'Remove';
-                    btn.onclick = () => removeAuthorizedTarget(target);
-                    li.appendChild(span);
-                    li.appendChild(btn);
-                    targetsList.appendChild(li);
-                });
-            }
-        }
-
-        async function loadConsentStatus() {
-            try {
-                const response = await fetch('/api/consent-status');
-                const data = await response.json();
-
-                if (!data.success || !data.status) {
-                    throw new Error(data.error || 'Consent status unavailable');
+                btn.disabled = false;
+                const buttonId = btn.closest('form').id;
+                if (buttonId === 'batchScanForm') {
+                    icon.innerHTML = '⚡';
+                    text.textContent = 'Scan Batch';
+                } else if (buttonId === 'smokeTestForm') {
+                    icon.innerHTML = '🛡️';
+                    text.textContent = customText || 'Run Smoke Test';
+                } else {
+                    icon.innerHTML = '🚀';
+                    text.textContent = 'Scan URL';
                 }
-
-                applyConsentStatus(data.status);
-            } catch (error) {
-                applyConsentStatus(null);
-            }
-        }
-
-        async function addAuthorizedTarget() {
-            const input = document.getElementById('consentTargetInput');
-            if (!input) return;
-            const target = input.value.trim();
-            if (!target) {
-                showErrorMessage('Enter a target to add');
-                return;
-            }
-
-            try {
-                const response = await fetch('/api/consent/add-target', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ target })
-                });
-                const data = await response.json();
-                if (!data.success || !data.status) {
-                    throw new Error(data.error || 'Failed to add target');
-                }
-                input.value = '';
-                applyConsentStatus(data.status);
-                showSuccessMessage(`Authorized ${target}`);
-            } catch (error) {
-                showErrorMessage(error.message || 'Failed to add target');
-            }
-        }
-
-        async function removeAuthorizedTarget(target) {
-            try {
-                const response = await fetch('/api/consent/remove-target', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ target })
-                });
-                const data = await response.json();
-                if (!data.success || !data.status) {
-                    throw new Error(data.error || 'Failed to remove target');
-                }
-                applyConsentStatus(data.status);
-                showSuccessMessage(`Removed ${target}`);
-            } catch (error) {
-                showErrorMessage(error.message || 'Failed to remove target');
             }
         }
 
@@ -1262,88 +1210,51 @@
                 if (endDate) {
                     endDate.setHours(23, 59, 59, 999);
                 }
+        function buildAiResultPayload(result, isSmokeTest, detectionData) {
+            if (isSmokeTest) {
+                const summary = result.summary || {};
+                return {
+                    url: result.url || '',
+                    detected_waf: result.detected_waf || null,
+                    detected_cdn: result.detected_cdn || null,
+                    summary: {
+                        blocked_count: summary.blocked_count ?? 0,
+                        allowed_count: summary.allowed_count ?? 0,
+                        error_count: summary.error_count ?? 0,
+                        effectiveness_percentage: summary.effectiveness_percentage ?? 0
+                    },
+                    detection_time_ms: result.total_time_ms || 0,
+                    evidence: []
+                };
             }
 
-            const filtered = vaHistoryCache.filter(report => {
-                const target = (report.target_url || '').toLowerCase();
-                if (term && !target.includes(term)) {
-                    return false;
-                }
-                if (startDate || endDate) {
-                    const reportDate = new Date(report.created_at);
-                    if (Number.isNaN(reportDate.getTime())) {
-                        return false;
-                    }
-                    if (startDate && reportDate < startDate) {
-                        return false;
-                    }
-                    if (endDate && reportDate > endDate) {
-                        return false;
-                    }
-                }
-                return true;
-            });
-            const sorted = filtered.slice();
-            if (sortMode === 'oldest') {
-                sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-            } else if (sortMode === 'risk') {
-                sorted.sort((a, b) => historyRiskScore(a) - historyRiskScore(b));
-            } else if (sortMode === 'blocked') {
-                sorted.sort((a, b) => historyRiskScore(b) - historyRiskScore(a));
-            } else {
-                sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            }
-            renderVaHistoryList(sorted);
+            const evidence = Array.isArray(detectionData && detectionData.evidence)
+                ? detectionData.evidence.map(item => ({
+                    description: item && item.description ? item.description : '',
+                    confidence: item && typeof item.confidence === 'number' ? item.confidence : null
+                }))
+                : [];
+
+            return {
+                url: detectionData && detectionData.url ? detectionData.url : '',
+                detected_waf: detectionData ? detectionData.detected_waf : null,
+                detected_cdn: detectionData ? detectionData.detected_cdn : null,
+                detection_time_ms: detectionData ? detectionData.detection_time_ms : 0,
+                evidence
+            };
         }
 
-        async function loadVaHistory() {
-            try {
-                const response = await fetch('/api/virtual-adversary/reports');
-                const data = await response.json();
-                if (!data.success || !Array.isArray(data.reports)) {
-                    throw new Error(data.error || 'Failed to load VA history');
-                }
-                vaHistoryCache = data.reports;
-                applyVaHistoryFilter();
-            } catch (error) {
-                vaHistoryCache = [];
-                renderVaHistoryList([]);
-            }
-        }
+        function renderAiSummary(summary) {
+            if (!summary) return '';
+            const verdict = escapeHtml(summary.verdict || 'Unknown');
+            const oneLiner = escapeHtml(summary.one_liner || '');
+            const keyPoints = Array.isArray(summary.key_points) ? summary.key_points : [];
+            const nextSteps = Array.isArray(summary.next_steps) ? summary.next_steps : [];
+            const caveats = Array.isArray(summary.caveats) ? summary.caveats : [];
 
-        async function downloadVaHistoryReport(reportId) {
-            try {
-                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
-                const data = await response.json();
-                if (!data.success || !data.report) {
-                    throw new Error(data.error || 'Failed to load VA report');
-                }
-
-                const jsonData = JSON.stringify(data.report, null, 2);
-                const jsonBlob = new Blob([jsonData], { type: 'application/json' });
-                const jsonUrl = URL.createObjectURL(jsonBlob);
-                const link = document.createElement('a');
-                link.href = jsonUrl;
-                link.download = reportId;
-                link.click();
-                URL.revokeObjectURL(jsonUrl);
-            } catch (error) {
-                showErrorMessage(error.message || 'Failed to download VA report');
-            }
-        }
-
-        async function openVaReportModalFromHistory(reportId) {
-            try {
-                const response = await fetch(`/api/virtual-adversary/reports/${reportId}`);
-                const data = await response.json();
-                if (!data.success || !data.report) {
-                    throw new Error(data.error || 'Failed to load VA report');
-                }
-                openVaReportModal(data.report);
-            } catch (error) {
-                showErrorMessage(error.message || 'Failed to open VA report');
-            }
-        }
+            const renderList = (items) => items.length
+                ? `<ul class="ai-summary-list">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+                : '<div class="ai-summary-empty">No items</div>';
 
         async function downloadVaHistoryReportCsv(reportId) {
             try {
@@ -1393,12 +1304,34 @@
             }
         }
 
+            return `
+                <div class="ai-summary-header">
+                    <div class="ai-verdict">Verdict: <span class="ai-verdict-badge">${verdict}</span></div>
+                    <div class="ai-one-liner">${oneLiner}</div>
+                </div>
+                <div class="ai-summary-grid">
+                    <div>
+                        <div class="ai-summary-title">Key Points</div>
+                        ${renderList(keyPoints)}
+                    </div>
+                    <div>
+                        <div class="ai-summary-title">Next Steps</div>
+                        ${renderList(nextSteps)}
+                    </div>
+                </div>
+                <div class="ai-summary-title">Caveats</div>
+                ${renderList(caveats)}
+            `;
+        }
 
-        async function downloadVaHistoryCsv() {
-            try {
-                const response = await fetch('/api/virtual-adversary/reports.csv');
-                if (!response.ok) {
-                    throw new Error('Failed to download CSV');
+        async function requestAiSummary(index) {
+            const result = allResults[index];
+            if (!result) return;
+
+            if (result.ai_summary) {
+                const panel = document.getElementById(`aiSummary-${index}`);
+                if (panel) {
+                    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
                 }
                 const csvData = await response.text();
                 const blob = new Blob([csvData], { type: 'text/csv' });
@@ -1442,51 +1375,15 @@
                 showErrorMessage('No Virtual Adversary report available');
                 return;
             }
-            if (result.report_id) {
-                return downloadVaHistoryReportCsv(result.report_id);
-            }
 
-            const csvData = buildVaReportCsv(result);
-            const blob = new Blob([csvData], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `va-report-${new Date().toISOString().split('T')[0]}.csv`;
-            link.click();
-            URL.revokeObjectURL(url);
-        }
-
-
-        function openVaReportModalFromResult(index) {
-            const result = allResults[index];
-            if (!result) {
-                showErrorMessage('No Virtual Adversary report available');
-                return;
-            }
-            const stored = {
-                id: result.report_id || 'local-report',
-                created_at: result.timestamp || new Date().toISOString(),
-                report: result
+            const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) ||
+                result.is_smoke_test === true ||
+                (result.summary && result.summary.effectiveness_percentage !== undefined);
+            const detectionData = result.detection_result ? result.detection_result : result;
+            const payload = {
+                result: buildAiResultPayload(result, isSmokeTest, detectionData),
+                context: { mode: result._ai_context || (isSmokeTest ? 'smoke' : 'single') }
             };
-            openVaReportModal(stored);
-        }
-
-        function computeVaRisk(summary, planSize) {
-            const total = summary.total || planSize || 0;
-            const effective = (summary.blocked || 0) + (summary.challenge || 0);
-            if (total === 0) return 'HIGH';
-            const score = effective / total;
-            if (score >= 0.8) return 'LOW';
-            if (score >= 0.5) return 'MEDIUM';
-            return 'HIGH';
-        }
-
-        function openVaReportModal(stored) {
-            const modal = document.getElementById('vaReportModal');
-            const title = document.getElementById('vaReportTitle');
-            const meta = document.getElementById('vaReportMeta');
-            const summaryEl = document.getElementById('vaReportSummary');
-            const tableBody = document.getElementById('vaReportTableBody');
 
             if (!modal || !stored || !stored.report) {
                 showErrorMessage('VA report unavailable');
@@ -2159,53 +2056,29 @@
             const value = input ? parseInt(input.value, 10) : 0;
             const maxReports = Number.isFinite(value) && value > 0 ? value : 50;
 
-            try {
-                const response = await fetch('/api/virtual-adversary/reports/cleanup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ max_reports: maxReports })
-                });
-                const data = await response.json();
-                if (!data.success) {
-                    throw new Error(data.error || 'Failed to cleanup reports');
-                }
-                showSuccessMessage(`Kept ${data.kept}, deleted ${data.deleted}`);
-                loadVaHistory();
-            } catch (error) {
-                showErrorMessage(error.message || 'Failed to cleanup reports');
-            }
-        }
-
-        async function deleteVaHistoryRange() {
-            const startInput = document.getElementById('vaHistoryStart');
-            const endInput = document.getElementById('vaHistoryEnd');
-            const startDate = startInput ? startInput.value : '';
-            const endDate = endInput ? endInput.value : '';
-
-            if (!startDate || !endDate) {
-                showErrorMessage('Select a start and end date to delete');
-                return;
-            }
-            if (startDate > endDate) {
-                showErrorMessage('Start date must be before end date');
-                return;
-            }
-            if (!confirm(`Delete VA reports from ${startDate} to ${endDate}?`)) {
-                return;
+            const panel = document.getElementById(`aiSummary-${index}`);
+            if (panel) {
+                panel.style.display = 'block';
+                panel.innerHTML = '<div class="ai-summary-loading">Generating AI summary...</div>';
             }
 
             try {
-                const response = await fetch('/api/virtual-adversary/reports/delete-range', {
+                const response = await fetch('/api/ai/summary', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ start_date: startDate, end_date: endDate })
+                    body: JSON.stringify(payload)
                 });
                 const data = await response.json();
-                if (!data.success) {
-                    throw new Error(data.error || 'Failed to delete reports');
+                if (data.success && data.summary) {
+                    result.ai_summary = data.summary;
+                    if (panel) {
+                        panel.innerHTML = renderAiSummary(data.summary);
+                    }
+                } else {
+                    if (panel) {
+                        panel.innerHTML = `<div class="ai-summary-error">${escapeHtml(data.error || 'AI summaries are unavailable.')}</div>`;
+                    }
                 }
-                showSuccessMessage(`Deleted ${data.deleted} report${data.deleted === 1 ? '' : 's'}`);
-                loadVaHistory();
             } catch (error) {
                 showErrorMessage(error.message || 'Failed to delete reports');
             }
@@ -2234,6 +2107,8 @@
                 } else {
                     icon.innerHTML = '🚀';
                     text.textContent = 'Scan URL';
+                if (panel) {
+                    panel.innerHTML = `<div class="ai-summary-error">AI summaries are unavailable.</div>`;
                 }
             }
         }
@@ -2260,9 +2135,6 @@
             const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) ||
                 result.is_smoke_test === true ||
                 (result.summary && result.summary.effectiveness_percentage !== undefined);
-            const isVirtualAdversary = result.is_virtual_adversary === true ||
-                (result && result.target_url && result.summary && typeof result.summary.total === 'number' && Array.isArray(result.results));
-
             console.log("Creating result card for:", result);
             console.log("isSmokeTest:", isSmokeTest, "is_smoke_test flag:", result.is_smoke_test, "detected_waf:", result.detected_waf, "detected_cdn:", result.detected_cdn);
             console.log("test_results array:", Array.isArray(result.test_results), "length:", result.test_results ? result.test_results.length : 0);
@@ -2340,82 +2212,22 @@
             return `
                 <div class="result-card">
                     <div class="result-header">
-                        <div class="result-url">${escapeHtml(isVirtualAdversary && result.target_url ? result.target_url :
+                        <div class="result-url">${escapeHtml(
                 isSmokeTest && result.url ? result.url :
                 isCombined && result.url ? result.url :
                     detectionData && detectionData.url ? detectionData.url :
                         "Unknown URL")}</div>
-                        <div class="result-time">${isVirtualAdversary ? `${result.plan_size || 0} payloads` :
-                    isSmokeTest && result.total_time_ms ? `${result.total_time_ms}ms` :
+                        <div class="result-time">${isSmokeTest && result.total_time_ms ? `${result.total_time_ms}ms` :
                         isCombined && result.total_time_ms ? `${result.total_time_ms}ms` :
                             detectionData && detectionData.detection_time_ms ? `${detectionData.detection_time_ms}ms` :
                                 "0ms"}</div>
                     </div>
-                    ${isVirtualAdversary ? (() => {
-                                const summary = result.summary || {};
-                                const total = summary.total || 0;
-                                const blocked = summary.blocked || 0;
-                                const challenge = summary.challenge || 0;
-                                const allowed = summary.allowed || 0;
-                                const errorCount = summary.error || 0;
-                                const effective = blocked + challenge;
-                                const effectiveness = total > 0 ? (effective / total) * 100 : 0;
-                                const risk = effectiveness >= 80 ? 'LOW' : effectiveness >= 50 ? 'MEDIUM' : 'HIGH';
-                                const rows = Array.isArray(result.results) ? result.results.slice(0, 12) : [];
+                    <div class="ai-summary-actions">
+                        <button class="btn btn-secondary" onclick="requestAiSummary(${index})">✨ AI Summary</button>
+                    </div>
+                    <div class="ai-summary-panel" id="aiSummary-${index}" style="display:none;"></div>
 
-                                return `
-                        <div class="va-card">
-                            <h4 class="va-title">🧠 Virtual Adversary Results</h4>
-                            <p class="va-note">Consent-gated adaptive testing with baseline-aware response analysis.</p>
-                            <div class="va-grid">
-                                <div><strong>Effectiveness:</strong> ${effectiveness.toFixed(1)}%</div>
-                                <div><strong>Risk:</strong> ${risk}</div>
-                                <div><strong>Blocked:</strong> ${blocked}</div>
-                                <div><strong>Challenge:</strong> ${challenge}</div>
-                                <div><strong>Allowed:</strong> ${allowed}</div>
-                                <div><strong>Errors:</strong> ${errorCount}</div>
-                            </div>
-                            <div class="va-actions">
-                                <button class="btn btn-secondary" onclick="downloadVaReport(${index})">
-                                    💾 Download VA Report
-                                </button>
-                                <button class="btn btn-secondary" onclick="downloadVaReportCsv(${index})">
-                                    📄 CSV
-                                </button>
-                                <button class="btn btn-secondary" onclick="openVaReportModalFromResult(${index})">
-                                    🔎 View
-                                </button>
-                            </div>
-                            <div class="payload-table-wrapper">
-                                <table class="payload-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Category</th>
-                                            <th>Payload</th>
-                                            <th>Outcome</th>
-                                            <th>Reason</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        ${rows.map((entry, index) => {
-                                            const rowColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
-                                            const outcome = entry.outcome || 'Unknown';
-                                            const outcomeColor = outcome === 'Blocked' ? '#22c55e' :
-                                                outcome === 'Challenge' ? '#f59e0b' :
-                                                    outcome === 'Allowed' ? '#ef4444' : '#94a3b8';
-                                            return `<tr style="background: ${rowColor};">
-                                                <td>${escapeHtml(entry.category || 'Unknown')}</td>
-                                                <td style="font-family: monospace;">${escapeHtml(entry.payload || '')}</td>
-                                                <td><span style="background: ${outcomeColor}; color: white; padding: 0.125rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block;">${escapeHtml(outcome)}</span></td>
-                                                <td>${escapeHtml(entry.reason || '')}</td>
-                                            </tr>`;
-                                        }).join('')}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        `;
-                            })() : isSmokeTest ? `
+                    ${isSmokeTest ? `
                         <div class="smoke-test-card">
                             <h4 class="smoke-test-title">🛡️ WAF Smoke Test Results</h4>
                             <p class="smoke-test-note">Note: Scanner Detection tests use realistic User-Agent headers instead of query parameters to test if the WAF blocks security scanning tools.</p>
@@ -2472,7 +2284,7 @@
                         </div>
                     ` : ''}
                     
-                    ${!isSmokeTest && !result.is_smoke_test && !isVirtualAdversary ? `
+                    ${!isSmokeTest && !result.is_smoke_test ? `
                     <div class="detection-info">
                         <div class="detection-item ${wafDetected ? 'detected' : 'not-detected'}">
                             <div class="detection-label">
@@ -2504,7 +2316,7 @@
                     </div>
                     ` : ''}
                     
-                    ${!isSmokeTest && !result.is_smoke_test && !isVirtualAdversary && detectionData && detectionData.evidence && Array.isArray(detectionData.evidence) && detectionData.evidence.length > 0 ? `
+                    ${!isSmokeTest && !result.is_smoke_test && detectionData && detectionData.evidence && Array.isArray(detectionData.evidence) && detectionData.evidence.length > 0 ? `
                         <div class="evidence-section">
                             <button class="evidence-toggle" onclick="toggleEvidence(this)">
                                 View Evidence (${detectionData.evidence.length} items)

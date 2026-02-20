@@ -4,13 +4,16 @@ use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, WafSmokeTest};
 use crate::providers::{
     akamai::AkamaiProvider, aws::AwsProvider, azure::AzureProvider, cloudflare::CloudFlareProvider,
-    f5::F5Provider, fastly::FastlyProvider, vercel::VercelProvider, Provider,
+    f5::F5Provider, fastly::FastlyProvider, fortiweb::FortiWebProvider, imperva::ImpervaProvider,
+    modsecurity::ModSecurityProvider, radware::RadwareProvider, sucuri::SucuriProvider,
+    vercel::VercelProvider, Provider,
 };
 use crate::registry::ProviderRegistry;
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::virtual_adversary2::{
     build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner,
 };
+use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use clap::{Arg, ArgMatches, Command};
@@ -46,6 +49,15 @@ fn parse_va2_phases(raw: &str) -> Result<Vec<Va2Phase>> {
     Ok(phases)
 }
 
+fn load_effectiveness_overrides(
+    path: &str,
+) -> Result<crate::effectiveness::EffectivenessConfigOverrides> {
+    let contents = fs::read_to_string(path)?;
+    let overrides = toml::from_str(&contents)
+        .map_err(|err| anyhow!("Failed to parse effectiveness config TOML {path}: {err}"))?;
+    Ok(overrides)
+}
+
 pub struct SimpleCliApp {
     registry: ProviderRegistry,
 }
@@ -62,6 +74,11 @@ impl SimpleCliApp {
         registry.register_provider(Provider::Vercel(VercelProvider::new()))?;
         registry.register_provider(Provider::Azure(AzureProvider::new()))?;
         registry.register_provider(Provider::F5(F5Provider::new()))?;
+        registry.register_provider(Provider::Imperva(ImpervaProvider::new()))?;
+        registry.register_provider(Provider::ModSecurity(ModSecurityProvider::new()))?;
+        registry.register_provider(Provider::Sucuri(SucuriProvider::new()))?;
+        registry.register_provider(Provider::Radware(RadwareProvider::new()))?;
+        registry.register_provider(Provider::FortiWeb(FortiWebProvider::new()))?;
 
         Ok(Self { registry })
     }
@@ -95,7 +112,7 @@ impl SimpleCliApp {
 
         // Handle effectiveness testing
         if let Some(url) = matches.get_one::<String>("effectiveness") {
-            return self.run_effectiveness_test(url).await;
+            return self.run_effectiveness_test(url, &matches).await;
         }
 
         // Handle smoke test command
@@ -126,6 +143,7 @@ impl SimpleCliApp {
             if matches.get_flag("va2-run") {
                 let runner = Va2Runner::new()?;
                 let report = runner.run_plan(plan)?;
+                let report = runner.run_plan(plan).await?;
                 let errors = report
                     .results
                     .iter()
@@ -191,6 +209,10 @@ impl SimpleCliApp {
             if matches.get_flag("va-replay-csv") {
                 let mut lines = Vec::new();
                 lines.push("index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string());
+                lines.push(
+                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
+                        .to_string(),
+                );
                 for item in &report.replay_plan {
                     let row = vec![
                         item.index.to_string(),
@@ -215,6 +237,7 @@ impl SimpleCliApp {
                     "{}.summary.txt",
                     output.trim_end_matches(".json")
                 );
+                let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
                 let summary = format!(
                     "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
                     report.target_url,
@@ -280,9 +303,7 @@ impl SimpleCliApp {
                 request_delay: std::time::Duration::from_millis(
                     *matches.get_one::<u64>("va-delay").unwrap_or(&750),
                 ),
-                max_variants_per_payload: *matches
-                    .get_one::<u8>("va-variants")
-                    .unwrap_or(&4),
+                max_variants_per_payload: *matches.get_one::<u8>("va-variants").unwrap_or(&4),
             };
             let mut runner = VirtualAdversaryRunner::new(config)?;
             if matches.get_flag("va-dry-run") {
@@ -310,6 +331,10 @@ impl SimpleCliApp {
             if matches.get_flag("va-replay-csv") {
                 let mut lines = Vec::new();
                 lines.push("index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string());
+                lines.push(
+                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
+                        .to_string(),
+                );
                 for item in &report.replay_plan {
                     let row = vec![
                         item.index.to_string(),
@@ -330,10 +355,7 @@ impl SimpleCliApp {
             if let Some(output) = matches.get_one::<String>("va-output") {
                 let json = serde_json::to_string_pretty(&report)?;
                 std::fs::write(output, json)?;
-                let summary_path = format!(
-                    "{}.summary.txt",
-                    output.trim_end_matches(".json")
-                );
+                let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
                 let summary = format!(
                     "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
                     report.target_url,
@@ -495,7 +517,7 @@ impl SimpleCliApp {
                 println!("{}", serde_json::to_string_pretty(&detection_result)?);
             }
             "yaml" => {
-                println!("{}", serde_yaml::to_string(&detection_result)?);
+                println!("{}", serde_yml::to_string(&detection_result)?);
             }
             "compact" => {
                 self.print_compact(&detection_result);
@@ -549,7 +571,7 @@ impl SimpleCliApp {
                 println!("{}", serde_json::to_string_pretty(&results)?);
             }
             "yaml" => {
-                println!("{}", serde_yaml::to_string(&results)?);
+                println!("{}", serde_yml::to_string(&results)?);
             }
             "compact" => {
                 for result in &results {
@@ -825,14 +847,44 @@ impl SimpleCliApp {
         Err(last_error.unwrap_or_else(|| anyhow!("Unable to bind to a free port")))
     }
 
-    async fn run_effectiveness_test(&self, url: &str) -> Result<()> {
+    async fn run_effectiveness_test(&self, url: &str, matches: &ArgMatches) -> Result<()> {
         use crate::effectiveness::{EffectivenessConfig, EffectivenessTest};
 
         println!("🔍 WAF Effectiveness Testing");
         println!("════════════════════════════════════════════════════════════════");
 
         // Create effectiveness test with default config
-        let config = EffectivenessConfig::default();
+        let mut config = EffectivenessConfig::default();
+        if let Some(path) = matches.get_one::<String>("effectiveness-config") {
+            let overrides = load_effectiveness_overrides(path)?;
+            config.apply_overrides(overrides);
+        }
+
+        if let Some(value) = matches.get_one::<f64>("effectiveness-similarity-threshold") {
+            if !(0.0..=1.0).contains(value) {
+                return Err(anyhow!(
+                    "effectiveness-similarity-threshold must be between 0.0 and 1.0"
+                ));
+            }
+            config.similarity_threshold = *value;
+        }
+        if let Some(value) = matches.get_one::<f64>("effectiveness-reduction-ratio") {
+            if !(0.0..=1.0).contains(value) {
+                return Err(anyhow!(
+                    "effectiveness-reduction-ratio must be between 0.0 and 1.0"
+                ));
+            }
+            config.reduction_ratio = *value;
+        }
+        if let Some(value) = matches.get_one::<usize>("effectiveness-min-length-diff") {
+            if *value == 0 {
+                return Err(anyhow!(
+                    "effectiveness-min-length-diff must be greater than 0"
+                ));
+            }
+            config.min_length_diff = *value;
+        }
+
         let mut test = EffectivenessTest::new(config).await?;
 
         // Run the test
@@ -1067,6 +1119,37 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Run comprehensive WAF effectiveness testing (requires consent)")
                 .value_name("URL")
                 .num_args(1),
+        )
+        .arg(
+            Arg::new("effectiveness-config")
+                .long("effectiveness-config")
+                .help("Path to TOML config overrides for effectiveness testing")
+                .value_name("FILE")
+                .requires("effectiveness"),
+        )
+        .arg(
+            Arg::new("effectiveness-similarity-threshold")
+                .long("effectiveness-similarity-threshold")
+                .help("Override response body similarity threshold (0.0-1.0)")
+                .value_name("FLOAT")
+                .value_parser(clap::value_parser!(f64))
+                .requires("effectiveness"),
+        )
+        .arg(
+            Arg::new("effectiveness-reduction-ratio")
+                .long("effectiveness-reduction-ratio")
+                .help("Override response body reduction ratio (0.0-1.0)")
+                .value_name("FLOAT")
+                .value_parser(clap::value_parser!(f64))
+                .requires("effectiveness"),
+        )
+        .arg(
+            Arg::new("effectiveness-min-length-diff")
+                .long("effectiveness-min-length-diff")
+                .help("Override minimum response body length diff")
+                .value_name("BYTES")
+                .value_parser(clap::value_parser!(usize))
+                .requires("effectiveness"),
         )
         .arg(
             Arg::new("va2")

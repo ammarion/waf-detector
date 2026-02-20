@@ -44,6 +44,92 @@ pub fn get_techniques_for_level(level: u8) -> Vec<TestingTechnique> {
     techniques
 }
 
+/// Get benign testing techniques for false positive testing
+pub fn get_benign_techniques() -> Vec<TestingTechnique> {
+    vec![
+        TestingTechnique {
+            name: "Blog post with SQL keywords".to_string(),
+            category: "Benign".to_string(),
+            method: "POST".to_string(),
+            payload:
+                "content=Today I learned how to SELECT data FROM a database using WHERE clauses"
+                    .to_string(),
+            headers: HashMap::from([(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )]),
+            severity: "NONE".to_string(),
+            remediation: "Benign content should not be blocked".to_string(),
+        },
+        TestingTechnique {
+            name: "Valid path traversal".to_string(),
+            category: "Benign".to_string(),
+            method: "GET".to_string(),
+            payload: "path=/docs/../images/logo.png".to_string(),
+            headers: HashMap::new(),
+            severity: "NONE".to_string(),
+            remediation: "Valid path navigation should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "JSON with angle brackets".to_string(),
+            category: "Benign".to_string(),
+            method: "POST".to_string(),
+            payload: r#"{"message": "<b>Hello</b> World"}"#.to_string(),
+            headers: HashMap::from([("Content-Type".to_string(), "application/json".to_string())]),
+            severity: "NONE".to_string(),
+            remediation: "Legitimate HTML in JSON should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "Search query with boolean keywords".to_string(),
+            category: "Benign".to_string(),
+            method: "GET".to_string(),
+            payload: "search=red OR blue AND green".to_string(),
+            headers: HashMap::new(),
+            severity: "NONE".to_string(),
+            remediation: "Natural language searches should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "HTML tutorial comment".to_string(),
+            category: "Benign".to_string(),
+            method: "POST".to_string(),
+            payload: "comment=I love the <script> tag in HTML tutorials".to_string(),
+            headers: HashMap::from([(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )]),
+            severity: "NONE".to_string(),
+            remediation: "Educational content about HTML should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "Valid percent-encoded name".to_string(),
+            category: "Benign".to_string(),
+            method: "GET".to_string(),
+            payload: "name=O%27Brien".to_string(),
+            headers: HashMap::new(),
+            severity: "NONE".to_string(),
+            remediation: "Properly encoded legitimate names should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "Mathematical expression".to_string(),
+            category: "Benign".to_string(),
+            method: "GET".to_string(),
+            payload: "calc=1+1=2 OR 2+2=4".to_string(),
+            headers: HashMap::new(),
+            severity: "NONE".to_string(),
+            remediation: "Math expressions should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "Legitimate XML content".to_string(),
+            category: "Benign".to_string(),
+            method: "POST".to_string(),
+            payload: r#"data=<note><to>User</to><from>Admin</from></note>"#.to_string(),
+            headers: HashMap::from([("Content-Type".to_string(), "application/xml".to_string())]),
+            severity: "NONE".to_string(),
+            remediation: "Valid XML without external entities should be allowed".to_string(),
+        },
+    ]
+}
+
 /// Basic detection techniques (safe for production)
 fn get_basic_techniques() -> Vec<TestingTechnique> {
     vec![
@@ -211,15 +297,122 @@ pub fn get_evasion_techniques() -> Vec<TestingTechnique> {
     ]
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BrowserFingerprint {
+    pub user_agent: &'static str,
+    pub accept: &'static str,
+    pub accept_language: &'static str,
+    pub accept_encoding: &'static str,
+    pub sec_ch_ua: Option<&'static str>,
+    pub sec_ch_ua_mobile: Option<&'static str>,
+    pub sec_ch_ua_platform: Option<&'static str>,
+}
+
+const BROWSER_FINGERPRINTS: &[BrowserFingerprint] = &[
+    BrowserFingerprint {
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        accept_language: "en-US,en;q=0.9",
+        accept_encoding: "gzip, deflate, br",
+        sec_ch_ua: Some("\"Chromium\";v=\"122\", \"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"122\""),
+        sec_ch_ua_mobile: Some("?0"),
+        sec_ch_ua_platform: Some("\"Windows\""),
+    },
+    BrowserFingerprint {
+        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        accept_language: "en-US,en;q=0.9",
+        accept_encoding: "gzip, deflate, br",
+        sec_ch_ua: Some("\"Chromium\";v=\"122\", \"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"122\""),
+        sec_ch_ua_mobile: Some("?0"),
+        sec_ch_ua_platform: Some("\"macOS\""),
+    },
+    BrowserFingerprint {
+        user_agent: "Mozilla/5.0 (X11; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0",
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        accept_language: "en-US,en;q=0.9",
+        accept_encoding: "gzip, deflate, br",
+        sec_ch_ua: None,
+        sec_ch_ua_mobile: None,
+        sec_ch_ua_platform: None,
+    },
+    BrowserFingerprint {
+        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        accept_language: "en-US,en;q=0.9",
+        accept_encoding: "gzip, deflate, br",
+        sec_ch_ua: None,
+        sec_ch_ua_mobile: None,
+        sec_ch_ua_platform: None,
+    },
+    BrowserFingerprint {
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edg/122.0.0.0 Safari/537.36",
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        accept_language: "en-US,en;q=0.9",
+        accept_encoding: "gzip, deflate, br",
+        sec_ch_ua: Some("\"Chromium\";v=\"122\", \"Not:A-Brand\";v=\"99\", \"Microsoft Edge\";v=\"122\""),
+        sec_ch_ua_mobile: Some("?0"),
+        sec_ch_ua_platform: Some("\"Windows\""),
+    },
+];
+
 /// User agent strings for diversification
 pub fn get_user_agents() -> Vec<&'static str> {
-    vec![
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
-    ]
+    BROWSER_FINGERPRINTS
+        .iter()
+        .map(|fp| fp.user_agent)
+        .collect()
+}
+
+pub fn random_browser_fingerprint() -> BrowserFingerprint {
+    let mut rng = rand::thread_rng();
+    BROWSER_FINGERPRINTS
+        .choose(&mut rng)
+        .copied()
+        .unwrap_or(BROWSER_FINGERPRINTS[0])
+}
+
+pub fn apply_browser_fingerprint_headers(
+    headers: &mut HashMap<String, String>,
+    fingerprint: BrowserFingerprint,
+) {
+    fn has_header(headers: &HashMap<String, String>, name: &str) -> bool {
+        headers.keys().any(|key| key.eq_ignore_ascii_case(name))
+    }
+
+    if !has_header(headers, "User-Agent") {
+        headers.insert("User-Agent".to_string(), fingerprint.user_agent.to_string());
+    }
+    if !has_header(headers, "Accept") {
+        headers.insert("Accept".to_string(), fingerprint.accept.to_string());
+    }
+    if !has_header(headers, "Accept-Language") {
+        headers.insert(
+            "Accept-Language".to_string(),
+            fingerprint.accept_language.to_string(),
+        );
+    }
+    if !has_header(headers, "Accept-Encoding") {
+        headers.insert(
+            "Accept-Encoding".to_string(),
+            fingerprint.accept_encoding.to_string(),
+        );
+    }
+    if let Some(value) = fingerprint.sec_ch_ua {
+        if !has_header(headers, "Sec-CH-UA") {
+            headers.insert("Sec-CH-UA".to_string(), value.to_string());
+        }
+    }
+    if let Some(value) = fingerprint.sec_ch_ua_mobile {
+        if !has_header(headers, "Sec-CH-UA-Mobile") {
+            headers.insert("Sec-CH-UA-Mobile".to_string(), value.to_string());
+        }
+    }
+    if let Some(value) = fingerprint.sec_ch_ua_platform {
+        if !has_header(headers, "Sec-CH-UA-Platform") {
+            headers.insert("Sec-CH-UA-Platform".to_string(), value.to_string());
+        }
+    }
 }
 
 /// Generate random headers for request diversification
@@ -227,21 +420,21 @@ pub fn generate_random_headers() -> HashMap<String, String> {
     let mut rng = rand::thread_rng();
     let mut headers = HashMap::new();
 
-    // Random user agent
-    let user_agents = get_user_agents();
-    if let Some(ua) = user_agents.choose(&mut rng) {
-        headers.insert("User-Agent".to_string(), ua.to_string());
-    }
+    // Realistic browser fingerprint headers
+    let fingerprint = random_browser_fingerprint();
+    apply_browser_fingerprint_headers(&mut headers, fingerprint);
 
-    // Random accept language
-    let languages = [
-        "en-US,en;q=0.9",
-        "en-GB,en;q=0.9",
-        "fr-FR,fr;q=0.9",
-        "de-DE,de;q=0.9",
-    ];
-    if let Some(lang) = languages.choose(&mut rng) {
-        headers.insert("Accept-Language".to_string(), lang.to_string());
+    // Optional: minor language variation to avoid hardcoding a single locale
+    if rng.gen_bool(0.2) {
+        let languages = [
+            "en-US,en;q=0.9",
+            "en-GB,en;q=0.9",
+            "fr-FR,fr;q=0.9",
+            "de-DE,de;q=0.9",
+        ];
+        if let Some(lang) = languages.choose(&mut rng) {
+            headers.insert("Accept-Language".to_string(), lang.to_string());
+        }
     }
 
     // Random referer (sometimes)

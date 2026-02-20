@@ -197,11 +197,7 @@ pub struct BaselineRecord {
 }
 
 impl BaselineRecord {
-    pub fn from_response(
-        status_code: u16,
-        headers: HashMap<String, String>,
-        body: &str,
-    ) -> Self {
+    pub fn from_response(status_code: u16, headers: HashMap<String, String>, body: &str) -> Self {
         let sample = if body.len() <= BASELINE_SAMPLE_LIMIT {
             body.to_string()
         } else {
@@ -457,6 +453,66 @@ fn classify_enforcement(summary: &VaResultSummary, evidence_score: f64) -> VaEnf
         return VaEnforcement::Inconclusive;
     }
 
+    }
+
+    VaProbeEvaluation {
+        outcome: VaOutcome::Allowed,
+        reason: "no-anomaly".to_string(),
+        evidence,
+    }
+}
+
+fn score_evidence(evidence: &[VaEvidence]) -> f64 {
+    if evidence.is_empty() {
+        return 0.0;
+    }
+    let mut score = 0.0;
+    for entry in evidence {
+        score += match entry.kind {
+            VaEvidenceKind::StatusCode => 1.0,
+            VaEvidenceKind::BlockedKeyword => 0.9,
+            VaEvidenceKind::ChallengeHeader => 0.8,
+            VaEvidenceKind::ChallengeKeyword => 0.7,
+            VaEvidenceKind::BaselineDeviation => 0.6,
+            VaEvidenceKind::StatusChange => 0.5,
+            VaEvidenceKind::HeaderDiff => 0.4,
+            VaEvidenceKind::LengthDelta => 0.2,
+        };
+    }
+    (score / evidence.len() as f64).min(1.0)
+}
+
+fn compute_evidence_score(results: &[VaResultRecord]) -> f64 {
+    if results.is_empty() {
+        return 0.0;
+    }
+    let total: f64 = results
+        .iter()
+        .map(|record| score_evidence(&record.evidence))
+        .sum();
+    (total / results.len() as f64).min(1.0)
+}
+
+fn summarize_evidence(results: &[VaResultRecord]) -> Vec<VaEvidenceTally> {
+    let mut counts: HashMap<VaEvidenceKind, usize> = HashMap::new();
+    for record in results {
+        for entry in &record.evidence {
+            *counts.entry(entry.kind).or_insert(0) += 1;
+        }
+    }
+    let mut tallies: Vec<VaEvidenceTally> = counts
+        .into_iter()
+        .map(|(kind, count)| VaEvidenceTally { kind, count })
+        .collect();
+    tallies.sort_by(|a, b| b.count.cmp(&a.count));
+    tallies
+}
+
+fn classify_enforcement(summary: &VaResultSummary, evidence_score: f64) -> VaEnforcement {
+    if summary.total == 0 {
+        return VaEnforcement::Inconclusive;
+    }
+
     let blocked_rate = summary.blocked as f64 / summary.total as f64;
     let challenge_rate = summary.challenge as f64 / summary.total as f64;
     let allowed_rate = summary.allowed as f64 / summary.total as f64;
@@ -484,6 +540,12 @@ pub struct VaResultSummary {
     pub challenge: usize,
     pub allowed: usize,
     pub error: usize,
+}
+
+impl Default for VaResultSummary {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VaResultSummary {
@@ -645,6 +707,11 @@ pub trait VaHttpAdapter {
     fn get(&self, url: &str) -> anyhow::Result<VaHttpResponse>;
     fn get_with_payload(&self, url: &str, payload: &VaPayloadVariant)
         -> anyhow::Result<VaHttpResponse>;
+    fn get_with_payload(
+        &self,
+        url: &str,
+        payload: &VaPayloadVariant,
+    ) -> anyhow::Result<VaHttpResponse>;
     fn send(&self, request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse>;
 }
 
@@ -768,10 +835,7 @@ pub fn base_payloads_for_tier(tier: u8) -> Vec<VaPayloadTemplate> {
     templates
 }
 
-pub fn generate_variants(
-    template: &VaPayloadTemplate,
-    max_variants: u8,
-) -> Vec<VaPayloadVariant> {
+pub fn generate_variants(template: &VaPayloadTemplate, max_variants: u8) -> Vec<VaPayloadVariant> {
     let mut variants = Vec::new();
     variants.push(VaPayloadVariant {
         category: template.category,
@@ -816,10 +880,7 @@ impl VirtualAdversaryRunner {
         })
     }
 
-    pub fn with_http_adapter(
-        mut self,
-        http: Box<dyn VaHttpAdapter + Send + Sync>,
-    ) -> Self {
+    pub fn with_http_adapter(mut self, http: Box<dyn VaHttpAdapter + Send + Sync>) -> Self {
         self.http = http;
         self
     }
@@ -870,6 +931,12 @@ impl VirtualAdversaryRunner {
         let parsed = Url::parse(&item.url)
             .or_else(|_| Url::parse(&format!("https://{}", item.url)))?;
         let host = parsed.host_str().ok_or_else(|| anyhow!("replay url missing host"))?;
+    fn build_replay_item(target_host: &str, item: &VaReplayPlanItem) -> Result<VaProbePlanItem> {
+        let parsed =
+            Url::parse(&item.url).or_else(|_| Url::parse(&format!("https://{}", item.url)))?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| anyhow!("replay url missing host"))?;
         if host != target_host {
             return Err(anyhow!(
                 "replay url host mismatch: expected {target_host}, got {host}"
@@ -931,6 +998,17 @@ impl VirtualAdversaryRunner {
         );
         let mut evaluation = classify_outcome(response.status, &diff, &response.body);
         evaluation.reason.push_str(&format!(
+        let diff =
+            ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
+        let mut evaluation = classify_outcome(response.status, &diff, &response.body);
+        evaluation.reason.push_str(&format!(
+        payload: &VaPayloadVariant,
+    ) -> Result<(VaOutcome, String)> {
+        let response = self.http.get_with_payload(target_url, payload)?;
+        let diff =
+            ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
+        let (outcome, mut reason) = classify_outcome(response.status, &diff, &response.body);
+        reason.push_str(&format!(
             " status={} len_delta={} header_diff={}",
             response.status,
             diff.length_delta,
@@ -951,6 +1029,11 @@ impl VirtualAdversaryRunner {
         let base = Url::parse(target_url)
             .or_else(|_| Url::parse(&format!("https://{target_url}")))?;
         let target_host = base.host_str().ok_or_else(|| anyhow!("target url missing host"))?;
+        let base =
+            Url::parse(target_url).or_else(|_| Url::parse(&format!("https://{target_url}")))?;
+        let target_host = base
+            .host_str()
+            .ok_or_else(|| anyhow!("target url missing host"))?;
 
         let required = 1 + replay_plan.len() as u32;
         self.budget.consume(required)?;
@@ -1080,6 +1163,8 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 fn build_probe_request(probe: &Probe, target_url: &str) -> Result<VaHttpRequest> {
     let mut url = Url::parse(target_url)
         .or_else(|_| Url::parse(&format!("https://{target_url}")))?;
+    let mut url =
+        Url::parse(target_url).or_else(|_| Url::parse(&format!("https://{target_url}")))?;
 
     match probe.channel {
         dae::ProbeChannel::Path => {
@@ -1329,9 +1414,13 @@ mod tests {
 
             let mut events = Vec::new();
             let report = runner
-                .run_with_events("https://example.com", |_, _| {}, |event| {
-                    events.push(event);
-                })
+                .run_with_events(
+                    "https://example.com",
+                    |_, _| {},
+                    |event| {
+                        events.push(event);
+                    },
+                )
                 .unwrap();
 
             assert_eq!(events.len(), report.plan_size);
@@ -1381,7 +1470,10 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("content-type".to_string(), "text/html".to_string());
         let record = BaselineRecord::from_response(200, headers.clone(), "ok");
-        assert_eq!(record.headers.get("content-type"), Some(&"text/html".to_string()));
+        assert_eq!(
+            record.headers.get("content-type"),
+            Some(&"text/html".to_string())
+        );
         assert_eq!(record.status_code, 200);
     }
 
@@ -1439,6 +1531,7 @@ mod tests {
             .evidence
             .iter()
             .any(|e| e.kind == VaEvidenceKind::ChallengeHeader));
+        assert_eq!(classify_outcome(200, &diff, "ok").0, VaOutcome::Challenge);
     }
 
     #[test]
@@ -1447,6 +1540,7 @@ mod tests {
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
         let evaluation = classify_outcome(200, &diff, "ok");
         assert_eq!(evaluation.outcome, VaOutcome::Allowed);
+        assert_eq!(classify_outcome(200, &diff, "ok").0, VaOutcome::Allowed);
     }
 
     #[test]
@@ -1522,11 +1616,8 @@ mod tests {
 
     #[test]
     fn test_run_report_tracks_plan_and_timing() {
-        let mut report = VaRunReport::new(
-            "https://example.com",
-            5,
-            VirtualAdversaryConfig::default(),
-        );
+        let mut report =
+            VaRunReport::new("https://example.com", 5, VirtualAdversaryConfig::default());
         assert_eq!(report.target_url, "https://example.com");
         assert_eq!(report.plan_size, 5);
         assert_eq!(report.enforcement, VaEnforcement::Inconclusive);
@@ -1774,11 +1865,7 @@ mod tests {
 
     #[test]
     fn test_va_report_serializes_to_json() {
-        let report = VaRunReport::new(
-            "https://example.com",
-            2,
-            VirtualAdversaryConfig::default(),
-        );
+        let report = VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("example.com"));
         assert!(json.contains("plan_size"));
@@ -1788,10 +1875,7 @@ mod tests {
     #[test]
     fn test_va_report_schema_has_required_keys() {
         let schema = va_report_schema();
-        let required = schema
-            .get("required")
-            .and_then(|v| v.as_array())
-            .unwrap();
+        let required = schema.get("required").and_then(|v| v.as_array()).unwrap();
         let required_keys: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
         assert!(required_keys.contains(&"target_url"));
         assert!(required_keys.contains(&"plan_size"));

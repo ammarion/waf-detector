@@ -3,6 +3,7 @@
 //! Behavioral WAF profiling with deterministic, replayable campaigns.
 
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -74,6 +75,9 @@ pub struct Va2HttpResponse {
 
 pub trait Va2HttpAdapter {
     fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse>;
+#[async_trait]
+pub trait Va2HttpAdapter: Send + Sync {
+    async fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse>;
 }
 
 pub struct RealVa2HttpAdapter {
@@ -96,6 +100,18 @@ impl Va2HttpAdapter for RealVa2HttpAdapter {
             &request.headers,
             request.body.as_deref(),
         ))?;
+#[async_trait]
+impl Va2HttpAdapter for RealVa2HttpAdapter {
+    async fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
+        let response = self
+            .client
+            .request(
+                &request.method,
+                &request.url,
+                &request.headers,
+                request.body.as_deref(),
+            )
+            .await?;
         Ok(Va2HttpResponse {
             status: response.status,
             headers: response.headers,
@@ -222,6 +238,7 @@ impl Va2Runner {
     }
 
     pub fn run_plan(&self, plan: Va2CampaignPlan) -> Result<Va2RunReport> {
+    pub async fn run_plan(&self, plan: Va2CampaignPlan) -> Result<Va2RunReport> {
         ensure_va2_consent_and_target(&self.consent_manager, &plan.target_url)?;
 
         let mut results = Vec::with_capacity(plan.steps.len());
@@ -238,6 +255,11 @@ impl Va2Runner {
             let request = build_va2_request(&plan.target_url, step)?;
             let started = Instant::now();
             let response = self.http.send(&request);
+                tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms)).await;
+            }
+            let request = build_va2_request(&plan.target_url, step)?;
+            let started = Instant::now();
+            let response = self.http.send(&request).await;
             let duration = started.elapsed().as_millis();
             match response {
                 Ok(resp) => {
@@ -292,6 +314,12 @@ impl Va2Runner {
             Some(compute_throttle_curve(&throttle_samples))
         };
         let wbf = compute_wbf(&normalization, &state_summary, &challenge_profile, &throttle);
+        let wbf = compute_wbf(
+            &normalization,
+            &state_summary,
+            &challenge_profile,
+            &throttle,
+        );
         let pmi = compute_pmi(&wbf);
 
         Ok(Va2RunReport {
@@ -321,6 +349,7 @@ fn ensure_va2_consent_and_target(
     consent_manager: &ConsentManager,
     target_url: &str,
 ) -> Result<()> {
+fn ensure_va2_consent_and_target(consent_manager: &ConsentManager, target_url: &str) -> Result<()> {
     if !consent_manager.has_valid_consent()? {
         return Err(anyhow!(
             "Consent is required before running Virtual Adversary 2.0 tests"
@@ -460,6 +489,11 @@ fn compute_throttle_curve(samples: &[u128]) -> Va2ThrottleCurve {
     }
     let steps = samples.len().saturating_sub(1) as f64;
     curve.slope_ms_per_step = if steps > 0.0 { total_slope / steps } else { 0.0 };
+    curve.slope_ms_per_step = if steps > 0.0 {
+        total_slope / steps
+    } else {
+        0.0
+    };
     curve.triggered = curve.slope_ms_per_step > 50.0;
     curve
 }
@@ -593,6 +627,7 @@ pub fn build_va2_campaign_plan(
                     "/%2F",
                     "/index.html",
                 ];
+                let variants = ["/", "/./", "/%2e/", "/%2F", "/index.html"];
                 for idx in 0..3 {
                     let path = variants[rng.gen_range(0..variants.len())];
                     steps.push(Va2CampaignStep {
@@ -697,6 +732,10 @@ mod tests {
     fn with_temp_home<F>(f: F)
     where
         F: FnOnce(&TempDir),
+    async fn with_temp_home<F, Fut>(f: F)
+    where
+        F: FnOnce(TempDir) -> Fut,
+        Fut: std::future::Future<Output = ()>,
     {
         let _guard = crate::test_utils::env_lock()
             .lock()
@@ -705,6 +744,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
         f(&temp_dir);
+        f(temp_dir).await;
         if let Some(value) = original_home {
             std::env::set_var("WAF_DETECTOR_HOME", value);
         } else {
@@ -717,6 +757,9 @@ mod tests {
 
     impl Va2HttpAdapter for StubAdapter {
         fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
+    #[async_trait]
+    impl Va2HttpAdapter for StubAdapter {
+        async fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
             let (status, body) = if request.url.contains("protocol") {
                 (418, "teapot".to_string())
             } else if request.url.contains("state") {
@@ -749,6 +792,11 @@ mod tests {
             "acknowledgment": "I AGREE"
         });
         std::fs::write(&consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+        std::fs::write(
+            &consent_path,
+            serde_json::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -760,6 +808,9 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
+        let err = build_va2_campaign_plan("https://example.com", &[], Va2CampaignConfig::default())
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("at least one phase"));
     }
 
@@ -767,6 +818,10 @@ mod tests {
     fn test_va2_plan_deterministic() {
         let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
         let config = Va2CampaignConfig { seed: 4242, budget: 20 };
+        let config = Va2CampaignConfig {
+            seed: 4242,
+            budget: 20,
+        };
         let plan_a = build_va2_campaign_plan("https://example.com", &phases, config).unwrap();
         let plan_b = build_va2_campaign_plan("https://example.com", &phases, config).unwrap();
         assert_eq!(plan_a, plan_b);
@@ -793,6 +848,9 @@ mod tests {
             Va2CampaignConfig::default(),
         )
         .unwrap();
+        let plan =
+            build_va2_campaign_plan("https://example.com", &phases, Va2CampaignConfig::default())
+                .unwrap();
         let json = serde_json::to_string(&plan).unwrap();
         assert!(json.contains("va2-0.1"));
     }
@@ -800,6 +858,9 @@ mod tests {
     #[test]
     fn test_va2_runner_requires_consent() {
         with_temp_home(|_temp| {
+    #[tokio::test]
+    async fn test_va2_runner_requires_consent() {
+        with_temp_home(|_temp| async move {
             let phases = vec![Va2Phase::Baseline];
             let plan = build_va2_campaign_plan(
                 "https://example.com",
@@ -817,6 +878,16 @@ mod tests {
     fn test_va2_runner_executes_plan() {
         with_temp_home(|temp| {
             write_consent(temp, &["example.com"]);
+            let err = runner.run_plan(plan).await.unwrap_err().to_string();
+            assert!(err.contains("Consent is required"));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_va2_runner_executes_plan() {
+        with_temp_home(|temp| async move {
+            write_consent(&temp, &["example.com"]);
             let phases = vec![
                 Va2Phase::Baseline,
                 Va2Phase::ProtocolVariance,
@@ -828,6 +899,10 @@ mod tests {
                 "https://example.com",
                 &phases,
                 Va2CampaignConfig { seed: 1, budget: 10 },
+                Va2CampaignConfig {
+                    seed: 1,
+                    budget: 10,
+                },
             )
             .unwrap();
             for step in &mut plan.steps {
@@ -844,6 +919,7 @@ mod tests {
             }
             let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
             let report = runner.run_plan(plan).unwrap();
+            let report = runner.run_plan(plan).await.unwrap();
             assert!(!report.results.is_empty());
             assert_eq!(report.results.len(), report.plan.steps.len());
             assert_eq!(report.baseline.status, Some(200));
@@ -854,6 +930,8 @@ mod tests {
             assert!(report.pmi.score >= 0.0);
             assert!(!report.pmi.label.is_empty());
         });
+        })
+        .await;
     }
 
     #[test]

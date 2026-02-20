@@ -177,6 +177,8 @@ impl ConsentManager {
         // Check if host matches any authorized target
         for authorized in &consent.authorized_targets {
             let authorized = Self::normalize_target(authorized).unwrap_or_else(|_| authorized.to_string());
+            let authorized =
+                Self::normalize_target(authorized).unwrap_or_else(|_| authorized.to_string());
             if host == authorized || host.ends_with(&format!(".{authorized}")) {
                 return Ok(true);
             }
@@ -202,9 +204,7 @@ impl ConsentManager {
     pub fn remove_authorized_target(&self, target: &str) -> Result<bool> {
         let mut consent = self.load_consent()?;
         let before = consent.authorized_targets.len();
-        consent
-            .authorized_targets
-            .retain(|entry| entry != target);
+        consent.authorized_targets.retain(|entry| entry != target);
         let removed = consent.authorized_targets.len() != before;
         if removed {
             self.save_consent(&consent)?;
@@ -330,6 +330,10 @@ pub fn manage_consent_cli(args: Vec<String>) -> Result<()> {
                     println!("Authorized targets: (none)");
                 } else {
                     println!("Authorized targets: {}", status.authorized_targets.join(", "));
+                    println!(
+                        "Authorized targets: {}",
+                        status.authorized_targets.join(", ")
+                    );
                 }
             }
             "add-target" => {
