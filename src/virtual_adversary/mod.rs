@@ -155,11 +155,7 @@ pub struct BaselineRecord {
 }
 
 impl BaselineRecord {
-    pub fn from_response(
-        status_code: u16,
-        headers: HashMap<String, String>,
-        body: &str,
-    ) -> Self {
+    pub fn from_response(status_code: u16, headers: HashMap<String, String>, body: &str) -> Self {
         let sample = if body.len() <= BASELINE_SAMPLE_LIMIT {
             body.to_string()
         } else {
@@ -396,8 +392,11 @@ pub fn va_report_schema() -> serde_json::Value {
 
 pub trait VaHttpAdapter {
     fn get(&self, url: &str) -> anyhow::Result<VaHttpResponse>;
-    fn get_with_payload(&self, url: &str, payload: &VaPayloadVariant)
-        -> anyhow::Result<VaHttpResponse>;
+    fn get_with_payload(
+        &self,
+        url: &str,
+        payload: &VaPayloadVariant,
+    ) -> anyhow::Result<VaHttpResponse>;
 }
 
 pub struct RealVaHttpAdapter {
@@ -490,10 +489,7 @@ pub fn base_payloads_for_tier(tier: u8) -> Vec<VaPayloadTemplate> {
     templates
 }
 
-pub fn generate_variants(
-    template: &VaPayloadTemplate,
-    max_variants: u8,
-) -> Vec<VaPayloadVariant> {
+pub fn generate_variants(template: &VaPayloadTemplate, max_variants: u8) -> Vec<VaPayloadVariant> {
     let mut variants = Vec::new();
     variants.push(VaPayloadVariant {
         category: template.category,
@@ -538,10 +534,7 @@ impl VirtualAdversaryRunner {
         })
     }
 
-    pub fn with_http_adapter(
-        mut self,
-        http: Box<dyn VaHttpAdapter + Send + Sync>,
-    ) -> Self {
+    pub fn with_http_adapter(mut self, http: Box<dyn VaHttpAdapter + Send + Sync>) -> Self {
         self.http = http;
         self
     }
@@ -576,12 +569,8 @@ impl VirtualAdversaryRunner {
         payload: &VaPayloadVariant,
     ) -> Result<(VaOutcome, String)> {
         let response = self.http.get_with_payload(target_url, payload)?;
-        let diff = ResponseDiff::compare(
-            baseline,
-            response.status,
-            &response.headers,
-            &response.body,
-        );
+        let diff =
+            ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
         let (outcome, mut reason) = classify_outcome(response.status, &diff, &response.body);
         reason.push_str(&format!(
             " status={} len_delta={} header_diff={}",
@@ -864,9 +853,13 @@ mod tests {
 
             let mut events = Vec::new();
             let report = runner
-                .run_with_events("https://example.com", |_, _| {}, |event| {
-                    events.push(event);
-                })
+                .run_with_events(
+                    "https://example.com",
+                    |_, _| {},
+                    |event| {
+                        events.push(event);
+                    },
+                )
                 .unwrap();
 
             assert_eq!(events.len(), report.plan_size);
@@ -916,7 +909,10 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("content-type".to_string(), "text/html".to_string());
         let record = BaselineRecord::from_response(200, headers.clone(), "ok");
-        assert_eq!(record.headers.get("content-type"), Some(&"text/html".to_string()));
+        assert_eq!(
+            record.headers.get("content-type"),
+            Some(&"text/html".to_string())
+        );
         assert_eq!(record.status_code, 200);
     }
 
@@ -966,20 +962,14 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("cf-ray".to_string(), "123".to_string());
         let diff = ResponseDiff::compare(&baseline, 200, &headers, "ok");
-        assert_eq!(
-            classify_outcome(200, &diff, "ok").0,
-            VaOutcome::Challenge
-        );
+        assert_eq!(classify_outcome(200, &diff, "ok").0, VaOutcome::Challenge);
     }
 
     #[test]
     fn test_classify_outcome_allowed() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
-        assert_eq!(
-            classify_outcome(200, &diff, "ok").0,
-            VaOutcome::Allowed
-        );
+        assert_eq!(classify_outcome(200, &diff, "ok").0, VaOutcome::Allowed);
     }
 
     #[test]
@@ -1049,11 +1039,8 @@ mod tests {
 
     #[test]
     fn test_run_report_tracks_plan_and_timing() {
-        let mut report = VaRunReport::new(
-            "https://example.com",
-            5,
-            VirtualAdversaryConfig::default(),
-        );
+        let mut report =
+            VaRunReport::new("https://example.com", 5, VirtualAdversaryConfig::default());
         assert_eq!(report.target_url, "https://example.com");
         assert_eq!(report.plan_size, 5);
         assert!(report.finished_at.is_none());
@@ -1195,11 +1182,7 @@ mod tests {
 
     #[test]
     fn test_va_report_serializes_to_json() {
-        let report = VaRunReport::new(
-            "https://example.com",
-            2,
-            VirtualAdversaryConfig::default(),
-        );
+        let report = VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
         let json = serde_json::to_string(&report).unwrap();
         assert!(json.contains("example.com"));
         assert!(json.contains("plan_size"));
@@ -1208,10 +1191,7 @@ mod tests {
     #[test]
     fn test_va_report_schema_has_required_keys() {
         let schema = va_report_schema();
-        let required = schema
-            .get("required")
-            .and_then(|v| v.as_array())
-            .unwrap();
+        let required = schema.get("required").and_then(|v| v.as_array()).unwrap();
         let required_keys: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
         assert!(required_keys.contains(&"target_url"));
         assert!(required_keys.contains(&"plan_size"));

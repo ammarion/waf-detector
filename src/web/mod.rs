@@ -7,7 +7,6 @@ use crate::virtual_adversary::{
 };
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, NaiveDate, Utc};
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
@@ -15,6 +14,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{
@@ -22,8 +22,8 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::{fs, path::PathBuf};
-use url::Url;
 use tower_http::{cors::CorsLayer, services::ServeDir};
+use url::Url;
 
 pub mod templates;
 
@@ -300,7 +300,10 @@ impl WebServer {
             .route("/api/smoke-test", post(smoke_test))
             .route("/api/batch-scan", post(batch_scan))
             .route("/api/virtual-adversary", post(virtual_adversary))
-            .route("/api/virtual-adversary/start", post(virtual_adversary_start))
+            .route(
+                "/api/virtual-adversary/start",
+                post(virtual_adversary_start),
+            )
             .route(
                 "/api/virtual-adversary/status/:id",
                 get(virtual_adversary_status),
@@ -419,11 +422,7 @@ fn report_filename(target_url: &str, created_at: DateTime<Utc>) -> String {
         .and_then(|url| url.host_str().map(|host| host.to_string()))
         .unwrap_or_else(|| "unknown".to_string());
     let host = sanitize_report_component(&host);
-    format!(
-        "va-{}-{}.json",
-        created_at.format("%Y%m%dT%H%M%S"),
-        host
-    )
+    format!("va-{}-{}.json", created_at.format("%Y%m%dT%H%M%S"), host)
 }
 
 fn write_va_report(report: &VaRunReport) -> Result<String> {
@@ -499,12 +498,14 @@ fn enforce_va_report_retention(max_reports: usize) -> Result<(usize, usize)> {
 }
 
 fn parse_date_range(start: &str, end: &str) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
-    let start_date = NaiveDate::parse_from_str(start, "%Y-%m-%d")
-        .map_err(|_| anyhow!("Invalid start date"))?;
+    let start_date =
+        NaiveDate::parse_from_str(start, "%Y-%m-%d").map_err(|_| anyhow!("Invalid start date"))?;
     let end_date =
         NaiveDate::parse_from_str(end, "%Y-%m-%d").map_err(|_| anyhow!("Invalid end date"))?;
 
-    let start_dt = start_date.and_hms_opt(0, 0, 0).ok_or_else(|| anyhow!("Invalid start date"))?;
+    let start_dt = start_date
+        .and_hms_opt(0, 0, 0)
+        .ok_or_else(|| anyhow!("Invalid start date"))?;
     let end_dt = end_date
         .and_hms_opt(23, 59, 59)
         .ok_or_else(|| anyhow!("Invalid end date"))?;
@@ -544,7 +545,9 @@ fn csv_escape(value: &str) -> String {
 
 fn build_va_reports_csv(reports: &[VaReportSummary]) -> String {
     let mut lines = Vec::new();
-    lines.push("id,target_url,created_at,plan_size,blocked,challenge,allowed,error,risk_label".to_string());
+    lines.push(
+        "id,target_url,created_at,plan_size,blocked,challenge,allowed,error,risk_label".to_string(),
+    );
     for report in reports {
         let row = [
             csv_escape(&report.id),
@@ -1101,11 +1104,7 @@ async fn virtual_adversary_reports_csv() -> impl IntoResponse {
     match list_va_reports() {
         Ok(reports) => {
             let body = build_va_reports_csv(&reports);
-            (
-                StatusCode::OK,
-                [(header::CONTENT_TYPE, "text/csv")],
-                body,
-            )
+            (StatusCode::OK, [(header::CONTENT_TYPE, "text/csv")], body)
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1120,11 +1119,7 @@ async fn virtual_adversary_report_csv(Path(report_id): Path<String>) -> impl Int
     match load_va_report(&report_id) {
         Ok(report) => {
             let body = build_va_report_csv(&report);
-            (
-                StatusCode::OK,
-                [(header::CONTENT_TYPE, "text/csv")],
-                body,
-            )
+            (StatusCode::OK, [(header::CONTENT_TYPE, "text/csv")], body)
         }
         Err(e) => (
             StatusCode::NOT_FOUND,
@@ -1217,9 +1212,9 @@ mod tests {
         sanitize_report_component, VaJobState, VaReportSummary, VaRequest, VaStoredReport,
     };
     use crate::virtual_adversary::{VaRunReport, VirtualAdversaryConfig};
-    use std::time::Duration;
     use chrono::{NaiveDate, TimeZone, Timelike, Utc};
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn va_request_defaults_to_config() {
@@ -1328,13 +1323,16 @@ mod tests {
 
     #[test]
     fn build_va_report_csv_includes_payloads() {
-        let mut report = VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
-        report.results.push(crate::virtual_adversary::VaResultRecord {
-            payload: "' OR '1'='1".to_string(),
-            category: crate::virtual_adversary::VaPayloadCategory::SqlInjection,
-            outcome: crate::virtual_adversary::VaOutcome::Blocked,
-            reason: "status=403".to_string(),
-        });
+        let mut report =
+            VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
+        report
+            .results
+            .push(crate::virtual_adversary::VaResultRecord {
+                payload: "' OR '1'='1".to_string(),
+                category: crate::virtual_adversary::VaPayloadCategory::SqlInjection,
+                outcome: crate::virtual_adversary::VaOutcome::Blocked,
+                reason: "status=403".to_string(),
+            });
         let stored = VaStoredReport {
             id: "va-1.json".to_string(),
             created_at: chrono::Utc::now(),
@@ -1371,7 +1369,11 @@ mod tests {
             let stored = VaStoredReport {
                 id: report.id.clone(),
                 created_at,
-                report: VaRunReport::new("https://example.com", 0, VirtualAdversaryConfig::default()),
+                report: VaRunReport::new(
+                    "https://example.com",
+                    0,
+                    VirtualAdversaryConfig::default(),
+                ),
             };
             let path = temp_dir
                 .path()
@@ -1390,8 +1392,14 @@ mod tests {
     #[test]
     fn parse_date_range_respects_bounds() {
         let (start, end) = super::parse_date_range("2026-02-01", "2026-02-02").unwrap();
-        assert_eq!(start.date_naive(), NaiveDate::from_ymd_opt(2026, 2, 1).unwrap());
-        assert_eq!(end.date_naive(), NaiveDate::from_ymd_opt(2026, 2, 2).unwrap());
+        assert_eq!(
+            start.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 2, 1).unwrap()
+        );
+        assert_eq!(
+            end.date_naive(),
+            NaiveDate::from_ymd_opt(2026, 2, 2).unwrap()
+        );
         assert_eq!(start.time().hour(), 0);
         assert_eq!(end.time().hour(), 23);
     }
@@ -1420,7 +1428,8 @@ mod tests {
 
         for (idx, created_at) in dates.iter().enumerate() {
             let id = format!("va-range-{idx}.json");
-            let report = VaRunReport::new("https://example.com", 0, VirtualAdversaryConfig::default());
+            let report =
+                VaRunReport::new("https://example.com", 0, VirtualAdversaryConfig::default());
             let stored = VaStoredReport {
                 id: id.clone(),
                 created_at: *created_at,

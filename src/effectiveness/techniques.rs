@@ -51,10 +51,13 @@ pub fn get_benign_techniques() -> Vec<TestingTechnique> {
             name: "Blog post with SQL keywords".to_string(),
             category: "Benign".to_string(),
             method: "POST".to_string(),
-            payload: "content=Today I learned how to SELECT data FROM a database using WHERE clauses".to_string(),
-            headers: HashMap::from([
-                ("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()),
-            ]),
+            payload:
+                "content=Today I learned how to SELECT data FROM a database using WHERE clauses"
+                    .to_string(),
+            headers: HashMap::from([(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )]),
             severity: "NONE".to_string(),
             remediation: "Benign content should not be blocked".to_string(),
         },
@@ -72,9 +75,7 @@ pub fn get_benign_techniques() -> Vec<TestingTechnique> {
             category: "Benign".to_string(),
             method: "POST".to_string(),
             payload: r#"{"message": "<b>Hello</b> World"}"#.to_string(),
-            headers: HashMap::from([
-                ("Content-Type".to_string(), "application/json".to_string()),
-            ]),
+            headers: HashMap::from([("Content-Type".to_string(), "application/json".to_string())]),
             severity: "NONE".to_string(),
             remediation: "Legitimate HTML in JSON should be allowed".to_string(),
         },
@@ -92,9 +93,10 @@ pub fn get_benign_techniques() -> Vec<TestingTechnique> {
             category: "Benign".to_string(),
             method: "POST".to_string(),
             payload: "comment=I love the <script> tag in HTML tutorials".to_string(),
-            headers: HashMap::from([
-                ("Content-Type".to_string(), "application/x-www-form-urlencoded".to_string()),
-            ]),
+            headers: HashMap::from([(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )]),
             severity: "NONE".to_string(),
             remediation: "Educational content about HTML should be allowed".to_string(),
         },
@@ -121,9 +123,7 @@ pub fn get_benign_techniques() -> Vec<TestingTechnique> {
             category: "Benign".to_string(),
             method: "POST".to_string(),
             payload: r#"data=<note><to>User</to><from>Admin</from></note>"#.to_string(),
-            headers: HashMap::from([
-                ("Content-Type".to_string(), "application/xml".to_string()),
-            ]),
+            headers: HashMap::from([("Content-Type".to_string(), "application/xml".to_string())]),
             severity: "NONE".to_string(),
             remediation: "Valid XML without external entities should be allowed".to_string(),
         },

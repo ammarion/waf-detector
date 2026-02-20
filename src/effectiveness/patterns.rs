@@ -463,7 +463,8 @@ fn benign_patterns() -> Vec<AttackPattern> {
             id: "benign-001".to_string(),
             name: "Blog post with SQL keywords".to_string(),
             category: PatternCategory::Benign,
-            pattern: "Today I learned how to SELECT data FROM a database using WHERE clauses".to_string(),
+            pattern: "Today I learned how to SELECT data FROM a database using WHERE clauses"
+                .to_string(),
             description: "Legitimate blog content containing SQL keywords".to_string(),
             risk_level: "NONE".to_string(),
             cwe_id: None,

@@ -475,8 +475,7 @@ impl EffectivenessTest {
 
         // Calculate false positive rate
         if report.statistics.benign_tests_count > 0 {
-            report.statistics.false_positive_rate =
-                report.statistics.false_positive_count as f64
+            report.statistics.false_positive_rate = report.statistics.false_positive_count as f64
                 / report.statistics.benign_tests_count as f64;
         }
 
@@ -702,7 +701,9 @@ impl EffectivenessTest {
                 implementation: "Review and tune WAF rules to reduce false positives. Consider allowlisting legitimate patterns and adjusting sensitivity thresholds. High false positive rates can impact legitimate users."
                     .to_string(),
             });
-        } else if report.statistics.false_positive_rate > 0.0 && report.statistics.benign_tests_count > 0 {
+        } else if report.statistics.false_positive_rate > 0.0
+            && report.statistics.benign_tests_count > 0
+        {
             report.add_recommendation(Recommendation {
                 priority: "MEDIUM".to_string(),
                 category: "False Positives".to_string(),

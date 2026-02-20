@@ -42,8 +42,7 @@ impl FortiWebProvider {
 
     fn body_block_pattern() -> &'static Regex {
         static PATTERN: OnceLock<Regex> = OnceLock::new();
-        PATTERN
-            .get_or_init(|| Regex::new(r"(?i)web\s+page\s+blocked.*fortinet").unwrap())
+        PATTERN.get_or_init(|| Regex::new(r"(?i)web\s+page\s+blocked.*fortinet").unwrap())
     }
 
     async fn check_headers(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
