@@ -1,0 +1,91 @@
+# SQL Injection Payloads
+
+[[payloads]]
+id = "sqli-001"
+name = "Basic SQL Injection"
+category = "SQLInjection"
+pattern = "' OR '1'='1"
+description = "Classic SQL injection attempting to bypass authentication"
+risk_level = "HIGH"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "sqli-002"
+name = "Union-based SQL Injection"
+category = "SQLInjection"
+pattern = "1' UNION SELECT NULL,NULL,NULL--"
+description = "Attempts to extract data using UNION clause"
+risk_level = "HIGH"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "sqli-003"
+name = "SQL DROP TABLE"
+category = "SQLInjection"
+pattern = "'; DROP TABLE users; --"
+description = "Destructive SQL injection attempt"
+risk_level = "CRITICAL"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "sqli-004"
+name = "SQL Admin Bypass"
+category = "SQLInjection"
+pattern = "admin'--"
+description = "Authentication bypass using SQL comments"
+risk_level = "HIGH"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "sqli-005"
+name = "Information Schema Query"
+category = "SQLInjection"
+pattern = "1' AND (SELECT COUNT(*) FROM information_schema.tables)>0--"
+description = "SQL injection targeting information schema"
+risk_level = "HIGH"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "sqli-006"
+name = "Time-based Blind SQL Injection"
+category = "SQLInjection"
+pattern = "'; WAITFOR DELAY '00:00:05'--"
+description = "Blind SQL injection using time delays"
+risk_level = "HIGH"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "sqli-007"
+name = "SQL LIMIT OFFSET"
+category = "SQLInjection"
+pattern = "' OR 1=1 LIMIT 1 OFFSET 0--"
+description = "SQL injection with LIMIT clause"
+risk_level = "HIGH"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "sqli-008"
+name = "EXTRACTVALUE SQL Injection"
+category = "SQLInjection"
+pattern = "1' AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT version()), 0x7e))--"
+description = "MySQL EXTRACTVALUE-based injection"
+risk_level = "HIGH"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "sqli-009"
+name = "Wide UNION SELECT"
+category = "SQLInjection"
+pattern = "1' UNION SELECT 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20--"
+description = "UNION SELECT with many columns"
+risk_level = "HIGH"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"

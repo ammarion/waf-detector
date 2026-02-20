@@ -1,0 +1,71 @@
+# Server-Side Request Forgery (SSRF) Payloads
+
+[[payloads]]
+id = "ssrf-001"
+name = "AWS Metadata SSRF"
+category = "SSRF"
+pattern = "http://169.254.169.254/latest/meta-data/"
+description = "Attempts to access AWS metadata endpoint"
+risk_level = "HIGH"
+cwe_id = "CWE-918"
+owasp_category = "A10:2021"
+
+[[payloads]]
+id = "ssrf-002"
+name = "GCP Metadata SSRF"
+category = "SSRF"
+pattern = "http://metadata.google.internal/computeMetadata/v1/"
+description = "Attempts to access Google Cloud metadata endpoint"
+risk_level = "HIGH"
+cwe_id = "CWE-918"
+owasp_category = "A10:2021"
+
+[[payloads]]
+id = "ssrf-003"
+name = "Azure Metadata SSRF"
+category = "SSRF"
+pattern = "http://169.254.169.254/metadata/instance"
+description = "Attempts to access Azure metadata endpoint"
+risk_level = "HIGH"
+cwe_id = "CWE-918"
+owasp_category = "A10:2021"
+
+[[payloads]]
+id = "ssrf-004"
+name = "AWS IAM Credentials SSRF"
+category = "SSRF"
+pattern = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+description = "Attempts to access AWS IAM credentials"
+risk_level = "CRITICAL"
+cwe_id = "CWE-918"
+owasp_category = "A10:2021"
+
+[[payloads]]
+id = "ssrf-005"
+name = "Localhost Admin SSRF"
+category = "SSRF"
+pattern = "http://localhost:8080/admin"
+description = "Attempts to access localhost admin interfaces"
+risk_level = "HIGH"
+cwe_id = "CWE-918"
+owasp_category = "A10:2021"
+
+[[payloads]]
+id = "ssrf-006"
+name = "Redis SSRF"
+category = "SSRF"
+pattern = "http://127.0.0.1:6379/"
+description = "Attempts to access internal Redis instance"
+risk_level = "HIGH"
+cwe_id = "CWE-918"
+owasp_category = "A10:2021"
+
+[[payloads]]
+id = "ssrf-007"
+name = "File URI SSRF"
+category = "SSRF"
+pattern = "file:///etc/passwd"
+description = "Attempts to read local files via file:// protocol"
+risk_level = "HIGH"
+cwe_id = "CWE-918"
+owasp_category = "A10:2021"

@@ -1,0 +1,41 @@
+# WebSocket Injection Payloads
+
+[[payloads]]
+id = "ws-001"
+name = "WebSocket XSS Injection"
+category = "WebSocketInjection"
+pattern = "{\"type\":\"message\",\"data\":\"<script>alert('XSS')</script>\"}"
+description = "Cross-site scripting via WebSocket message payload"
+risk_level = "HIGH"
+cwe_id = "CWE-1385"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "ws-002"
+name = "WebSocket Command Injection"
+category = "WebSocketInjection"
+pattern = "{\"cmd\":\"exec\",\"args\":\"rm -rf /\"}"
+description = "Command injection via WebSocket message"
+risk_level = "CRITICAL"
+cwe_id = "CWE-1385"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "ws-003"
+name = "WebSocket Protocol XSS"
+category = "WebSocketInjection"
+pattern = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\nSec-WebSocket-Protocol: <script>alert(1)</script>"
+description = "XSS via WebSocket protocol header"
+risk_level = "HIGH"
+cwe_id = "CWE-1385"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "ws-004"
+name = "WebSocket SQL Injection"
+category = "WebSocketInjection"
+pattern = "{\"event\":\"subscribe\",\"channel\":\"'; DROP TABLE users; --\"}"
+description = "SQL injection via WebSocket subscription channel"
+risk_level = "HIGH"
+cwe_id = "CWE-1385"
+owasp_category = "A03:2021"

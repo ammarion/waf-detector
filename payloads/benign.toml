@@ -1,0 +1,66 @@
+# Benign Payloads for False Positive Testing
+# These payloads contain suspicious-looking patterns but are legitimate content
+
+[[payloads]]
+id = "benign-001"
+name = "Blog post with SQL keywords"
+category = "Benign"
+pattern = "Today I learned how to SELECT data FROM a database using WHERE clauses"
+description = "Legitimate blog content containing SQL keywords"
+risk_level = "NONE"
+
+[[payloads]]
+id = "benign-002"
+name = "Valid path traversal"
+category = "Benign"
+pattern = "/docs/../images/logo.png"
+description = "URL path with valid traversal for navigation"
+risk_level = "NONE"
+
+[[payloads]]
+id = "benign-003"
+name = "JSON with angle brackets"
+category = "Benign"
+pattern = "{\"message\": \"<b>Hello</b> World\"}"
+description = "Legitimate JSON containing HTML formatting tags"
+risk_level = "NONE"
+
+[[payloads]]
+id = "benign-004"
+name = "Search query with boolean keywords"
+category = "Benign"
+pattern = "search=red OR blue AND green"
+description = "Natural language search with OR/AND keywords"
+risk_level = "NONE"
+
+[[payloads]]
+id = "benign-005"
+name = "HTML tutorial comment"
+category = "Benign"
+pattern = "comment=I love the <script> tag in HTML tutorials"
+description = "Forum comment about HTML/JavaScript learning"
+risk_level = "NONE"
+
+[[payloads]]
+id = "benign-006"
+name = "Valid percent-encoded name"
+category = "Benign"
+pattern = "name=O%27Brien"
+description = "Legitimate name with apostrophe correctly encoded"
+risk_level = "NONE"
+
+[[payloads]]
+id = "benign-007"
+name = "Mathematical expression"
+category = "Benign"
+pattern = "calc=1+1=2 OR 2+2=4"
+description = "Math calculation that looks like SQL injection"
+risk_level = "NONE"
+
+[[payloads]]
+id = "benign-008"
+name = "Legitimate XML content"
+category = "Benign"
+pattern = "data=<note><to>User</to><from>Admin</from></note>"
+description = "Valid XML data without external entities"
+risk_level = "NONE"
