@@ -4,14 +4,18 @@
 //! Certificates are infrastructure-level and cannot be easily hidden, making them
 //! highly reliable for detection.
 
+pub mod fingerprint;
+
 use crate::{Evidence, MethodType};
 use anyhow::Result;
+use fingerprint::{FingerprintDatabase, TlsConnectionInfo};
 use std::collections::HashMap;
 
 /// TLS certificate analyzer
 #[derive(Debug, Clone)]
 pub struct TlsAnalyzer {
     provider_patterns: HashMap<String, Vec<CertificatePattern>>,
+    fingerprint_db: FingerprintDatabase,
 }
 
 /// Certificate pattern for provider identification
@@ -199,15 +203,18 @@ impl TlsAnalyzer {
             }],
         );
 
-        Self { provider_patterns }
+        Self {
+            provider_patterns,
+            fingerprint_db: FingerprintDatabase::new(),
+        }
     }
 
     /// Analyze TLS certificate for provider identification
     pub async fn analyze(&self, url: &str) -> Result<Vec<Evidence>> {
         let mut evidence = Vec::new();
 
-        // Extract certificate info
-        let cert_info = match self.extract_certificate_info(url).await {
+        // Extract certificate and connection info
+        let (cert_info, conn_info) = match self.extract_certificate_info(url).await {
             Ok(info) => info,
             Err(e) => {
                 // Certificate extraction failed - not an error, just no TLS evidence
@@ -216,7 +223,7 @@ impl TlsAnalyzer {
             }
         };
 
-        // Match against provider patterns
+        // Match against provider patterns (certificate-based)
         for (provider_name, patterns) in &self.provider_patterns {
             for pattern in patterns {
                 if self.matches_pattern(&cert_info, pattern) {
@@ -246,11 +253,18 @@ impl TlsAnalyzer {
             }
         }
 
+        // Perform TLS fingerprinting (protocol-level)
+        let fingerprint_evidence = self.fingerprint_db.analyze(&conn_info);
+        evidence.extend(fingerprint_evidence);
+
         Ok(evidence)
     }
 
-    /// Extract certificate information from URL
-    async fn extract_certificate_info(&self, url: &str) -> Result<CertificateInfo> {
+    /// Extract certificate information and TLS connection metadata from URL
+    async fn extract_certificate_info(
+        &self,
+        url: &str,
+    ) -> Result<(CertificateInfo, TlsConnectionInfo)> {
         use std::sync::Arc;
         use tokio::net::TcpStream;
         use tokio_rustls::rustls::client::danger::{
@@ -290,7 +304,10 @@ impl TlsAnalyzer {
                 // Capture the certificates
                 let mut certs = vec![end_entity.to_vec()];
                 certs.extend(intermediates.iter().map(|c| c.to_vec()));
-                let mut guard = self.captured_certs.lock().unwrap_or_else(|e| e.into_inner());
+                let mut guard = self
+                    .captured_certs
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 *guard = Some(certs);
                 Ok(ServerCertVerified::assertion())
             }
@@ -339,13 +356,31 @@ impl TlsAnalyzer {
 
         // Connect and extract certificate
         let stream = TcpStream::connect((host, port)).await?;
-        let _tls_stream = connector.connect(server_name, stream).await?;
+        let tls_stream = connector.connect(server_name, stream).await?;
+
+        // Extract TLS connection metadata
+        let (_, conn) = tls_stream.get_ref();
+        let tls_version = conn.protocol_version().map(|v| format!("{:?}", v));
+        let cipher_suite = conn.negotiated_cipher_suite().map(|c| {
+            // Format cipher suite as a more readable string
+            format!("{:?}", c.suite())
+        });
+        let alpn_protocol = conn
+            .alpn_protocol()
+            .map(|a| String::from_utf8_lossy(a).to_string());
+
+        let conn_info = TlsConnectionInfo {
+            tls_version,
+            cipher_suite,
+            alpn_protocol,
+        };
 
         // Get captured certificates
         let guard = captured_certs.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(certs) = guard.as_ref() {
             if let Some(cert) = certs.first() {
-                return self.parse_certificate(cert);
+                let cert_info = self.parse_certificate(cert)?;
+                return Ok((cert_info, conn_info));
             }
         }
 
