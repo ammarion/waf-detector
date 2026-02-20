@@ -7,7 +7,9 @@
 //! ⚠️ WARNING: Only use this module against systems you own or have explicit permission to test.
 
 use anyhow::{anyhow, Result};
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
@@ -599,6 +601,7 @@ impl EffectivenessTest {
         // Build client with timeout
         let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
         let make_builder = |force_no_proxy: bool| {
+            let mut client_builder = reqwest::Client::builder().timeout(self.config.request_timeout);
             let mut client_builder =
                 reqwest::Client::builder().timeout(self.config.request_timeout);
             if disable_proxy || force_no_proxy {
@@ -613,6 +616,7 @@ impl EffectivenessTest {
             Ok(Ok(client)) => client,
             Ok(Err(err)) => return Err(err.into()),
             Err(_) => {
+                eprintln!("⚠️  Effectiveness HTTP client init panicked; retrying without system proxy.");
                 eprintln!(
                     "⚠️  Effectiveness HTTP client init panicked; retrying without system proxy."
                 );
@@ -631,6 +635,13 @@ impl EffectivenessTest {
             .iter()
             .any(|(k, v)| k.eq_ignore_ascii_case("user-agent") && !v.trim().is_empty());
         if !has_valid_user_agent {
+            let agents = techniques::get_user_agents();
+            let mut rng = rand::thread_rng();
+            let ua = agents
+                .choose(&mut rng)
+                .copied()
+                .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            request_builder = request_builder.header("User-Agent", ua);
             let fingerprint = techniques::random_browser_fingerprint();
             techniques::apply_browser_fingerprint_headers(&mut headers, fingerprint);
         }

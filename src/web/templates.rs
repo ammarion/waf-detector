@@ -652,6 +652,31 @@ mod tests {
     use super::dashboard_html;
 
     #[test]
+    fn dashboard_html_contains_va_placeholder() {
+        assert!(DASHBOARD_HTML.contains("Virtual Adversary"));
+        assert!(DASHBOARD_HTML.contains("vaTestForm"));
+        assert!(DASHBOARD_HTML.contains("Download VA Report"));
+        assert!(DASHBOARD_HTML.contains("consentTargetInput"));
+        assert!(DASHBOARD_HTML.contains("vaHistoryList"));
+        assert!(DASHBOARD_HTML.contains("vaActivityLog"));
+        assert!(DASHBOARD_HTML.contains("reports.csv"));
+        assert!(DASHBOARD_HTML.contains("vaRetentionInput"));
+        assert!(DASHBOARD_HTML.contains("vaActivityFilter"));
+        assert!(DASHBOARD_HTML.contains("downloadVaReportCsv"));
+        assert!(DASHBOARD_HTML.contains("vaHistorySearch"));
+        assert!(DASHBOARD_HTML.contains("vaAutoScroll"));
+        assert!(DASHBOARD_HTML.contains("vaHistoryDate"));
+        assert!(DASHBOARD_HTML.contains("vaReportModal"));
+        assert!(DASHBOARD_HTML.contains("vaHistorySort"));
+        assert!(DASHBOARD_HTML.contains("vaActivitySearch"));
+        assert!(DASHBOARD_HTML.contains("deleteVaHistoryRange"));
+        assert!(DASHBOARD_HTML.contains("Replay Plan"));
+        assert!(DASHBOARD_HTML.contains("vaReplayPlanPanel"));
+        assert!(DASHBOARD_HTML.contains("vaReplaySearch"));
+        assert!(DASHBOARD_HTML.contains("vaReplayClassFilter"));
+        assert!(DASHBOARD_HTML.contains("vaReplayChannelFilter"));
+        assert!(DASHBOARD_HTML.contains("vaReplayMethodFilter"));
+        assert!(DASHBOARD_HTML.contains("vaReplayOutcomeFilter"));
     fn dashboard_html_contains_smoke_test_controls() {
         let html = dashboard_html();
         assert!(html.contains("WAF Smoke Test"));

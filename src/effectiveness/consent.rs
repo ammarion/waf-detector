@@ -176,6 +176,7 @@ impl ConsentManager {
 
         // Check if host matches any authorized target
         for authorized in &consent.authorized_targets {
+            let authorized = Self::normalize_target(authorized).unwrap_or_else(|_| authorized.to_string());
             let authorized =
                 Self::normalize_target(authorized).unwrap_or_else(|_| authorized.to_string());
             if host == authorized || host.ends_with(&format!(".{authorized}")) {
@@ -328,6 +329,7 @@ pub fn manage_consent_cli(args: Vec<String>) -> Result<()> {
                 if status.authorized_targets.is_empty() {
                     println!("Authorized targets: (none)");
                 } else {
+                    println!("Authorized targets: {}", status.authorized_targets.join(", "));
                     println!(
                         "Authorized targets: {}",
                         status.authorized_targets.join(", ")

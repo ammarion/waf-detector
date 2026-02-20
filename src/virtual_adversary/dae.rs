@@ -64,6 +64,8 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
         description: "Case and whitespace header mutation",
         payload: "x-forwarded-host".to_string(),
         headers: vec![
+            ("X-FORWARDED-HOST".to_string(), "example.invalid".to_string()),
+            ("x-forwarded-host".to_string(), "example.invalid".to_string()),
             (
                 "X-FORWARDED-HOST".to_string(),
                 "example.invalid".to_string(),
@@ -233,6 +235,7 @@ pub fn validate_zero_overlap(probes: &[Probe]) -> Result<()> {
     for probe in probes {
         let payload = probe.payload.trim().to_lowercase();
         if blacklist.contains(&payload) {
+            return Err(anyhow!("Probe payload overlaps smoke test payload: {}", probe.payload));
             return Err(anyhow!(
                 "Probe payload overlaps smoke test payload: {}",
                 probe.payload
@@ -275,6 +278,7 @@ mod tests {
     #[test]
     fn tier2_catalog_adds_parser_ambiguity() {
         let probes = probe_catalog_for_tier(2).unwrap();
+        assert!(probes.iter().any(|probe| probe.class == ProbeClass::ParserAmbiguity));
         assert!(probes
             .iter()
             .any(|probe| probe.class == ProbeClass::ParserAmbiguity));
@@ -283,6 +287,7 @@ mod tests {
     #[test]
     fn tier3_catalog_adds_behavioral_throttle() {
         let probes = probe_catalog_for_tier(3).unwrap();
+        assert!(probes.iter().any(|probe| probe.class == ProbeClass::BehavioralThrottle));
         assert!(probes
             .iter()
             .any(|probe| probe.class == ProbeClass::BehavioralThrottle));
