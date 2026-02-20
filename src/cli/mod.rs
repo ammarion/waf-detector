@@ -274,7 +274,7 @@ impl SimpleCliApp {
                 println!("{}", serde_json::to_string_pretty(&detection_result)?);
             }
             "yaml" => {
-                println!("{}", serde_yaml::to_string(&detection_result)?);
+                println!("{}", serde_yml::to_string(&detection_result)?);
             }
             "compact" => {
                 self.print_compact(&detection_result);
@@ -328,7 +328,7 @@ impl SimpleCliApp {
                 println!("{}", serde_json::to_string_pretty(&results)?);
             }
             "yaml" => {
-                println!("{}", serde_yaml::to_string(&results)?);
+                println!("{}", serde_yml::to_string(&results)?);
             }
             "compact" => {
                 for result in &results {
