@@ -13,7 +13,6 @@ use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::virtual_adversary2::{
     build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner,
 };
-use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use clap::{Arg, ArgMatches, Command};
@@ -142,7 +141,6 @@ impl SimpleCliApp {
 
             if matches.get_flag("va2-run") {
                 let runner = Va2Runner::new()?;
-                let report = runner.run_plan(plan)?;
                 let report = runner.run_plan(plan).await?;
                 let errors = report
                     .results
@@ -209,12 +207,8 @@ impl SimpleCliApp {
             if matches.get_flag("va-replay-csv") {
                 let mut lines = Vec::new();
                 lines.push("index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string());
-                lines.push(
-                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
-                        .to_string(),
-                );
                 for item in &report.replay_plan {
-                    let row = vec![
+                    let row = [
                         item.index.to_string(),
                         csv_escape(&item.class),
                         csv_escape(&item.channel),
@@ -233,10 +227,6 @@ impl SimpleCliApp {
             if let Some(output) = matches.get_one::<String>("va-output") {
                 let json = serde_json::to_string_pretty(&report)?;
                 std::fs::write(output, json)?;
-                let summary_path = format!(
-                    "{}.summary.txt",
-                    output.trim_end_matches(".json")
-                );
                 let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
                 let summary = format!(
                     "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
@@ -331,12 +321,8 @@ impl SimpleCliApp {
             if matches.get_flag("va-replay-csv") {
                 let mut lines = Vec::new();
                 lines.push("index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string());
-                lines.push(
-                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
-                        .to_string(),
-                );
                 for item in &report.replay_plan {
-                    let row = vec![
+                    let row = [
                         item.index.to_string(),
                         csv_escape(&item.class),
                         csv_escape(&item.channel),

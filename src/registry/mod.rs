@@ -273,13 +273,11 @@ impl ProviderRegistry {
         };
 
         // Run all detection techniques in parallel
-        let (provider_results, timing_result, dns_result, payload_result, tls_result) = tokio::join!(
         let (provider_results, timing_result, dns_result, payload_result, tls_result, h2_result, error_profile_result, connection_behavior_result) = tokio::join!(
             futures::future::join_all(provider_futures),
             timing_future,
             dns_future,
             payload_future,
-            tls_future
             tls_future,
             h2_future,
             error_profile_future,

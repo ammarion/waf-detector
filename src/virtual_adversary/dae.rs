@@ -33,6 +33,7 @@ pub struct Probe {
     pub body: Option<String>,
 }
 
+#[allow(clippy::vec_init_then_push)]
 pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
     if !(1..=3).contains(&tier) {
         return Err(anyhow!("tier must be between 1 and 3"));
@@ -235,7 +236,6 @@ pub fn validate_zero_overlap(probes: &[Probe]) -> Result<()> {
     for probe in probes {
         let payload = probe.payload.trim().to_lowercase();
         if blacklist.contains(&payload) {
-            return Err(anyhow!("Probe payload overlaps smoke test payload: {}", probe.payload));
             return Err(anyhow!(
                 "Probe payload overlaps smoke test payload: {}",
                 probe.payload

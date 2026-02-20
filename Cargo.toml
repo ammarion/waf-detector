@@ -28,7 +28,6 @@ reqwest = { version = "0.12", features = ["json", "gzip", "deflate", "brotli", "
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
 serde_yml = "0.0.12"
 toml = "0.8"
 
@@ -87,8 +86,6 @@ h2 = "0.4"
 tokio-test = "0.4"
 mockito = "1.2"
 criterion = { version = "0.5", features = ["html_reports"] }
-urlencoding = "2.1"
-
 [profile.release]
 opt-level = 3
 lto = true
@@ -111,5 +108,3 @@ providers-all = ["cloudflare", "akamai"]
 cloudflare = []
 akamai = []
 cli = []
-
-rand = "0.8.5"

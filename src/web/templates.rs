@@ -653,30 +653,34 @@ mod tests {
 
     #[test]
     fn dashboard_html_contains_va_placeholder() {
-        assert!(DASHBOARD_HTML.contains("Virtual Adversary"));
-        assert!(DASHBOARD_HTML.contains("vaTestForm"));
-        assert!(DASHBOARD_HTML.contains("Download VA Report"));
-        assert!(DASHBOARD_HTML.contains("consentTargetInput"));
-        assert!(DASHBOARD_HTML.contains("vaHistoryList"));
-        assert!(DASHBOARD_HTML.contains("vaActivityLog"));
-        assert!(DASHBOARD_HTML.contains("reports.csv"));
-        assert!(DASHBOARD_HTML.contains("vaRetentionInput"));
-        assert!(DASHBOARD_HTML.contains("vaActivityFilter"));
-        assert!(DASHBOARD_HTML.contains("downloadVaReportCsv"));
-        assert!(DASHBOARD_HTML.contains("vaHistorySearch"));
-        assert!(DASHBOARD_HTML.contains("vaAutoScroll"));
-        assert!(DASHBOARD_HTML.contains("vaHistoryDate"));
-        assert!(DASHBOARD_HTML.contains("vaReportModal"));
-        assert!(DASHBOARD_HTML.contains("vaHistorySort"));
-        assert!(DASHBOARD_HTML.contains("vaActivitySearch"));
-        assert!(DASHBOARD_HTML.contains("deleteVaHistoryRange"));
-        assert!(DASHBOARD_HTML.contains("Replay Plan"));
-        assert!(DASHBOARD_HTML.contains("vaReplayPlanPanel"));
-        assert!(DASHBOARD_HTML.contains("vaReplaySearch"));
-        assert!(DASHBOARD_HTML.contains("vaReplayClassFilter"));
-        assert!(DASHBOARD_HTML.contains("vaReplayChannelFilter"));
-        assert!(DASHBOARD_HTML.contains("vaReplayMethodFilter"));
-        assert!(DASHBOARD_HTML.contains("vaReplayOutcomeFilter"));
+        let html = dashboard_html();
+        assert!(html.contains("Virtual Adversary"));
+        assert!(html.contains("vaTestForm"));
+        assert!(html.contains("va2DownloadJsonBtn"));
+        assert!(html.contains("consentTargetInput"));
+        assert!(html.contains("vaHistoryList"));
+        assert!(html.contains("vaActivityLog"));
+        assert!(html.contains("downloadVaReportCsv"));
+        assert!(html.contains("vaRetentionInput"));
+        assert!(html.contains("vaActivityFilter"));
+        assert!(html.contains("downloadVaReportCsv"));
+        assert!(html.contains("vaHistorySearch"));
+        assert!(html.contains("vaAutoScroll"));
+        assert!(html.contains("vaHistoryDate"));
+        assert!(html.contains("vaReportModal"));
+        assert!(html.contains("vaHistorySort"));
+        assert!(html.contains("vaActivitySearch"));
+        assert!(html.contains("deleteVaHistoryRange"));
+        assert!(html.contains("Replay Plan"));
+        assert!(html.contains("vaReplayPlanPanel"));
+        assert!(html.contains("vaReplaySearch"));
+        assert!(html.contains("vaReplayClassFilter"));
+        assert!(html.contains("vaReplayChannelFilter"));
+        assert!(html.contains("vaReplayMethodFilter"));
+        assert!(html.contains("vaReplayOutcomeFilter"));
+    }
+
+    #[test]
     fn dashboard_html_contains_smoke_test_controls() {
         let html = dashboard_html();
         assert!(html.contains("WAF Smoke Test"));

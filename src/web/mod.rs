@@ -375,22 +375,6 @@ impl WebServer {
                 "/api/virtual-adversary/reports",
                 get(virtual_adversary_reports),
             )
-        .route(
-            "/api/virtual-adversary/reports/:id",
-            get(virtual_adversary_report),
-        )
-        .route(
-            "/api/virtual-adversary/reports/:id/replay.json",
-            get(virtual_adversary_report_replay_json),
-        )
-        .route(
-            "/api/virtual-adversary/reports/:id/csv",
-            get(virtual_adversary_report_csv),
-        )
-        .route(
-            "/api/virtual-adversary/reports/:id/replay.csv",
-            get(virtual_adversary_report_replay_csv),
-        )
             .route(
                 "/api/virtual-adversary/reports/:id",
                 get(virtual_adversary_report),
@@ -419,8 +403,6 @@ impl WebServer {
                 "/api/virtual-adversary/reports/delete-range",
                 post(virtual_adversary_reports_delete_range),
             )
-            .route("/api/virtual-adversary2/plan", post(virtual_adversary2_plan))
-            .route("/api/virtual-adversary2/run", post(virtual_adversary2_run))
             .route(
                 "/api/virtual-adversary2/plan",
                 post(virtual_adversary2_plan),
@@ -679,7 +661,6 @@ fn build_va_report_csv(stored: &VaStoredReport) -> String {
     );
     for (idx, record) in stored.report.results.iter().enumerate() {
         let replay = stored.report.replay_plan.get(idx);
-        let row = vec![
         let row = [
             csv_escape(&stored.id),
             csv_escape(&stored.report.target_url),
@@ -690,11 +671,11 @@ fn build_va_report_csv(stored: &VaStoredReport) -> String {
             csv_escape(&format!("{:?}", record.outcome)),
             csv_escape(&record.reason),
             csv_escape(&format_va_evidence(&record.evidence)),
-            csv_escape(&replay.map(|item| item.class.as_str()).unwrap_or("")),
-            csv_escape(&replay.map(|item| item.channel.as_str()).unwrap_or("")),
-            csv_escape(&replay.map(|item| item.description.as_str()).unwrap_or("")),
-            csv_escape(&replay.map(|item| item.method.as_str()).unwrap_or("")),
-            csv_escape(&replay.map(|item| item.url.as_str()).unwrap_or("")),
+            csv_escape(replay.map(|item| item.class.as_str()).unwrap_or("")),
+            csv_escape(replay.map(|item| item.channel.as_str()).unwrap_or("")),
+            csv_escape(replay.map(|item| item.description.as_str()).unwrap_or("")),
+            csv_escape(replay.map(|item| item.method.as_str()).unwrap_or("")),
+            csv_escape(replay.map(|item| item.url.as_str()).unwrap_or("")),
         ]
         .join(",");
         lines.push(row);
@@ -702,16 +683,13 @@ fn build_va_report_csv(stored: &VaStoredReport) -> String {
     lines.join("\n")
 }
 
-fn build_va_replay_plan_csv(
-    replay_plan: &[crate::virtual_adversary::VaReplayPlanItem],
-) -> String {
 fn build_va_replay_plan_csv(replay_plan: &[crate::virtual_adversary::VaReplayPlanItem]) -> String {
     let mut lines = Vec::new();
     lines.push(
         "index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string(),
     );
     for item in replay_plan {
-        let row = vec![
+        let row = [
             item.index.to_string(),
             csv_escape(&item.class),
             csv_escape(&item.channel),
@@ -1241,9 +1219,6 @@ async fn virtual_adversary_report(Path(report_id): Path<String>) -> impl IntoRes
 }
 
 // Handler to fetch a Virtual Adversary replay plan as JSON
-async fn virtual_adversary_report_replay_json(
-    Path(report_id): Path<String>,
-) -> impl IntoResponse {
 async fn virtual_adversary_report_replay_json(Path(report_id): Path<String>) -> impl IntoResponse {
     match load_va_report(&report_id) {
         Ok(report) => {
@@ -1285,21 +1260,6 @@ async fn virtual_adversary_report_csv(Path(report_id): Path<String>) -> impl Int
     match load_va_report(&report_id) {
         Ok(report) => {
             let body = build_va_report_csv(&report);
-            (StatusCode::OK, [(header::CONTENT_TYPE, "text/csv")], body)
-        }
-        Err(e) => (
-            StatusCode::NOT_FOUND,
-            [(header::CONTENT_TYPE, "text/plain")],
-            format!("Failed to load report: {e}"),
-        ),
-    }
-}
-
-// Handler to export a Virtual Adversary replay plan as CSV
-async fn virtual_adversary_report_replay_csv(Path(report_id): Path<String>) -> impl IntoResponse {
-    match load_va_report(&report_id) {
-        Ok(report) => {
-            let body = build_va_replay_plan_csv(&report.report.replay_plan);
             (StatusCode::OK, [(header::CONTENT_TYPE, "text/csv")], body)
         }
         Err(e) => (
@@ -1468,12 +1428,6 @@ async fn virtual_adversary2_run(Json(payload): Json<Va2Request>) -> impl IntoRes
         }
     };
 
-    match Va2Runner::new().and_then(|runner| runner.run_plan(plan)) {
-        Ok(report) => Json(Va2RunResponse {
-            success: true,
-            report: Some(report),
-            error: None,
-        }),
     match Va2Runner::new() {
         Ok(runner) => match runner.run_plan(plan).await {
             Ok(report) => Json(Va2RunResponse {
@@ -1644,24 +1598,6 @@ mod tests {
 
     #[test]
     fn build_va_report_csv_includes_payloads() {
-        let mut report = VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
-        report.replay_plan.push(crate::virtual_adversary::VaReplayPlanItem {
-            index: 1,
-            class: "SemanticDrift".to_string(),
-            channel: "Query".to_string(),
-            description: "Duplicate key ordering drift".to_string(),
-            method: "GET".to_string(),
-            url: "https://example.com/?a=1&a=2".to_string(),
-            headers: Vec::new(),
-            body: None,
-        });
-        report.results.push(crate::virtual_adversary::VaResultRecord {
-            payload: "' OR '1'='1".to_string(),
-            category: crate::virtual_adversary::VaPayloadCategory::SqlInjection,
-            outcome: crate::virtual_adversary::VaOutcome::Blocked,
-            reason: "status=403".to_string(),
-            evidence: Vec::new(),
-        });
         let mut report =
             VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
         report

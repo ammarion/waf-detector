@@ -176,7 +176,6 @@ impl ConsentManager {
 
         // Check if host matches any authorized target
         for authorized in &consent.authorized_targets {
-            let authorized = Self::normalize_target(authorized).unwrap_or_else(|_| authorized.to_string());
             let authorized =
                 Self::normalize_target(authorized).unwrap_or_else(|_| authorized.to_string());
             if host == authorized || host.ends_with(&format!(".{authorized}")) {
