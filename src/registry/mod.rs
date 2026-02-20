@@ -419,10 +419,8 @@ impl ProviderRegistry {
             Some(rest)
         } else if let Some(rest) = sig.strip_prefix("tls-") {
             rest.split('-').next()
-        } else if let Some(rest) = sig.strip_prefix("payload_detection_") {
-            Some(rest)
         } else {
-            None
+            sig.strip_prefix("payload_detection_")
         }?;
 
         let normalized = match provider_key {
@@ -434,6 +432,7 @@ impl ProviderRegistry {
             "vercel" => "Vercel",
             "azure" => "Azure",
             "f5" => "F5",
+            "imperva" => "Imperva",
             "generic_waf" => "Generic WAF",
             _ => return None,
         };
@@ -470,6 +469,10 @@ impl ProviderRegistry {
             "f5-asm-block-behavior",
             "f5-block-pattern",
             "f5-support-id-pattern",
+            // Imperva
+            "imperva-x-iinfo-header",
+            "imperva-incap-cookie",
+            "imperva-visid-cookie",
         ];
 
         evidence.iter().any(|ev| match ev.method_type {

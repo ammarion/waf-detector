@@ -177,6 +177,17 @@ impl TlsAnalyzer {
             ],
         );
 
+        // Imperva certificate patterns
+        provider_patterns.insert(
+            "Imperva".to_string(),
+            vec![CertificatePattern {
+                pattern_type: CertificatePatternType::Subject,
+                pattern: "incapsula".to_string(),
+                confidence: 0.95,
+                description: "Incapsula SSL certificate".to_string(),
+            }],
+        );
+
         Self { provider_patterns }
     }
 

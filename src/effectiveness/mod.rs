@@ -208,7 +208,7 @@ impl EffectivenessTest {
             let similarity =
                 static_detection::calculate_similarity(body, &baseline_sig.body_sample);
             let length_diff =
-                (baseline_sig.body_length as i64 - body.len() as i64).abs() as usize;
+                (baseline_sig.body_length as i64 - body.len() as i64).unsigned_abs() as usize;
             let significant_reduction = body.len()
                 < (baseline_sig.body_length as f64 * REDUCTION_RATIO) as usize
                 && length_diff > MIN_LENGTH_DIFF;

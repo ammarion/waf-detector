@@ -268,6 +268,12 @@ pub struct VaResultSummary {
     pub error: usize,
 }
 
+impl Default for VaResultSummary {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VaResultSummary {
     pub fn new() -> Self {
         Self {

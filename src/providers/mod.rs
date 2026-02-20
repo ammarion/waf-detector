@@ -4,6 +4,7 @@ pub mod azure;
 pub mod cloudflare;
 pub mod f5;
 pub mod fastly;
+pub mod imperva;
 pub mod vercel;
 
 use crate::{http::HttpClient, DetectionContext, DetectionProvider, Evidence, ProviderType};
@@ -19,6 +20,7 @@ pub enum Provider {
     Vercel(vercel::VercelProvider),
     Azure(azure::AzureProvider),
     F5(f5::F5Provider),
+    Imperva(imperva::ImpervaProvider),
 }
 
 impl Provider {
@@ -31,6 +33,7 @@ impl Provider {
             Provider::Vercel(p) => p.name(),
             Provider::Azure(p) => p.name(),
             Provider::F5(p) => p.name(),
+            Provider::Imperva(p) => p.name(),
         }
     }
 
@@ -43,6 +46,7 @@ impl Provider {
             Provider::Vercel(p) => p.version(),
             Provider::Azure(p) => p.version(),
             Provider::F5(p) => p.version(),
+            Provider::Imperva(p) => p.version(),
         }
     }
 
@@ -55,6 +59,7 @@ impl Provider {
             Provider::Vercel(p) => p.description(),
             Provider::Azure(p) => p.description(),
             Provider::F5(p) => p.description(),
+            Provider::Imperva(p) => p.description(),
         }
     }
 
@@ -67,6 +72,7 @@ impl Provider {
             Provider::Vercel(p) => p.provider_type(),
             Provider::Azure(p) => p.provider_type(),
             Provider::F5(p) => p.provider_type(),
+            Provider::Imperva(p) => p.provider_type(),
         }
     }
 
@@ -79,6 +85,7 @@ impl Provider {
             Provider::Vercel(p) => p.confidence_base(),
             Provider::Azure(p) => p.confidence_base(),
             Provider::F5(p) => p.confidence_base(),
+            Provider::Imperva(p) => p.confidence_base(),
         }
     }
 
@@ -91,6 +98,7 @@ impl Provider {
             Provider::Vercel(p) => p.priority(),
             Provider::Azure(p) => p.priority(),
             Provider::F5(p) => p.priority(),
+            Provider::Imperva(p) => p.priority(),
         }
     }
 
@@ -103,6 +111,7 @@ impl Provider {
             Provider::Vercel(p) => p.enabled(),
             Provider::Azure(p) => p.enabled(),
             Provider::F5(p) => p.enabled(),
+            Provider::Imperva(p) => p.enabled(),
         }
     }
 
@@ -115,6 +124,7 @@ impl Provider {
             Provider::Vercel(p) => p.detect(context).await,
             Provider::Azure(p) => p.detect(context).await,
             Provider::F5(p) => p.detect(context).await,
+            Provider::Imperva(p) => p.detect(context).await,
         }
     }
 
@@ -130,6 +140,7 @@ impl Provider {
             Provider::Vercel(p) => p.passive_detect(response).await,
             Provider::Azure(p) => p.passive_detect(response).await,
             Provider::F5(p) => p.passive_detect(response).await,
+            Provider::Imperva(p) => p.passive_detect(response).await,
         }
     }
 
@@ -142,6 +153,7 @@ impl Provider {
             Provider::Vercel(p) => p.active_detect(client, url).await,
             Provider::Azure(p) => p.active_detect(client, url).await,
             Provider::F5(p) => p.active_detect(client, url).await,
+            Provider::Imperva(p) => p.active_detect(client, url).await,
         }
     }
 }

@@ -546,7 +546,7 @@ fn build_va_reports_csv(reports: &[VaReportSummary]) -> String {
     let mut lines = Vec::new();
     lines.push("id,target_url,created_at,plan_size,blocked,challenge,allowed,error,risk_label".to_string());
     for report in reports {
-        let row = vec![
+        let row = [
             csv_escape(&report.id),
             csv_escape(&report.target_url),
             csv_escape(&report.created_at.to_rfc3339()),
@@ -567,7 +567,7 @@ fn build_va_report_csv(stored: &VaStoredReport) -> String {
     let mut lines = Vec::new();
     lines.push("report_id,target_url,created_at,index,category,payload,outcome,reason".to_string());
     for (idx, record) in stored.report.results.iter().enumerate() {
-        let row = vec![
+        let row = [
             csv_escape(&stored.id),
             csv_escape(&stored.report.target_url),
             csv_escape(&stored.created_at.to_rfc3339()),
