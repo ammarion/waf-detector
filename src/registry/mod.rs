@@ -3,6 +3,7 @@
 use crate::confidence::AdvancedScoring; // NEW: Import advanced scoring
 use crate::dns::DnsAnalyzer; // NEW: Import DNS analysis
 use crate::payload::PayloadAnalyzer; // NEW: Import payload analysis
+use crate::providers::error_profiles::ErrorProfileDatabase; // NEW: Import error profiles
 use crate::providers::{Provider, ProviderMetadata};
 use crate::timing::{TimingAnalyzer, TimingConfig}; // NEW: Import timing analysis
 use crate::tls::TlsAnalyzer;
@@ -23,6 +24,7 @@ pub struct ProviderRegistry {
     dns_analyzer: Arc<DnsAnalyzer>,         // NEW: DNS analysis
     payload_analyzer: Arc<PayloadAnalyzer>, // NEW: Payload analysis
     tls_analyzer: Arc<TlsAnalyzer>,
+    error_profile_db: Arc<ErrorProfileDatabase>, // NEW: Error profile analysis
     payload_analysis_enabled: Arc<AtomicBool>,
 }
 
@@ -36,6 +38,7 @@ impl ProviderRegistry {
             dns_analyzer: Arc::new(DnsAnalyzer::new()), // NEW: Initialize DNS analysis
             payload_analyzer: Arc::new(PayloadAnalyzer::new()), // NEW: Initialize payload analysis
             tls_analyzer: Arc::new(TlsAnalyzer::new()),
+            error_profile_db: Arc::new(ErrorProfileDatabase::new()), // NEW: Initialize error profile database
             payload_analysis_enabled: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -200,13 +203,33 @@ impl ProviderRegistry {
             }
         };
 
+        // NEW: Run error profile analysis on existing response (passive analysis)
+        let error_profile_future = {
+            let response = context.response.clone();
+            let error_profile_db = Arc::clone(&self.error_profile_db);
+            async move {
+                if let Some(resp) = response {
+                    let error_evidence =
+                        error_profile_db.match_response(resp.status, &resp.body, &resp.headers);
+                    if !error_evidence.is_empty() {
+                        Some(("ErrorProfileAnalysis".to_string(), error_evidence, 0.90))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+
         // Run all detection techniques in parallel
-        let (provider_results, timing_result, dns_result, payload_result, tls_result) = tokio::join!(
+        let (provider_results, timing_result, dns_result, payload_result, tls_result, error_profile_result) = tokio::join!(
             futures::future::join_all(provider_futures),
             timing_future,
             dns_future,
             payload_future,
-            tls_future
+            tls_future,
+            error_profile_future
         );
 
         let mut provider_scores = HashMap::new();
@@ -224,6 +247,7 @@ impl ProviderRegistry {
         evidence_map.insert("DnsAnalysis".to_string(), Vec::new());
         evidence_map.insert("PayloadAnalysis".to_string(), Vec::new());
         evidence_map.insert("TlsAnalysis".to_string(), Vec::new());
+        evidence_map.insert("ErrorProfileAnalysis".to_string(), Vec::new());
         evidence_map.insert("GenericWAF".to_string(), Vec::new());
 
         // Track best WAF and CDN separately to support multi-vendor scenarios
@@ -249,6 +273,9 @@ impl ProviderRegistry {
         }
         if let Some(tls_result) = tls_result {
             analysis_results.push(tls_result);
+        }
+        if let Some(error_profile_result) = error_profile_result {
+            analysis_results.push(error_profile_result);
         }
 
         for (analysis_name, evidence, _confidence) in analysis_results {
@@ -431,6 +458,9 @@ impl ProviderRegistry {
         } else if let Some(rest) = sig.strip_prefix("dns-ns-") {
             Some(rest)
         } else if let Some(rest) = sig.strip_prefix("tls-") {
+            rest.split('-').next()
+        } else if let Some(rest) = sig.strip_prefix("error-profile-") {
+            // Extract provider name from error-profile-<provider>-*
             rest.split('-').next()
         } else {
             sig.strip_prefix("payload_detection_")

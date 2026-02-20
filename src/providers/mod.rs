@@ -2,6 +2,7 @@ pub mod akamai;
 pub mod aws;
 pub mod azure;
 pub mod cloudflare;
+pub mod error_profiles;
 pub mod f5;
 pub mod fastly;
 pub mod fortiweb;
