@@ -9,7 +9,6 @@
 use anyhow::{anyhow, Result};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
@@ -258,7 +257,6 @@ impl EffectivenessTest {
 
             let similarity =
                 static_detection::calculate_similarity(body, &baseline_sig.body_sample);
-            let length_diff = (baseline_sig.body_length as i64 - body.len() as i64).abs() as usize;
             let length_diff =
                 (baseline_sig.body_length as i64 - body.len() as i64).unsigned_abs() as usize;
             let significant_reduction = body.len()
@@ -601,7 +599,6 @@ impl EffectivenessTest {
         // Build client with timeout
         let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
         let make_builder = |force_no_proxy: bool| {
-            let mut client_builder = reqwest::Client::builder().timeout(self.config.request_timeout);
             let mut client_builder =
                 reqwest::Client::builder().timeout(self.config.request_timeout);
             if disable_proxy || force_no_proxy {
@@ -616,7 +613,6 @@ impl EffectivenessTest {
             Ok(Ok(client)) => client,
             Ok(Err(err)) => return Err(err.into()),
             Err(_) => {
-                eprintln!("⚠️  Effectiveness HTTP client init panicked; retrying without system proxy.");
                 eprintln!(
                     "⚠️  Effectiveness HTTP client init panicked; retrying without system proxy."
                 );

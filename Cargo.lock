@@ -2877,7 +2877,7 @@ dependencies = [
  "dashmap",
  "dirs",
  "futures",
- "h2 0.4.11",
+ "h2",
  "hickory-resolver",
  "http 0.2.12",
  "http 1.3.1",

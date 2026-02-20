@@ -453,66 +453,6 @@ fn classify_enforcement(summary: &VaResultSummary, evidence_score: f64) -> VaEnf
         return VaEnforcement::Inconclusive;
     }
 
-    }
-
-    VaProbeEvaluation {
-        outcome: VaOutcome::Allowed,
-        reason: "no-anomaly".to_string(),
-        evidence,
-    }
-}
-
-fn score_evidence(evidence: &[VaEvidence]) -> f64 {
-    if evidence.is_empty() {
-        return 0.0;
-    }
-    let mut score = 0.0;
-    for entry in evidence {
-        score += match entry.kind {
-            VaEvidenceKind::StatusCode => 1.0,
-            VaEvidenceKind::BlockedKeyword => 0.9,
-            VaEvidenceKind::ChallengeHeader => 0.8,
-            VaEvidenceKind::ChallengeKeyword => 0.7,
-            VaEvidenceKind::BaselineDeviation => 0.6,
-            VaEvidenceKind::StatusChange => 0.5,
-            VaEvidenceKind::HeaderDiff => 0.4,
-            VaEvidenceKind::LengthDelta => 0.2,
-        };
-    }
-    (score / evidence.len() as f64).min(1.0)
-}
-
-fn compute_evidence_score(results: &[VaResultRecord]) -> f64 {
-    if results.is_empty() {
-        return 0.0;
-    }
-    let total: f64 = results
-        .iter()
-        .map(|record| score_evidence(&record.evidence))
-        .sum();
-    (total / results.len() as f64).min(1.0)
-}
-
-fn summarize_evidence(results: &[VaResultRecord]) -> Vec<VaEvidenceTally> {
-    let mut counts: HashMap<VaEvidenceKind, usize> = HashMap::new();
-    for record in results {
-        for entry in &record.evidence {
-            *counts.entry(entry.kind).or_insert(0) += 1;
-        }
-    }
-    let mut tallies: Vec<VaEvidenceTally> = counts
-        .into_iter()
-        .map(|(kind, count)| VaEvidenceTally { kind, count })
-        .collect();
-    tallies.sort_by(|a, b| b.count.cmp(&a.count));
-    tallies
-}
-
-fn classify_enforcement(summary: &VaResultSummary, evidence_score: f64) -> VaEnforcement {
-    if summary.total == 0 {
-        return VaEnforcement::Inconclusive;
-    }
-
     let blocked_rate = summary.blocked as f64 / summary.total as f64;
     let challenge_rate = summary.challenge as f64 / summary.total as f64;
     let allowed_rate = summary.allowed as f64 / summary.total as f64;
@@ -705,8 +645,6 @@ pub fn va_report_schema() -> serde_json::Value {
 
 pub trait VaHttpAdapter {
     fn get(&self, url: &str) -> anyhow::Result<VaHttpResponse>;
-    fn get_with_payload(&self, url: &str, payload: &VaPayloadVariant)
-        -> anyhow::Result<VaHttpResponse>;
     fn get_with_payload(
         &self,
         url: &str,
@@ -924,13 +862,6 @@ impl VirtualAdversaryRunner {
             .collect()
     }
 
-    fn build_replay_item(
-        target_host: &str,
-        item: &VaReplayPlanItem,
-    ) -> Result<VaProbePlanItem> {
-        let parsed = Url::parse(&item.url)
-            .or_else(|_| Url::parse(&format!("https://{}", item.url)))?;
-        let host = parsed.host_str().ok_or_else(|| anyhow!("replay url missing host"))?;
     fn build_replay_item(target_host: &str, item: &VaReplayPlanItem) -> Result<VaProbePlanItem> {
         let parsed =
             Url::parse(&item.url).or_else(|_| Url::parse(&format!("https://{}", item.url)))?;
@@ -990,25 +921,10 @@ impl VirtualAdversaryRunner {
         item: &VaProbePlanItem,
     ) -> Result<VaProbeEvaluation> {
         let response = self.http.send(&item.request)?;
-        let diff = ResponseDiff::compare(
-            baseline,
-            response.status,
-            &response.headers,
-            &response.body,
-        );
-        let mut evaluation = classify_outcome(response.status, &diff, &response.body);
-        evaluation.reason.push_str(&format!(
         let diff =
             ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
         let mut evaluation = classify_outcome(response.status, &diff, &response.body);
         evaluation.reason.push_str(&format!(
-        payload: &VaPayloadVariant,
-    ) -> Result<(VaOutcome, String)> {
-        let response = self.http.get_with_payload(target_url, payload)?;
-        let diff =
-            ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
-        let (outcome, mut reason) = classify_outcome(response.status, &diff, &response.body);
-        reason.push_str(&format!(
             " status={} len_delta={} header_diff={}",
             response.status,
             diff.length_delta,
@@ -1026,9 +942,6 @@ impl VirtualAdversaryRunner {
         if replay_plan.is_empty() {
             return Err(anyhow!("replay plan is empty"));
         }
-        let base = Url::parse(target_url)
-            .or_else(|_| Url::parse(&format!("https://{target_url}")))?;
-        let target_host = base.host_str().ok_or_else(|| anyhow!("target url missing host"))?;
         let base =
             Url::parse(target_url).or_else(|_| Url::parse(&format!("https://{target_url}")))?;
         let target_host = base
@@ -1161,8 +1074,6 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 }
 
 fn build_probe_request(probe: &Probe, target_url: &str) -> Result<VaHttpRequest> {
-    let mut url = Url::parse(target_url)
-        .or_else(|_| Url::parse(&format!("https://{target_url}")))?;
     let mut url =
         Url::parse(target_url).or_else(|_| Url::parse(&format!("https://{target_url}")))?;
 
@@ -1531,7 +1442,6 @@ mod tests {
             .evidence
             .iter()
             .any(|e| e.kind == VaEvidenceKind::ChallengeHeader));
-        assert_eq!(classify_outcome(200, &diff, "ok").0, VaOutcome::Challenge);
     }
 
     #[test]
@@ -1540,7 +1450,6 @@ mod tests {
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
         let evaluation = classify_outcome(200, &diff, "ok");
         assert_eq!(evaluation.outcome, VaOutcome::Allowed);
-        assert_eq!(classify_outcome(200, &diff, "ok").0, VaOutcome::Allowed);
     }
 
     #[test]
