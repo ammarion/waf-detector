@@ -199,9 +199,7 @@ impl ConsentManager {
     pub fn remove_authorized_target(&self, target: &str) -> Result<bool> {
         let mut consent = self.load_consent()?;
         let before = consent.authorized_targets.len();
-        consent
-            .authorized_targets
-            .retain(|entry| entry != target);
+        consent.authorized_targets.retain(|entry| entry != target);
         let removed = consent.authorized_targets.len() != before;
         if removed {
             self.save_consent(&consent)?;

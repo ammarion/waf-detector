@@ -65,6 +65,9 @@ pub struct TestStatistics {
     pub allowed_requests: usize,
     pub error_responses: usize,
     pub average_response_time_ms: f64,
+    pub benign_tests_count: usize,
+    pub false_positive_count: usize,
+    pub false_positive_rate: f64,
 }
 
 impl EffectivenessReport {
@@ -85,6 +88,9 @@ impl EffectivenessReport {
                 allowed_requests: 0,
                 error_responses: 0,
                 average_response_time_ms: 0.0,
+                benign_tests_count: 0,
+                false_positive_count: 0,
+                false_positive_rate: 0.0,
             },
         }
     }
@@ -213,9 +219,23 @@ impl EffectivenessReport {
             (self.statistics.allowed_requests as f64 / self.statistics.total_tests as f64) * 100.0
         ));
         summary.push_str(&format!(
-            "- Avg Response Time: {:.0}ms\n\n",
+            "- Avg Response Time: {:.0}ms\n",
             self.statistics.average_response_time_ms
         ));
+
+        // False positive statistics
+        if self.statistics.benign_tests_count > 0 {
+            summary.push_str(&format!(
+                "- Benign Tests: {}\n",
+                self.statistics.benign_tests_count
+            ));
+            summary.push_str(&format!(
+                "- False Positives: {} ({:.1}%)\n",
+                self.statistics.false_positive_count,
+                self.statistics.false_positive_rate * 100.0
+            ));
+        }
+        summary.push('\n');
 
         // Vulnerabilities
         if !self.vulnerabilities.is_empty() {
@@ -316,6 +336,13 @@ impl EffectivenessReport {
             r#"<div class="stat">Allowed: <span class="stat-value">{}</span></div>"#,
             self.statistics.allowed_requests
         ));
+        if self.statistics.benign_tests_count > 0 {
+            html.push_str(&format!(
+                r#"<div class="stat">False Positives: <span class="stat-value">{}</span> ({:.1}%)</div>"#,
+                self.statistics.false_positive_count,
+                self.statistics.false_positive_rate * 100.0
+            ));
+        }
         html.push_str("</div>");
 
         // Vulnerabilities

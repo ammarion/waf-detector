@@ -138,7 +138,10 @@ fn parse_evidence(value: &Value) -> Result<EvidenceInfo> {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Object(map)) => {
             // Enum serialization: {"Header":"cf-ray"} or similar
-            map.keys().next().cloned().unwrap_or_else(|| "unknown".to_string())
+            map.keys()
+                .next()
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string())
         }
         _ => "unknown".to_string(),
     };

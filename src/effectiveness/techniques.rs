@@ -44,6 +44,92 @@ pub fn get_techniques_for_level(level: u8) -> Vec<TestingTechnique> {
     techniques
 }
 
+/// Get benign testing techniques for false positive testing
+pub fn get_benign_techniques() -> Vec<TestingTechnique> {
+    vec![
+        TestingTechnique {
+            name: "Blog post with SQL keywords".to_string(),
+            category: "Benign".to_string(),
+            method: "POST".to_string(),
+            payload:
+                "content=Today I learned how to SELECT data FROM a database using WHERE clauses"
+                    .to_string(),
+            headers: HashMap::from([(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )]),
+            severity: "NONE".to_string(),
+            remediation: "Benign content should not be blocked".to_string(),
+        },
+        TestingTechnique {
+            name: "Valid path traversal".to_string(),
+            category: "Benign".to_string(),
+            method: "GET".to_string(),
+            payload: "path=/docs/../images/logo.png".to_string(),
+            headers: HashMap::new(),
+            severity: "NONE".to_string(),
+            remediation: "Valid path navigation should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "JSON with angle brackets".to_string(),
+            category: "Benign".to_string(),
+            method: "POST".to_string(),
+            payload: r#"{"message": "<b>Hello</b> World"}"#.to_string(),
+            headers: HashMap::from([("Content-Type".to_string(), "application/json".to_string())]),
+            severity: "NONE".to_string(),
+            remediation: "Legitimate HTML in JSON should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "Search query with boolean keywords".to_string(),
+            category: "Benign".to_string(),
+            method: "GET".to_string(),
+            payload: "search=red OR blue AND green".to_string(),
+            headers: HashMap::new(),
+            severity: "NONE".to_string(),
+            remediation: "Natural language searches should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "HTML tutorial comment".to_string(),
+            category: "Benign".to_string(),
+            method: "POST".to_string(),
+            payload: "comment=I love the <script> tag in HTML tutorials".to_string(),
+            headers: HashMap::from([(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )]),
+            severity: "NONE".to_string(),
+            remediation: "Educational content about HTML should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "Valid percent-encoded name".to_string(),
+            category: "Benign".to_string(),
+            method: "GET".to_string(),
+            payload: "name=O%27Brien".to_string(),
+            headers: HashMap::new(),
+            severity: "NONE".to_string(),
+            remediation: "Properly encoded legitimate names should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "Mathematical expression".to_string(),
+            category: "Benign".to_string(),
+            method: "GET".to_string(),
+            payload: "calc=1+1=2 OR 2+2=4".to_string(),
+            headers: HashMap::new(),
+            severity: "NONE".to_string(),
+            remediation: "Math expressions should be allowed".to_string(),
+        },
+        TestingTechnique {
+            name: "Legitimate XML content".to_string(),
+            category: "Benign".to_string(),
+            method: "POST".to_string(),
+            payload: r#"data=<note><to>User</to><from>Admin</from></note>"#.to_string(),
+            headers: HashMap::from([("Content-Type".to_string(), "application/xml".to_string())]),
+            severity: "NONE".to_string(),
+            remediation: "Valid XML without external entities should be allowed".to_string(),
+        },
+    ]
+}
+
 /// Basic detection techniques (safe for production)
 fn get_basic_techniques() -> Vec<TestingTechnique> {
     vec![

