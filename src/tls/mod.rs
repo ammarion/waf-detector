@@ -188,6 +188,17 @@ impl TlsAnalyzer {
             }],
         );
 
+        // Sucuri certificate patterns
+        provider_patterns.insert(
+            "Sucuri".to_string(),
+            vec![CertificatePattern {
+                pattern_type: CertificatePatternType::Subject,
+                pattern: "sucuri.net".to_string(),
+                confidence: 0.95,
+                description: "Sucuri SSL certificate".to_string(),
+            }],
+        );
+
         Self { provider_patterns }
     }
 

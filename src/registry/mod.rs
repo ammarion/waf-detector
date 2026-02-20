@@ -433,6 +433,7 @@ impl ProviderRegistry {
             "azure" => "Azure",
             "f5" => "F5",
             "imperva" => "Imperva",
+            "sucuri" => "Sucuri",
             "generic_waf" => "Generic WAF",
             _ => return None,
         };
@@ -473,6 +474,10 @@ impl ProviderRegistry {
             "imperva-x-iinfo-header",
             "imperva-incap-cookie",
             "imperva-visid-cookie",
+            // Sucuri
+            "sucuri-id-header",
+            "sucuri-cookie",
+            "sucuri-server-header",
         ];
 
         evidence.iter().any(|ev| match ev.method_type {
