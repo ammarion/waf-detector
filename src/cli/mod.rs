@@ -4,7 +4,9 @@ use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, WafSmokeTest};
 use crate::providers::{
     akamai::AkamaiProvider, aws::AwsProvider, azure::AzureProvider, cloudflare::CloudFlareProvider,
-    f5::F5Provider, fastly::FastlyProvider, vercel::VercelProvider, Provider,
+    f5::F5Provider, fastly::FastlyProvider, fortiweb::FortiWebProvider, imperva::ImpervaProvider,
+    modsecurity::ModSecurityProvider, radware::RadwareProvider, sucuri::SucuriProvider,
+    vercel::VercelProvider, Provider,
 };
 use crate::registry::ProviderRegistry;
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
@@ -69,6 +71,11 @@ impl SimpleCliApp {
         registry.register_provider(Provider::Vercel(VercelProvider::new()))?;
         registry.register_provider(Provider::Azure(AzureProvider::new()))?;
         registry.register_provider(Provider::F5(F5Provider::new()))?;
+        registry.register_provider(Provider::Imperva(ImpervaProvider::new()))?;
+        registry.register_provider(Provider::ModSecurity(ModSecurityProvider::new()))?;
+        registry.register_provider(Provider::Sucuri(SucuriProvider::new()))?;
+        registry.register_provider(Provider::Radware(RadwareProvider::new()))?;
+        registry.register_provider(Provider::FortiWeb(FortiWebProvider::new()))?;
 
         Ok(Self { registry })
     }
@@ -500,7 +507,7 @@ impl SimpleCliApp {
                 println!("{}", serde_json::to_string_pretty(&detection_result)?);
             }
             "yaml" => {
-                println!("{}", serde_yaml::to_string(&detection_result)?);
+                println!("{}", serde_yml::to_string(&detection_result)?);
             }
             "compact" => {
                 self.print_compact(&detection_result);
@@ -554,7 +561,7 @@ impl SimpleCliApp {
                 println!("{}", serde_json::to_string_pretty(&results)?);
             }
             "yaml" => {
-                println!("{}", serde_yaml::to_string(&results)?);
+                println!("{}", serde_yml::to_string(&results)?);
             }
             "compact" => {
                 for result in &results {

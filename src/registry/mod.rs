@@ -2,8 +2,11 @@
 
 use crate::confidence::AdvancedScoring; // NEW: Import advanced scoring
 use crate::dns::DnsAnalyzer; // NEW: Import DNS analysis
+use crate::http2::H2FingerprintAnalyzer; // NEW: Import HTTP/2 fingerprinting
 use crate::payload::PayloadAnalyzer; // NEW: Import payload analysis
+use crate::providers::error_profiles::ErrorProfileDatabase; // NEW: Import error profiles
 use crate::providers::{Provider, ProviderMetadata};
+use crate::timing::connection_behavior::ConnectionBehaviorAnalyzer; // NEW: Import connection behavior analysis
 use crate::timing::{TimingAnalyzer, TimingConfig}; // NEW: Import timing analysis
 use crate::tls::TlsAnalyzer;
 use crate::{DetectionContext, DetectionMetadata, DetectionResult, ProviderDetection};
@@ -23,6 +26,9 @@ pub struct ProviderRegistry {
     dns_analyzer: Arc<DnsAnalyzer>,         // NEW: DNS analysis
     payload_analyzer: Arc<PayloadAnalyzer>, // NEW: Payload analysis
     tls_analyzer: Arc<TlsAnalyzer>,
+    h2_analyzer: Arc<H2FingerprintAnalyzer>, // NEW: HTTP/2 fingerprinting
+    error_profile_db: Arc<ErrorProfileDatabase>, // NEW: Error profile analysis
+    connection_behavior_analyzer: Arc<ConnectionBehaviorAnalyzer>, // NEW: Connection behavior analysis
     payload_analysis_enabled: Arc<AtomicBool>,
 }
 
@@ -36,6 +42,9 @@ impl ProviderRegistry {
             dns_analyzer: Arc::new(DnsAnalyzer::new()), // NEW: Initialize DNS analysis
             payload_analyzer: Arc::new(PayloadAnalyzer::new()), // NEW: Initialize payload analysis
             tls_analyzer: Arc::new(TlsAnalyzer::new()),
+            h2_analyzer: Arc::new(H2FingerprintAnalyzer::new()), // NEW: Initialize HTTP/2 fingerprinting
+            error_profile_db: Arc::new(ErrorProfileDatabase::new()), // NEW: Initialize error profile database
+            connection_behavior_analyzer: Arc::new(ConnectionBehaviorAnalyzer::new()), // NEW: Initialize connection behavior analyzer
             payload_analysis_enabled: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -200,13 +209,81 @@ impl ProviderRegistry {
             }
         };
 
+        // NEW: Run HTTP/2 fingerprinting in parallel with provider detection
+        let h2_future = {
+            let url = context.url.clone();
+            let h2_analyzer = Arc::clone(&self.h2_analyzer);
+            async move {
+                match h2_analyzer.analyze(&url).await {
+                    Ok(h2_evidence) => {
+                        if !h2_evidence.is_empty() {
+                            Some(("H2Fingerprinting".to_string(), h2_evidence, 0.93))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("HTTP/2 fingerprinting failed: {e}");
+                        None
+                    }
+                }
+            }
+        };
+
+        // NEW: Run error profile analysis on existing response (passive analysis)
+        let error_profile_future = {
+            let response = context.response.clone();
+            let error_profile_db = Arc::clone(&self.error_profile_db);
+            async move {
+                if let Some(resp) = response {
+                    let error_evidence =
+                        error_profile_db.match_response(resp.status, &resp.body, &resp.headers);
+                    if !error_evidence.is_empty() {
+                        Some(("ErrorProfileAnalysis".to_string(), error_evidence, 0.90))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+
+        // NEW: Run connection behavior analysis on existing response headers (passive analysis)
+        let connection_behavior_future = {
+            let response = context.response.clone();
+            let connection_behavior_analyzer = Arc::clone(&self.connection_behavior_analyzer);
+            async move {
+                if let Some(resp) = response {
+                    let connection_evidence =
+                        connection_behavior_analyzer.analyze_response_headers(&resp.headers);
+                    if !connection_evidence.is_empty() {
+                        Some((
+                            "ConnectionBehaviorAnalysis".to_string(),
+                            connection_evidence,
+                            0.78,
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+
         // Run all detection techniques in parallel
         let (provider_results, timing_result, dns_result, payload_result, tls_result) = tokio::join!(
+        let (provider_results, timing_result, dns_result, payload_result, tls_result, h2_result, error_profile_result, connection_behavior_result) = tokio::join!(
             futures::future::join_all(provider_futures),
             timing_future,
             dns_future,
             payload_future,
             tls_future
+            tls_future,
+            h2_future,
+            error_profile_future,
+            connection_behavior_future
         );
 
         let mut provider_scores = HashMap::new();
@@ -224,6 +301,9 @@ impl ProviderRegistry {
         evidence_map.insert("DnsAnalysis".to_string(), Vec::new());
         evidence_map.insert("PayloadAnalysis".to_string(), Vec::new());
         evidence_map.insert("TlsAnalysis".to_string(), Vec::new());
+        evidence_map.insert("H2Fingerprinting".to_string(), Vec::new());
+        evidence_map.insert("ErrorProfileAnalysis".to_string(), Vec::new());
+        evidence_map.insert("ConnectionBehaviorAnalysis".to_string(), Vec::new());
         evidence_map.insert("GenericWAF".to_string(), Vec::new());
 
         // Track best WAF and CDN separately to support multi-vendor scenarios
@@ -249,6 +329,15 @@ impl ProviderRegistry {
         }
         if let Some(tls_result) = tls_result {
             analysis_results.push(tls_result);
+        }
+        if let Some(h2_result) = h2_result {
+            analysis_results.push(h2_result);
+        }
+        if let Some(error_profile_result) = error_profile_result {
+            analysis_results.push(error_profile_result);
+        }
+        if let Some(connection_behavior_result) = connection_behavior_result {
+            analysis_results.push(connection_behavior_result);
         }
 
         for (analysis_name, evidence, _confidence) in analysis_results {
@@ -432,10 +521,15 @@ impl ProviderRegistry {
             Some(rest)
         } else if let Some(rest) = sig.strip_prefix("tls-") {
             rest.split('-').next()
-        } else if let Some(rest) = sig.strip_prefix("payload_detection_") {
+        } else if let Some(rest) = sig.strip_prefix("h2-fingerprint-") {
+            Some(rest)
+        } else if let Some(rest) = sig.strip_prefix("error-profile-") {
+            // Extract provider name from error-profile-<provider>-*
+            rest.split('-').next()
+        } else if let Some(rest) = sig.strip_prefix("connection-behavior-") {
             Some(rest)
         } else {
-            None
+            sig.strip_prefix("payload_detection_")
         }?;
 
         let normalized = match provider_key {
@@ -447,6 +541,11 @@ impl ProviderRegistry {
             "vercel" => "Vercel",
             "azure" => "Azure",
             "f5" => "F5",
+            "imperva" => "Imperva",
+            "modsecurity" => "ModSecurity",
+            "sucuri" => "Sucuri",
+            "radware" => "Radware",
+            "fortiweb" => "FortiWeb",
             "generic_waf" => "Generic WAF",
             _ => return None,
         };
@@ -483,6 +582,26 @@ impl ProviderRegistry {
             "f5-asm-block-behavior",
             "f5-block-pattern",
             "f5-support-id-pattern",
+            // Imperva
+            "imperva-x-iinfo-header",
+            "imperva-incap-cookie",
+            "imperva-visid-cookie",
+            // ModSecurity
+            "modsecurity-server-header",
+            "modsecurity-header",
+            "modsecurity-error-body",
+            // Sucuri
+            "sucuri-id-header",
+            "sucuri-cookie",
+            "sucuri-server-header",
+            // Radware
+            "radware-compstate-header",
+            "radware-requestid-header",
+            "radware-cookie",
+            // FortiWeb
+            "fortiweb-server-header",
+            "fortiweb-nonce-header",
+            "fortiweb-cookie",
         ];
 
         evidence.iter().any(|ev| match ev.method_type {
@@ -544,12 +663,32 @@ mod tests {
             Some("AWS".to_string())
         );
         assert_eq!(
+            registry.provider_from_signature("h2-fingerprint-cloudflare"),
+            Some("CloudFlare".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("h2-fingerprint-aws"),
+            Some("AWS".to_string())
+        );
+        assert_eq!(
             registry.provider_from_signature("payload_detection_aws_waf"),
             Some("AWS".to_string())
         );
         assert_eq!(
             registry.provider_from_signature("timing-waf-delay"),
             Some("Generic WAF".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("connection-behavior-cloudflare"),
+            Some("CloudFlare".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("connection-behavior-aws"),
+            Some("AWS".to_string())
+        );
+        assert_eq!(
+            registry.provider_from_signature("connection-behavior-akamai"),
+            Some("Akamai".to_string())
         );
     }
 

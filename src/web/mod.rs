@@ -626,7 +626,7 @@ fn build_va_reports_csv(reports: &[VaReportSummary]) -> String {
         "id,target_url,created_at,plan_size,blocked,challenge,allowed,error,risk_label".to_string(),
     );
     for report in reports {
-        let row = vec![
+        let row = [
             csv_escape(&report.id),
             csv_escape(&report.target_url),
             csv_escape(&report.created_at.to_rfc3339()),
@@ -662,6 +662,7 @@ fn build_va_report_csv(stored: &VaStoredReport) -> String {
     for (idx, record) in stored.report.results.iter().enumerate() {
         let replay = stored.report.replay_plan.get(idx);
         let row = vec![
+        let row = [
             csv_escape(&stored.id),
             csv_escape(&stored.report.target_url),
             csv_escape(&stored.created_at.to_rfc3339()),

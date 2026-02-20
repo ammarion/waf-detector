@@ -20,7 +20,7 @@ path = "test_integration.rs"
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 # Async runtime
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "gzip", "deflate", "brotli", "stream"] }
@@ -29,6 +29,7 @@ reqwest = { version = "0.12", features = ["json", "gzip", "deflate", "brotli", "
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
+serde_yml = "0.0.12"
 toml = "0.8"
 
 # Regex and text processing
@@ -58,6 +59,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # HTTP types
 http = "0.2"
+http1 = { package = "http", version = "1.0" }
+bytes = "1.0"
 
 # URL encoding for WAF mode detection
 urlencoding = "2.1"
@@ -77,6 +80,8 @@ tempfile = "3.20.0"
 hickory-resolver = "0.24"
 tokio-rustls = { version = "0.26", features = ["ring"] }
 x509-parser = "0.16"
+md5 = "0.7"
+h2 = "0.4"
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -106,3 +111,5 @@ providers-all = ["cloudflare", "akamai"]
 cloudflare = []
 akamai = []
 cli = []
+
+rand = "0.8.5"

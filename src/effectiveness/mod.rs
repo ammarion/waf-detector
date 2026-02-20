@@ -257,6 +257,8 @@ impl EffectivenessTest {
             let similarity =
                 static_detection::calculate_similarity(body, &baseline_sig.body_sample);
             let length_diff = (baseline_sig.body_length as i64 - body.len() as i64).abs() as usize;
+            let length_diff =
+                (baseline_sig.body_length as i64 - body.len() as i64).unsigned_abs() as usize;
             let significant_reduction = body.len()
                 < (baseline_sig.body_length as f64 * reduction_ratio) as usize
                 && length_diff > min_length_diff;
@@ -487,6 +489,46 @@ impl EffectivenessTest {
             report.add_test_result(technique.name.clone(), result);
         }
 
+        // Test benign patterns for false positive rate
+        info!("Testing benign patterns for false positive detection");
+        self.test_benign_patterns(url, report).await?;
+
+        Ok(())
+    }
+
+    /// Test benign patterns to measure false positive rate
+    async fn test_benign_patterns(
+        &mut self,
+        url: &str,
+        report: &mut EffectivenessReport,
+    ) -> Result<()> {
+        let benign_techniques = techniques::get_benign_techniques();
+
+        for technique in benign_techniques {
+            self.rate_limit().await?;
+
+            let result = self.apply_technique(url, &technique).await?;
+
+            // Track false positives (benign requests that were blocked)
+            report.statistics.benign_tests_count += 1;
+            if result.blocked {
+                report.statistics.false_positive_count += 1;
+
+                warn!(
+                    "False positive detected: Benign request '{}' was incorrectly blocked",
+                    technique.name
+                );
+            }
+
+            report.add_test_result(format!("Benign: {}", technique.name), result);
+        }
+
+        // Calculate false positive rate
+        if report.statistics.benign_tests_count > 0 {
+            report.statistics.false_positive_rate = report.statistics.false_positive_count as f64
+                / report.statistics.benign_tests_count as f64;
+        }
+
         Ok(())
     }
 
@@ -708,6 +750,33 @@ impl EffectivenessTest {
                 category: "WAF Mode".to_string(),
                 description: "No attacks were blocked (0% block rate).".to_string(),
                 implementation: "If a WAF is present, it is likely in 'Monitoring' or 'Log-Only' mode. Change to 'Blocking' mode to prevent attacks.".to_string(),
+            });
+        }
+
+        // Check for high false positive rate
+        if report.statistics.false_positive_rate > 0.1 {
+            report.add_recommendation(Recommendation {
+                priority: "HIGH".to_string(),
+                category: "False Positives".to_string(),
+                description: format!(
+                    "High false positive rate detected ({:.1}% of benign requests blocked)",
+                    report.statistics.false_positive_rate * 100.0
+                ),
+                implementation: "Review and tune WAF rules to reduce false positives. Consider allowlisting legitimate patterns and adjusting sensitivity thresholds. High false positive rates can impact legitimate users."
+                    .to_string(),
+            });
+        } else if report.statistics.false_positive_rate > 0.0
+            && report.statistics.benign_tests_count > 0
+        {
+            report.add_recommendation(Recommendation {
+                priority: "MEDIUM".to_string(),
+                category: "False Positives".to_string(),
+                description: format!(
+                    "Some benign requests were blocked ({:.1}% false positive rate)",
+                    report.statistics.false_positive_rate * 100.0
+                ),
+                implementation: "Monitor for false positives in production traffic and consider fine-tuning rules for specific edge cases."
+                    .to_string(),
             });
         }
     }

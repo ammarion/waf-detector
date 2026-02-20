@@ -3,6 +3,7 @@
 //! This module implements wafw00f-style detection using malicious payloads
 //! to trigger WAF responses and analyze the differences.
 
+pub mod loader;
 pub mod waf_smoke_test;
 
 use crate::http::HttpClient;

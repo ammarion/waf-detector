@@ -72,6 +72,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -82,6 +83,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -92,6 +94,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -102,6 +105,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -114,6 +118,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -124,6 +129,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -134,6 +140,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -144,6 +151,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -168,6 +176,11 @@ mod effectiveness_tests {
                 &config
             )
             .0
+            EffectivenessTest::is_blocked(200, "OK Bot.", &std::collections::HashMap::new(), None)
+                .0
+        );
+        assert!(
+            EffectivenessTest::is_blocked(200, "ok bot", &std::collections::HashMap::new(), None).0
         );
 
         // Test blocked keyword in short responses
@@ -191,6 +204,12 @@ mod effectiveness_tests {
                 &config
             )
             .0
+            EffectivenessTest::is_blocked(200, "Blocked", &std::collections::HashMap::new(), None)
+                .0
+        );
+        // "No" alone is not a block indicator - it needs context
+        assert!(
+            !EffectivenessTest::is_blocked(200, "No", &std::collections::HashMap::new(), None).0
         );
         assert!(
             EffectivenessTest::is_blocked(
@@ -199,6 +218,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -215,6 +235,8 @@ mod effectiveness_tests {
             )
             .0
         ); // Empty response should not be blocked
+        assert!(!EffectivenessTest::is_blocked(200, "<!DOCTYPE html><html><body>Welcome to our website! Here is some normal content that is definitely longer than 100 characters.</body></html>", &std::collections::HashMap::new(), None).0);
+        assert!(!EffectivenessTest::is_blocked(200, "", &std::collections::HashMap::new(), None).0); // Empty response should not be blocked
         assert!(
             !EffectivenessTest::is_blocked(
                 404,
@@ -222,6 +244,7 @@ mod effectiveness_tests {
                 &std::collections::HashMap::new(),
                 None,
                 &config
+                None
             )
             .0
         );
@@ -299,6 +322,8 @@ mod effectiveness_tests {
             Some(&baseline),
             &config,
         );
+        let (blocked, reasons) =
+            EffectivenessTest::is_blocked(200, "Welcome", &response_headers, Some(&baseline));
 
         assert!(blocked);
         assert!(reasons.iter().any(|r| r.contains("Blocking header")));

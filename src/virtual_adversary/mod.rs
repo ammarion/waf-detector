@@ -482,6 +482,12 @@ pub struct VaResultSummary {
     pub error: usize,
 }
 
+impl Default for VaResultSummary {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VaResultSummary {
     pub fn new() -> Self {
         Self {
@@ -919,6 +925,13 @@ impl VirtualAdversaryRunner {
             ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
         let mut evaluation = classify_outcome(response.status, &diff, &response.body);
         evaluation.reason.push_str(&format!(
+        payload: &VaPayloadVariant,
+    ) -> Result<(VaOutcome, String)> {
+        let response = self.http.get_with_payload(target_url, payload)?;
+        let diff =
+            ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
+        let (outcome, mut reason) = classify_outcome(response.status, &diff, &response.body);
+        reason.push_str(&format!(
             " status={} len_delta={} header_diff={}",
             response.status,
             diff.length_delta,
@@ -1436,6 +1449,7 @@ mod tests {
             .evidence
             .iter()
             .any(|e| e.kind == VaEvidenceKind::ChallengeHeader));
+        assert_eq!(classify_outcome(200, &diff, "ok").0, VaOutcome::Challenge);
     }
 
     #[test]
@@ -1444,6 +1458,7 @@ mod tests {
         let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "ok");
         let evaluation = classify_outcome(200, &diff, "ok");
         assert_eq!(evaluation.outcome, VaOutcome::Allowed);
+        assert_eq!(classify_outcome(200, &diff, "ok").0, VaOutcome::Allowed);
     }
 
     #[test]
