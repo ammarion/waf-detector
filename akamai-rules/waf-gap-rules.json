@@ -1,0 +1,644 @@
+{
+  "_metadata": {
+    "description": "Akamai WAF custom rules to close gaps identified by waf-detector smoke testing on tokui-commerce.adobe.com (2026-02-21). These rules are formatted for Akamai Application Security API custom rule import.",
+    "target": "tokui-commerce.adobe.com",
+    "generated_by": "waf-detector gap analysis",
+    "date": "2026-02-21",
+    "categories_covered": [
+      "GraphQL introspection/mutation",
+      "Prototype pollution (JSON body)",
+      "Localhost/loopback SSRF",
+      "HTTP request smuggling",
+      "Scanner UA gaps (BurpSuite, Acunetix)",
+      "PHP file extension blocking",
+      "SQLi comment bypass (admin'--)",
+      "Twig SSTI (registerUndefinedFilterCallback)"
+    ]
+  },
+  "rules": [
+    {
+      "id": "WAF-GAP-001",
+      "name": "GraphQL Introspection Block",
+      "description": "Block GraphQL introspection queries that expose schema metadata. Matches __schema, __type, and introspection keywords in POST request bodies.",
+      "severity": "HIGH",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestMethodMatch",
+          "value": ["POST"]
+        },
+        {
+          "type": "requestBodyMatch",
+          "value": ["__schema", "__type"],
+          "matchOperator": "containsAny",
+          "caseSensitive": false
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "AND",
+        "conditions": [
+          {
+            "type": "requestMethodCondition",
+            "positiveMatch": true,
+            "value": ["POST"]
+          },
+          {
+            "type": "requestBodyCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*__schema*", "*__type*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-002",
+      "name": "GraphQL Mutation Block",
+      "description": "Block unauthorized GraphQL mutation operations. Prevents privilege escalation via mutation queries.",
+      "severity": "HIGH",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestMethodMatch",
+          "value": ["POST"]
+        },
+        {
+          "type": "requestBodyMatch",
+          "value": ["mutation\\s*\\{", "mutation\\s*[a-zA-Z]"],
+          "matchOperator": "matchesRegex",
+          "caseSensitive": false
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "AND",
+        "conditions": [
+          {
+            "type": "requestMethodCondition",
+            "positiveMatch": true,
+            "value": ["POST"]
+          },
+          {
+            "type": "requestBodyCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*mutation *{*", "*mutation {*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-003",
+      "name": "GraphQL Alias Batching Block",
+      "description": "Block GraphQL alias batching attacks used for DoS amplification and data exfiltration via parallel aliased queries.",
+      "severity": "MEDIUM",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestMethodMatch",
+          "value": ["POST"]
+        },
+        {
+          "type": "requestBodyMatch",
+          "value": ["alias\\d+\\s*:", "\\w+\\s*:\\s*\\w+\\("],
+          "matchOperator": "matchesRegex",
+          "caseSensitive": false,
+          "note": "Matches patterns like 'alias1: user(id: 1)' commonly used in batching attacks"
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "AND",
+        "conditions": [
+          {
+            "type": "requestMethodCondition",
+            "positiveMatch": true,
+            "value": ["POST"]
+          },
+          {
+            "type": "requestBodyCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*alias*:*user*(*)*password*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-004",
+      "name": "Prototype Pollution - JSON Body __proto__",
+      "description": "Block prototype pollution attacks via __proto__ in JSON request bodies. Prevents JavaScript prototype chain poisoning for privilege escalation.",
+      "severity": "HIGH",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestMethodMatch",
+          "value": ["POST", "PUT", "PATCH"]
+        },
+        {
+          "type": "requestBodyMatch",
+          "value": ["__proto__"],
+          "matchOperator": "contains",
+          "caseSensitive": false
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "AND",
+        "conditions": [
+          {
+            "type": "requestMethodCondition",
+            "positiveMatch": true,
+            "value": ["POST", "PUT", "PATCH"]
+          },
+          {
+            "type": "requestBodyCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*__proto__*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-005",
+      "name": "Prototype Pollution - JSON Body constructor.prototype",
+      "description": "Block prototype pollution via constructor.prototype chain in JSON request bodies.",
+      "severity": "HIGH",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestMethodMatch",
+          "value": ["POST", "PUT", "PATCH"]
+        },
+        {
+          "type": "requestBodyMatch",
+          "value": ["constructor", "prototype"],
+          "matchOperator": "containsAll",
+          "caseSensitive": false
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "AND",
+        "conditions": [
+          {
+            "type": "requestMethodCondition",
+            "positiveMatch": true,
+            "value": ["POST", "PUT", "PATCH"]
+          },
+          {
+            "type": "requestBodyCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*constructor*prototype*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-006",
+      "name": "Localhost/Loopback SSRF Block",
+      "description": "Block SSRF attempts targeting localhost, 127.0.0.1, 0.0.0.0, and IPv6 loopback [::1] in query parameters. Cloud metadata IPs (169.254.x.x) are already covered by existing Akamai rules.",
+      "severity": "CRITICAL",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "queryStringMatch",
+          "value": [
+            "localhost",
+            "127.0.0.1",
+            "127.0.0.0",
+            "0.0.0.0",
+            "[::1]",
+            "0177.0.0.1",
+            "2130706433",
+            "017700000001",
+            "0x7f000001"
+          ],
+          "matchOperator": "containsAny",
+          "caseSensitive": false,
+          "note": "Includes decimal, octal, and hex representations of 127.0.0.1"
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "OR",
+        "conditions": [
+          {
+            "type": "argsCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": [
+              "*localhost*",
+              "*127.0.0.1*",
+              "*0.0.0.0*",
+              "*[::1]*",
+              "*0177.0.0.1*",
+              "*2130706433*",
+              "*0x7f000001*"
+            ]
+          },
+          {
+            "type": "requestBodyCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": [
+              "*localhost*",
+              "*127.0.0.1*",
+              "*0.0.0.0*",
+              "*[::1]*"
+            ]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-007",
+      "name": "HTTP Request Smuggling - Transfer-Encoding Manipulation",
+      "description": "Block HTTP request smuggling via conflicting or malformed Transfer-Encoding headers. Detects CL-TE, TE-CL, and TE-TE desync attacks.",
+      "severity": "HIGH",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestHeaderMatch",
+          "header": "Transfer-Encoding",
+          "value": ["chunked", "identity"],
+          "matchOperator": "containsAny",
+          "note": "Akamai edge should normalize TE headers. This rule catches any that slip through via non-standard casing or multiple TE headers."
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "AND",
+        "conditions": [
+          {
+            "type": "requestMethodCondition",
+            "positiveMatch": true,
+            "value": ["POST", "PUT"]
+          },
+          {
+            "type": "requestHeaderCondition",
+            "header": "Transfer-Encoding",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*chunked*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        },
+        "note": "Consider using Akamai's built-in Request Body Inspection setting to normalize Transfer-Encoding instead of a blanket deny if legitimate chunked uploads are expected."
+      }
+    },
+    {
+      "id": "WAF-GAP-008",
+      "name": "Scanner UA - BurpSuite Detection",
+      "description": "Block requests with BurpSuite scanner signatures in User-Agent header. Existing rules catch sqlmap, nikto, nessus but miss BurpSuite.",
+      "severity": "MEDIUM",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestHeaderMatch",
+          "header": "User-Agent",
+          "value": ["burpsuite", "burp suite", "portswigger"],
+          "matchOperator": "containsAny",
+          "caseSensitive": false
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "conditions": [
+          {
+            "type": "requestHeaderCondition",
+            "header": "User-Agent",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*burpsuite*", "*burp suite*", "*portswigger*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-009",
+      "name": "Scanner UA - Acunetix Detection",
+      "description": "Block requests with Acunetix scanner signatures in User-Agent header.",
+      "severity": "MEDIUM",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestHeaderMatch",
+          "header": "User-Agent",
+          "value": ["acunetix", "wvs", "web vulnerability scanner"],
+          "matchOperator": "containsAny",
+          "caseSensitive": false
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "conditions": [
+          {
+            "type": "requestHeaderCondition",
+            "header": "User-Agent",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*acunetix*", "*wvs*", "*web vulnerability scanner*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-010",
+      "name": "PHP File Extension Block",
+      "description": "Block direct access to .php files (case-insensitive) in URL paths. Prevents PHP shell uploads and direct PHP file access. Existing rules only catch traversal+php combos.",
+      "severity": "HIGH",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestPathMatch",
+          "value": ["\\.php($|\\.|\\?)"],
+          "matchOperator": "matchesRegex",
+          "caseSensitive": false,
+          "note": "Matches .php, .pHp, .PHP, .php.jpg (double extension), .php? (with query)"
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "conditions": [
+          {
+            "type": "pathCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*.php", "*.php.*", "*.php?*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        },
+        "note": "Adjust if legitimate .php endpoints exist on the origin. Can be scoped to specific paths."
+      }
+    },
+    {
+      "id": "WAF-GAP-011",
+      "name": "SQLi Comment Bypass (admin'--)",
+      "description": "Block SQL comment-based authentication bypass patterns. The pattern quote-dash-dash ('--) is a common auth bypass that existing rules miss when not preceded by SQL keywords.",
+      "severity": "CRITICAL",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "queryStringMatch",
+          "value": ["'\\s*--", "'\\s*#", "'\\s*/\\*"],
+          "matchOperator": "matchesRegex",
+          "caseSensitive": false,
+          "note": "Matches: admin'--, test'#, user'/* — single quote followed by SQL comment syntax"
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "OR",
+        "conditions": [
+          {
+            "type": "argsCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*'--*", "*'#*"]
+          },
+          {
+            "type": "requestBodyCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*'--*", "*'#*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-012",
+      "name": "Twig SSTI - registerUndefinedFilterCallback",
+      "description": "Block Twig template engine SSTI exploits using registerUndefinedFilterCallback for remote code execution. Other SSTI patterns ({{7*7}}, ${7*7}) are already caught.",
+      "severity": "CRITICAL",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "queryStringMatch",
+          "value": [
+            "registerUndefinedFilterCallback",
+            "registerUndefinedFunctionCallback",
+            "_self.env"
+          ],
+          "matchOperator": "containsAny",
+          "caseSensitive": false
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "OR",
+        "conditions": [
+          {
+            "type": "argsCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": [
+              "*registerundefinedfilter*",
+              "*registerundefinedfunc*",
+              "*_self.env*"
+            ]
+          },
+          {
+            "type": "requestBodyCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": [
+              "*registerundefinedfilter*",
+              "*registerundefinedfunc*",
+              "*_self.env*"
+            ]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-013",
+      "name": "WebSocket Command Injection in JSON Body",
+      "description": "Block command execution payloads embedded in JSON message bodies, commonly seen in WebSocket-style JSON protocols.",
+      "severity": "HIGH",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestMethodMatch",
+          "value": ["POST", "PUT"]
+        },
+        {
+          "type": "requestBodyMatch",
+          "value": ["\"cmd\"\\s*:\\s*\"exec\"", "\"command\"\\s*:\\s*\"exec\""],
+          "matchOperator": "matchesRegex",
+          "caseSensitive": false
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "operation": "AND",
+        "conditions": [
+          {
+            "type": "requestMethodCondition",
+            "positiveMatch": true,
+            "value": ["POST", "PUT"]
+          },
+          {
+            "type": "requestBodyCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": true,
+            "value": ["*\"cmd\"*\"exec\"*", "*\"command\"*\"exec\"*", "*\"cmd\"*\"shell\"*"]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        }
+      }
+    },
+    {
+      "id": "WAF-GAP-014",
+      "name": "Enumeration - Admin Path Block",
+      "description": "Block direct access to common administrative and sensitive file paths. These passed the WAF as simple path requests.",
+      "severity": "MEDIUM",
+      "action": "deny",
+      "conditions": [
+        {
+          "type": "requestPathMatch",
+          "value": [
+            "/admin",
+            "/administrator",
+            "/wp-config.php",
+            "/config.php",
+            "/wp-admin",
+            "/phpmyadmin",
+            "/.git",
+            "/server-status",
+            "/server-info"
+          ],
+          "matchOperator": "equalsAny",
+          "caseSensitive": false
+        }
+      ],
+      "akamai_config": {
+        "type": "custom_rule",
+        "conditions": [
+          {
+            "type": "pathCondition",
+            "positiveMatch": true,
+            "valueCase": "insensitive",
+            "valueWildcard": false,
+            "value": [
+              "/admin",
+              "/admin/",
+              "/administrator",
+              "/administrator/",
+              "/wp-config.php",
+              "/config.php",
+              "/wp-admin",
+              "/wp-admin/",
+              "/phpmyadmin",
+              "/phpmyadmin/",
+              "/.git",
+              "/.git/",
+              "/server-status",
+              "/server-info"
+            ]
+          }
+        ],
+        "ruleAction": {
+          "action": "deny",
+          "denyStatusCode": 403
+        },
+        "note": "Adjust paths based on your actual application routes. Remove /admin if your app has a legitimate /admin path behind authentication."
+      }
+    }
+  ],
+  "deployment_notes": {
+    "import_method": "Akamai Application Security API - Custom Rules endpoint",
+    "api_endpoint": "PUT /appsec/v1/configs/{configId}/versions/{versionId}/custom-rules",
+    "testing_recommendation": "Deploy in alert-only mode first, monitor for false positives for 48-72 hours, then switch to deny mode.",
+    "priority_order": [
+      "WAF-GAP-006 (Localhost SSRF) - CRITICAL: immediate deploy",
+      "WAF-GAP-011 (SQLi comment bypass) - CRITICAL: immediate deploy",
+      "WAF-GAP-012 (Twig SSTI) - CRITICAL: immediate deploy",
+      "WAF-GAP-001 (GraphQL introspection) - HIGH: deploy after baseline",
+      "WAF-GAP-002 (GraphQL mutation) - HIGH: deploy after baseline",
+      "WAF-GAP-004 (Prototype pollution __proto__) - HIGH: deploy after baseline",
+      "WAF-GAP-005 (Prototype pollution constructor) - HIGH: deploy after baseline",
+      "WAF-GAP-007 (HTTP smuggling) - HIGH: test carefully, may affect chunked uploads",
+      "WAF-GAP-010 (PHP extension) - HIGH: verify no legitimate .php endpoints",
+      "WAF-GAP-013 (WebSocket cmd exec) - HIGH: deploy after baseline",
+      "WAF-GAP-003 (GraphQL alias batching) - MEDIUM: deploy after baseline",
+      "WAF-GAP-008 (BurpSuite UA) - MEDIUM: low false positive risk",
+      "WAF-GAP-009 (Acunetix UA) - MEDIUM: low false positive risk",
+      "WAF-GAP-014 (Admin path enum) - MEDIUM: customize to your app"
+    ],
+    "false_positive_risks": {
+      "WAF-GAP-007": "May block legitimate chunked uploads. Test with application forms before enforcing.",
+      "WAF-GAP-010": "Will block all .php URL access. Remove if origin serves PHP pages directly.",
+      "WAF-GAP-011": "Pattern '--  may match legitimate apostrophe usage followed by dashes in names. Monitor closely.",
+      "WAF-GAP-014": "Admin paths must be customized per application. Remove /admin if app has authenticated admin route."
+    }
+  }
+}

@@ -536,6 +536,7 @@ impl WafSmokeTest {
         let mut waf_indicators = Vec::new();
 
         // Check status codes
+        let body_lower = response.body.to_lowercase();
         let classification = match response.status {
             403 => {
                 evidence.push("HTTP 403 Forbidden - Request blocked".to_string());
@@ -550,8 +551,30 @@ impl WafSmokeTest {
                 PayloadClassification::RateLimited
             }
             503 => {
-                evidence.push("HTTP 503 Service Unavailable - Potentially blocked".to_string());
-                PayloadClassification::Blocked
+                // Distinguish WAF-blocked 503s from origin infrastructure failures.
+                // Origin failures (DNS failure, connection refused, etc.) mean the
+                // payload passed the WAF but the origin is unreachable — not a block.
+                let is_origin_failure = body_lower.contains("dns failure")
+                    || body_lower.contains("dns resolution")
+                    || body_lower.contains("connection refused")
+                    || body_lower.contains("origin is unreachable")
+                    || body_lower.contains("no healthy upstream")
+                    || (body_lower.contains("service unavailable")
+                        && !body_lower.contains("access denied")
+                        && !body_lower.contains("blocked")
+                        && !body_lower.contains("firewall")
+                        && !body_lower.contains("security")
+                        && !body_lower.contains("waf"));
+
+                if is_origin_failure {
+                    evidence.push(
+                        "HTTP 503 Service Unavailable - Origin failure (passed WAF)".to_string(),
+                    );
+                    PayloadClassification::Allowed
+                } else {
+                    evidence.push("HTTP 503 Service Unavailable - WAF block".to_string());
+                    PayloadClassification::Blocked
+                }
             }
             200 | 301 | 302 => {
                 evidence.push(format!(
@@ -599,9 +622,7 @@ impl WafSmokeTest {
             }
         }
 
-        // Check response body for indicators
-        let body_lower = response.body.to_lowercase();
-
+        // Check response body for indicators (body_lower computed above)
         if let Some(vendor) = Self::match_block_template(&body_lower) {
             evidence.push(format!("Block page template match: {vendor}"));
             waf_indicators.push(vendor.to_string());

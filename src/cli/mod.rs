@@ -306,6 +306,7 @@ impl SimpleCliApp {
                     *matches.get_one::<u64>("va-delay").unwrap_or(&750),
                 ),
                 max_variants_per_payload: *matches.get_one::<u8>("va-variants").unwrap_or(&4),
+                skip_dns_validation: false,
             };
             let mut runner = VirtualAdversaryRunner::new(config)?;
             if matches.get_flag("va-dry-run") {
