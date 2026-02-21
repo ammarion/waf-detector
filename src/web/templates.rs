@@ -681,7 +681,6 @@ mod tests {
         assert!(html.contains("downloadVaReportCsv"));
         assert!(html.contains("vaRetentionInput"));
         assert!(html.contains("vaActivityFilter"));
-        assert!(html.contains("downloadVaReportCsv"));
         assert!(html.contains("vaHistorySearch"));
         assert!(html.contains("vaAutoScroll"));
         assert!(html.contains("vaHistoryDate"));

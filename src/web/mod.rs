@@ -1,7 +1,3 @@
-use crate::ai::{
-    ai_enabled, ai_endpoint, ai_model, ai_timeout, AiProvider, AiSummaryRequest, AiSummaryResponse,
-    OllamaProvider,
-};
 use crate::effectiveness::consent::{ConsentManager, ConsentStatus};
 use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, SmokeTestResult, WafSmokeTest};
@@ -277,13 +273,6 @@ pub struct CombinedScanResponse {
 pub struct SmokeTestResponse {
     success: bool,
     result: Option<SmokeTestResult>,
-    error: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct AiSummaryApiResponse {
-    success: bool,
-    summary: Option<AiSummaryResponse>,
     error: Option<String>,
 }
 
@@ -697,7 +686,6 @@ impl WebServer {
                 "/api/virtual-adversary2/cancel/:id",
                 post(virtual_adversary2_cancel),
             )
-            .route("/api/ai/summary", post(ai_summary))
             .route("/api/consent/add-target", post(consent_add_target))
             .route("/api/consent/remove-target", post(consent_remove_target))
             .layer(middleware::from_fn(require_api_token))
@@ -1974,37 +1962,6 @@ async fn virtual_adversary2_cancel(
         error: Some("Job not found".to_string()),
     };
     (StatusCode::NOT_FOUND, Json(response))
-}
-
-async fn ai_summary(Json(payload): Json<AiSummaryRequest>) -> impl IntoResponse {
-    if !ai_enabled() {
-        let response = AiSummaryApiResponse {
-            success: false,
-            summary: None,
-            error: Some("AI summaries are disabled".to_string()),
-        };
-        return (StatusCode::SERVICE_UNAVAILABLE, Json(response));
-    }
-
-    let provider = OllamaProvider::new(ai_endpoint(), ai_model(), ai_timeout());
-    match provider.summarize(&payload).await {
-        Ok(summary) => (
-            StatusCode::OK,
-            Json(AiSummaryApiResponse {
-                success: true,
-                summary: Some(summary),
-                error: None,
-            }),
-        ),
-        Err(err) => (
-            StatusCode::BAD_GATEWAY,
-            Json(AiSummaryApiResponse {
-                success: false,
-                summary: None,
-                error: Some(format!("AI unavailable: {err}")),
-            }),
-        ),
-    }
 }
 
 #[cfg(test)]

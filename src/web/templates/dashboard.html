@@ -16,6 +16,7 @@
         <div class="header">
             <h1>WAF Detector</h1>
             <p class="subtitle">Security infrastructure analysis</p>
+            <a href="/api-docs" target="_blank" class="header-link">API Docs</a>
         </div>
 
         <div class="experience-toolbar" aria-label="Experience controls">
@@ -28,30 +29,29 @@
         </div>
 
         <div class="experience-panels">
-            <section id="beginnerAssistantPanel" class="experience-panel" data-experience="beginner">
-                <h2>Quick Start Guide</h2>
+            <details id="beginnerAssistantPanel" class="experience-panel" data-experience="beginner">
+                <summary><h2>Quick Start Guide</h2></summary>
                 <p class="card-desc">Use this path for a clean first run with minimal risk.</p>
                 <ol class="assistant-checklist">
                     <li>Confirm consent once using <code>./waf-detect --consent request</code>.</li>
                     <li>Start with <strong>Safe preset</strong> in Virtual Adversary.</li>
                     <li>Review blocked vs challenge outcomes before increasing intensity.</li>
                 </ol>
-            </section>
-            <section id="analystAssistantPanel" class="experience-panel" data-experience="analyst" hidden>
-                <h2>Analyst Workflow</h2>
+            </details>
+            <details id="analystAssistantPanel" class="experience-panel" data-experience="analyst" hidden>
+                <summary><h2>Analyst Workflow</h2></summary>
                 <p class="card-desc">Fast path for deeper testing and higher signal extraction.</p>
                 <ul class="assistant-checklist">
                     <li>Run VA2 with fixed seed to preserve replayability.</li>
                     <li>Compare channel coverage and blind spots in the report panel.</li>
                     <li>Export JSON and CSV for triage and evidence tracking.</li>
                 </ul>
-            </section>
+            </details>
         </div>
 
         <div class="tab-bar" role="tablist" aria-label="Dashboard sections">
             <button class="tab-btn active" data-tab="detect" id="tab-detect-btn" role="tab" aria-selected="true" aria-controls="tab-detect">Detect</button>
             <button class="tab-btn" data-tab="test" id="tab-test-btn" role="tab" aria-selected="false" aria-controls="tab-test" tabindex="-1">Test</button>
-            <button class="tab-btn" data-tab="reports" id="tab-reports-btn" role="tab" aria-selected="false" aria-controls="tab-reports" tabindex="-1">Reports</button>
         </div>
 
         <div class="tab-panel active" id="tab-detect" role="tabpanel" aria-labelledby="tab-detect-btn">
@@ -89,6 +89,29 @@
         </div>
 
         <div class="tab-panel" id="tab-test" role="tabpanel" aria-labelledby="tab-test-btn" hidden>
+            <details id="consentPanel" class="consent-collapsible">
+                <summary class="consent-summary">
+                    <span>Consent</span>
+                    <span id="consentStatusBadge" class="consent-badge consent-badge-pending">Checking...</span>
+                    <span class="consent-expiry">Expires in: <span id="consentExpires">-</span> days</span>
+                </summary>
+                <div class="consent-details">
+                    <div class="consent-meta">
+                        <div>Terms: <span id="consentTerms">-</span></div>
+                    </div>
+                    <div class="consent-targets">
+                        <div class="consent-targets-title">Authorized Targets</div>
+                        <div class="consent-actions">
+                            <input id="consentTargetInput" class="input-field consent-input" type="text" placeholder="example.com">
+                            <button type="button" class="btn btn-secondary consent-add" onclick="addAuthorizedTarget()">Add</button>
+                        </div>
+                        <ul id="consentTargetsList" class="consent-targets-list"></ul>
+                        <div id="consentTargetsEmpty" class="consent-targets-empty">No authorized targets.</div>
+                    </div>
+                    <p class="consent-note">Run <code>./waf-detect --consent</code> to update.</p>
+                </div>
+            </details>
+
             <div class="dashboard-grid">
                 <div class="card">
                     <h2>WAF Smoke Test</h2>
@@ -241,90 +264,62 @@
                     <div class="va2-result" id="va2Result" style="display:none;"></div>
                 </div>
             </div>
-        </div>
 
-        <div class="tab-panel" id="tab-reports" role="tabpanel" aria-labelledby="tab-reports-btn" hidden>
-            <div class="dashboard-grid">
-                <div class="card">
-                    <h2>Quick Actions</h2>
-                    <div class="quick-actions-bar">
-                        <button onclick="clearResults()" class="btn btn-secondary btn-compact">Clear Results</button>
-                        <button onclick="window.open('/api-docs','_blank')" class="btn btn-secondary btn-compact">API Docs</button>
-                        <button onclick="exportResults()" class="btn btn-secondary btn-compact">Export JSON</button>
+            <details class="va-history-collapsible">
+                <summary class="va-history-summary">
+                    <span>Test History</span>
+                    <span id="vaHistoryCountBadge" class="va-history-count"></span>
+                </summary>
+                <div class="va-history">
+                    <div class="va-history-header">
+                        <button type="button" class="btn btn-secondary btn-compact" onclick="loadVaHistory()">Refresh</button>
+                        <button type="button" class="btn btn-secondary btn-compact" id="downloadVaReportCsv" onclick="downloadVaHistoryCsv()">Download CSV</button>
                     </div>
-                </div>
-
-                <div class="card">
-                    <h2>Consent Status</h2>
-                    <div class="consent-status">
-                        <div id="consentStatusBadge" class="consent-badge consent-badge-pending">Checking...</div>
-                        <div class="consent-meta">
-                            <div>Terms: <span id="consentTerms">-</span></div>
-                            <div>Expires in: <span id="consentExpires">-</span> days</div>
+                    <div id="vaHistoryToolbar" style="display:none">
+                        <div class="va-history-filters">
+                            <label for="vaHistoryDate">Date</label>
+                            <select id="vaHistoryDate" class="input-field va-history-select">
+                                <option value="all">All</option>
+                                <option value="7">Last 7 days</option>
+                                <option value="30">Last 30 days</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                            <label for="vaHistorySort">Sort</label>
+                            <select id="vaHistorySort" class="input-field va-history-select">
+                                <option value="newest">Newest</option>
+                                <option value="oldest">Oldest</option>
+                                <option value="risk">Risk (High to Low)</option>
+                                <option value="blocked">Blocked Rate</option>
+                            </select>
+                            <input id="vaHistoryStart" class="input-field va-history-date" type="date" disabled>
+                            <input id="vaHistoryEnd" class="input-field va-history-date" type="date" disabled>
+                            <button type="button" class="btn btn-secondary btn-compact" onclick="applyVaHistoryFilter()">Apply</button>
+                            <button type="button" class="btn btn-secondary btn-compact" id="deleteVaHistoryRange" onclick="deleteVaHistoryRange()">Delete range</button>
                         </div>
-                        <div class="consent-targets">
-                            <div class="consent-targets-title">Authorized Targets</div>
-                            <div class="consent-actions">
-                                <input id="consentTargetInput" class="input-field consent-input" type="text" placeholder="example.com">
-                                <button type="button" class="btn btn-secondary consent-add" onclick="addAuthorizedTarget()">Add</button>
-                            </div>
-                            <ul id="consentTargetsList" class="consent-targets-list"></ul>
-                            <div id="consentTargetsEmpty" class="consent-targets-empty">No authorized targets.</div>
+                        <div class="va-history-search">
+                            <label for="vaHistorySearch">Search</label>
+                            <input id="vaHistorySearch" class="input-field va-history-input" type="text" placeholder="Filter by target URL">
                         </div>
-                        <p class="consent-note">Run <code>./waf-detect --consent</code> to update.</p>
+                        <div class="va-history-retention">
+                            <label for="vaRetentionInput">Keep last</label>
+                            <input id="vaRetentionInput" class="input-field va-retention-input" type="number" min="5" value="50">
+                            <button type="button" class="btn btn-secondary btn-compact" onclick="cleanupVaHistory()">Cleanup</button>
+                        </div>
                     </div>
+                    <div id="vaHistoryEmpty" class="va-history-empty">No saved reports. Run a security test to build history.</div>
+                    <ul id="vaHistoryList" class="va-history-list"></ul>
                 </div>
-
-                <div class="card full-width">
-                    <h2>Virtual Adversary History</h2>
-                    <div class="va-history">
-                        <div class="va-history-header">
-                            <button type="button" class="btn btn-secondary btn-compact" onclick="loadVaHistory()">Refresh</button>
-                            <button type="button" class="btn btn-secondary btn-compact" id="vaHistoryCsvBtn" onclick="downloadVaHistoryCsv()" style="display:none">CSV</button>
-                            <button type="button" class="btn btn-secondary btn-compact" id="downloadVaReportCsv" onclick="downloadVaHistoryCsv()">Download CSV</button>
-                        </div>
-                        <div id="vaHistoryToolbar" style="display:none">
-                            <div class="va-history-filters">
-                                <label for="vaHistoryDate">Date</label>
-                                <select id="vaHistoryDate" class="input-field va-history-select">
-                                    <option value="all">All</option>
-                                    <option value="7">Last 7 days</option>
-                                    <option value="30">Last 30 days</option>
-                                    <option value="custom">Custom</option>
-                                </select>
-                                <label for="vaHistorySort">Sort</label>
-                                <select id="vaHistorySort" class="input-field va-history-select">
-                                    <option value="newest">Newest</option>
-                                    <option value="oldest">Oldest</option>
-                                    <option value="risk">Risk (High to Low)</option>
-                                    <option value="blocked">Blocked Rate</option>
-                                </select>
-                                <input id="vaHistoryStart" class="input-field va-history-date" type="date" disabled>
-                                <input id="vaHistoryEnd" class="input-field va-history-date" type="date" disabled>
-                                <button type="button" class="btn btn-secondary btn-compact" onclick="applyVaHistoryFilter()">Apply</button>
-                                <button type="button" class="btn btn-secondary btn-compact" id="deleteVaHistoryRange" onclick="deleteVaHistoryRange()">Delete range</button>
-                            </div>
-                            <div class="va-history-search">
-                                <label for="vaHistorySearch">Search</label>
-                                <input id="vaHistorySearch" class="input-field va-history-input" type="text" placeholder="Filter by target URL">
-                            </div>
-                            <div class="va-history-retention">
-                                <label for="vaRetentionInput">Keep last</label>
-                                <input id="vaRetentionInput" class="input-field va-retention-input" type="number" min="5" value="50">
-                                <button type="button" class="btn btn-secondary btn-compact" onclick="cleanupVaHistory()">Cleanup</button>
-                            </div>
-                        </div>
-                        <div id="vaHistoryEmpty" class="va-history-empty">No saved reports. Run a security test to build history.</div>
-                        <ul id="vaHistoryList" class="va-history-list"></ul>
-                    </div>
-                </div>
-            </div>
+            </details>
         </div>
 
         <div id="resultsSection" class="results-section" style="display:none;">
             <div class="results-header">
                 <h2>Detection Results</h2>
                 <span id="resultsCount">0 results</span>
+                <div class="results-actions">
+                    <button onclick="exportResults()" class="btn btn-secondary btn-compact">Export JSON</button>
+                    <button onclick="clearResults()" class="btn btn-secondary btn-compact">Clear</button>
+                </div>
             </div>
             <div id="resultsInsightBar" class="results-insight-strip" aria-live="polite">
                 <div class="insight-pill">
@@ -1241,6 +1236,9 @@ function escapeHtml(str) {
             const empty = document.getElementById('vaHistoryEmpty');
             if (!list || !empty) return;
 
+            const countBadge = document.getElementById('vaHistoryCountBadge');
+            if (countBadge) countBadge.textContent = reports && reports.length ? '(' + reports.length + ')' : '';
+
             list.innerHTML = '';
             if (!reports || reports.length === 0) {
                 empty.style.display = 'block';
@@ -1370,72 +1368,6 @@ function escapeHtml(str) {
             renderVaHistoryList(filtered);
         }
 
-        function buildAiResultPayload(result, isSmokeTest, detectionData) {
-            if (isSmokeTest) {
-                const summary = result.summary || {};
-                return {
-                    url: result.url || '',
-                    detected_waf: result.detected_waf || null,
-                    detected_cdn: result.detected_cdn || null,
-                    summary: {
-                        blocked_count: summary.blocked_count ?? 0,
-                        allowed_count: summary.allowed_count ?? 0,
-                        error_count: summary.error_count ?? 0,
-                        effectiveness_percentage: summary.effectiveness_percentage ?? 0
-                    },
-                    detection_time_ms: result.total_time_ms || 0,
-                    evidence: []
-                };
-            }
-
-            const evidence = Array.isArray(detectionData && detectionData.evidence)
-                ? detectionData.evidence.map(item => ({
-                    description: item && item.description ? item.description : '',
-                    confidence: item && typeof item.confidence === 'number' ? item.confidence : null
-                }))
-                : [];
-
-            return {
-                url: detectionData && detectionData.url ? detectionData.url : '',
-                detected_waf: detectionData ? detectionData.detected_waf : null,
-                detected_cdn: detectionData ? detectionData.detected_cdn : null,
-                detection_time_ms: detectionData ? detectionData.detection_time_ms : 0,
-                evidence
-            };
-        }
-
-        function renderAiSummary(summary) {
-            if (!summary) return '';
-            const verdict = escapeHtml(summary.verdict || 'Unknown');
-            const oneLiner = escapeHtml(summary.one_liner || '');
-            const keyPoints = Array.isArray(summary.key_points) ? summary.key_points : [];
-            const nextSteps = Array.isArray(summary.next_steps) ? summary.next_steps : [];
-            const caveats = Array.isArray(summary.caveats) ? summary.caveats : [];
-
-            const renderList = (items) => items.length
-                ? `<ul class="ai-summary-list">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
-                : '<div class="ai-summary-empty">No items</div>';
-
-            return `
-                <div class="ai-summary-header">
-                    <div class="ai-verdict">Verdict: <span class="ai-verdict-badge">${verdict}</span></div>
-                    <div class="ai-one-liner">${oneLiner}</div>
-                </div>
-                <div class="ai-summary-grid">
-                    <div>
-                        <div class="ai-summary-title">Key Points</div>
-                        ${renderList(keyPoints)}
-                    </div>
-                    <div>
-                        <div class="ai-summary-title">Next Steps</div>
-                        ${renderList(nextSteps)}
-                    </div>
-                </div>
-                <div class="ai-summary-title">Caveats</div>
-                ${renderList(caveats)}
-            `;
-        }
-
         async function downloadVaHistoryReportCsv(reportId) {
             try {
                 const response = await fetch(`/api/virtual-adversary/reports/${reportId}/csv`);
@@ -1484,109 +1416,6 @@ function escapeHtml(str) {
             }
         }
 
-        // AI Summary - sends correct payload format: {result: ..., context: {mode: ...}}
-        // All user-facing strings are escaped via escapeHtml() before insertion.
-        async function requestAiSummary(index) {
-            const result = allResults[index];
-            if (!result) return;
-            const containerId = 'aiSummary-' + index;
-            const container = document.getElementById(containerId);
-            if (!container) return;
-            container.textContent = 'Generating AI summary...';
-            container.className = 'ai-summary-loading';
-            container.style.display = 'block';
-            const isSmokeTest = result.is_smoke_test === true;
-            const detectionData = isSmokeTest ? null : result;
-            const contextMode = isSmokeTest ? 'smoke_test' : (result._ai_context || 'single');
-            const payload = {
-                result: buildAiResultPayload(result, isSmokeTest, detectionData),
-                context: { mode: contextMode }
-            };
-            try {
-                const response = await fetch('/api/ai/summary', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                if (!response.ok) {
-                    container.textContent = 'AI summary unavailable (' + response.status + ')';
-                    container.className = 'ai-summary-error';
-                    return;
-                }
-                const data = await response.json();
-                if (data.success && data.summary) {
-                    result.ai_summary = data.summary;
-                    renderAiSummaryPanel(container, data.summary);
-                } else {
-                    container.textContent = data.error || 'AI summary failed';
-                    container.className = 'ai-summary-error';
-                }
-            } catch (error) {
-                container.textContent = 'AI summary unavailable';
-                container.className = 'ai-summary-error';
-            }
-        }
-
-        function renderAiSummaryPanel(container, s) {
-            container.className = '';
-            // Build panel using DOM methods to avoid raw innerHTML with untrusted content
-            const panel = document.createElement('div');
-            panel.className = 'ai-summary-panel';
-
-            const header = document.createElement('div');
-            header.className = 'ai-summary-header';
-            const verdict = document.createElement('div');
-            verdict.className = 'ai-verdict';
-            verdict.textContent = s.verdict || '';
-            const badge = document.createElement('span');
-            badge.className = 'ai-verdict-badge';
-            badge.textContent = 'AI';
-            verdict.appendChild(badge);
-            header.appendChild(verdict);
-            const oneLiner = document.createElement('div');
-            oneLiner.className = 'ai-one-liner';
-            oneLiner.textContent = s.one_liner || '';
-            header.appendChild(oneLiner);
-            panel.appendChild(header);
-
-            const grid = document.createElement('div');
-            grid.className = 'ai-summary-grid';
-            grid.appendChild(buildAiList('Key Points', s.key_points));
-            grid.appendChild(buildAiList('Next Steps', s.next_steps));
-            panel.appendChild(grid);
-
-            if (s.caveats && s.caveats.length > 0) {
-                panel.appendChild(buildAiList('Caveats', s.caveats));
-            }
-
-            container.textContent = '';
-            container.appendChild(panel);
-        }
-
-        function buildAiList(title, items) {
-            const wrap = document.createElement('div');
-            const t = document.createElement('div');
-            t.className = 'ai-summary-title';
-            t.textContent = title;
-            wrap.appendChild(t);
-            if (items && items.length > 0) {
-                const ul = document.createElement('ul');
-                ul.className = 'ai-summary-list';
-                items.forEach(function(item) {
-                    const li = document.createElement('li');
-                    li.textContent = item;
-                    ul.appendChild(li);
-                });
-                wrap.appendChild(ul);
-            } else {
-                const empty = document.createElement('div');
-                empty.className = 'ai-summary-empty';
-                empty.textContent = 'None';
-                wrap.appendChild(empty);
-            }
-            return wrap;
-        }
-
         function csvEscape(value) {
             const str = String(value ?? '');
             if (str.includes(',') || str.includes('"') || str.includes('\n')) {
@@ -1610,21 +1439,47 @@ function escapeHtml(str) {
             return [header].concat(rows).join('\n');
         }
 
-        async function downloadVaReportCsv(index) {
-            const result = allResults[index];
-            if (!result) {
-                showErrorMessage('No Virtual Adversary report available');
-                return;
-            }
+        function computeVaRisk(summary, total) {
+            if (total === 0) return 'N/A';
+            const effective = (summary.blocked || 0) + (summary.challenge || 0);
+            const score = effective / total;
+            if (score >= 0.8) return 'LOW';
+            if (score >= 0.5) return 'MEDIUM';
+            return 'HIGH';
+        }
 
-            const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) ||
-                result.is_smoke_test === true ||
-                (result.summary && result.summary.effectiveness_percentage !== undefined);
-            const detectionData = result.detection_result ? result.detection_result : result;
-            const payload = {
-                result: buildAiResultPayload(result, isSmokeTest, detectionData),
-                context: { mode: result._ai_context || (isSmokeTest ? 'smoke' : 'single') }
-            };
+        async function downloadVaHistoryReport(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${encodeURIComponent(reportId)}`);
+                if (!response.ok) {
+                    throw new Error('Failed to download VA report');
+                }
+                const data = await response.json();
+                if (!data.success || !data.report) {
+                    throw new Error(data.error || 'VA report unavailable');
+                }
+                const filename = reportId.replace('.json', '') + '.json';
+                downloadJsonFile(filename, data.report);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to download VA report');
+            }
+        }
+
+        function buildSummaryRow(label, value) {
+            const div = document.createElement('div');
+            const strong = document.createElement('strong');
+            strong.textContent = label + ':';
+            div.appendChild(strong);
+            div.appendChild(document.createTextNode(' ' + value));
+            return div;
+        }
+
+        function populateVaReportModal(stored) {
+            const modal = document.getElementById('vaReportModal');
+            const title = document.getElementById('vaReportTitle');
+            const meta = document.getElementById('vaReportMeta');
+            const summaryEl = document.getElementById('vaReportSummary');
+            const tableBody = document.getElementById('vaReportTableBody');
 
             if (!modal || !stored || !stored.report) {
                 showErrorMessage('VA report unavailable');
@@ -1650,19 +1505,19 @@ function escapeHtml(str) {
             vaCurrentReportRaw = report;
 
             if (title) {
-                title.textContent = `VA Report • ${report.target_url || 'Unknown'}`;
+                title.textContent = 'VA Report \u2022 ' + (report.target_url || 'Unknown');
             }
             if (meta) {
-                meta.textContent = `${stored.created_at || ''} • ${stored.id || ''}`;
+                meta.textContent = (stored.created_at || '') + ' \u2022 ' + (stored.id || '');
                 const copyButton = document.createElement('button');
                 copyButton.className = 'va-evidence-button';
                 copyButton.textContent = 'Copy Summary';
                 copyButton.onclick = () => {
                     const summaryText = [
-                        `VA Report: ${report.target_url || 'Unknown'}`,
-                        `Enforcement: ${report.enforcement || 'Inconclusive'}`,
-                        `Evidence Score: ${typeof report.evidence_score === 'number' ? report.evidence_score.toFixed(2) : 'N/A'}`,
-                        `Blocked: ${blocked} | Challenge: ${challenge} | Allowed: ${allowed} | Error: ${errorCount}`,
+                        'VA Report: ' + (report.target_url || 'Unknown'),
+                        'Enforcement: ' + (report.enforcement || 'Inconclusive'),
+                        'Evidence Score: ' + (typeof report.evidence_score === 'number' ? report.evidence_score.toFixed(2) : 'N/A'),
+                        'Blocked: ' + blocked + ' | Challenge: ' + challenge + ' | Allowed: ' + allowed + ' | Error: ' + errorCount,
                     ].join('\n');
                     navigator.clipboard.writeText(summaryText).then(() => {
                         showSuccessMessage('Report summary copied');
@@ -1678,25 +1533,56 @@ function escapeHtml(str) {
                 meta.appendChild(bundleButton);
             }
             if (summaryEl) {
-                summaryEl.innerHTML = `
-                    <div><strong>Effectiveness:</strong> ${effectiveness.toFixed(1)}%</div>
-                    <div><strong>Risk:</strong> ${risk}</div>
-                    <div><strong>Enforcement:</strong> ${escapeHtml(enforcement)}</div>
-                    <div><strong>Evidence Score:</strong> ${evidenceScore === null ? 'N/A' : evidenceScore.toFixed(2)}</div>
-                    <div class="va-evidence-summary">
-                        <strong>Evidence Summary:</strong>
-                        <div class="va-evidence-chips">${renderEvidenceSummary(evidenceSummary)}</div>
-                    </div>
-                    <div class="va-replay-actions">
-                        <strong>Replay Plan:</strong>
-                        <button class="va-evidence-button" id="vaReplayExportJson">Export JSON</button>
-                        <button class="va-evidence-button" id="vaReplayExportCsv">Export CSV</button>
-                    </div>
-                    <div><strong>Blocked:</strong> ${blocked}</div>
-                    <div><strong>Challenge:</strong> ${challenge}</div>
-                    <div><strong>Allowed:</strong> ${allowed}</div>
-                    <div><strong>Errors:</strong> ${errorCount}</div>
-                `;
+                summaryEl.textContent = '';
+                summaryEl.appendChild(buildSummaryRow('Effectiveness', effectiveness.toFixed(1) + '%'));
+                summaryEl.appendChild(buildSummaryRow('Risk', risk));
+                summaryEl.appendChild(buildSummaryRow('Enforcement', enforcement));
+                summaryEl.appendChild(buildSummaryRow('Evidence Score', evidenceScore === null ? 'N/A' : evidenceScore.toFixed(2)));
+
+                const evidenceDiv = document.createElement('div');
+                evidenceDiv.className = 'va-evidence-summary';
+                const evidenceLabel = document.createElement('strong');
+                evidenceLabel.textContent = 'Evidence Summary:';
+                evidenceDiv.appendChild(evidenceLabel);
+                const chipsDiv = document.createElement('div');
+                chipsDiv.className = 'va-evidence-chips';
+                (evidenceSummary || []).slice(0, 6).forEach(item => {
+                    const chip = document.createElement('span');
+                    chip.className = 'va-evidence-chip';
+                    const kindSpan = document.createElement('span');
+                    kindSpan.className = 'va-evidence-kind';
+                    kindSpan.textContent = item.kind || '';
+                    const countSpan = document.createElement('span');
+                    countSpan.className = 'va-evidence-count';
+                    countSpan.textContent = item.count ?? 0;
+                    chip.appendChild(kindSpan);
+                    chip.appendChild(countSpan);
+                    chipsDiv.appendChild(chip);
+                });
+                evidenceDiv.appendChild(chipsDiv);
+                summaryEl.appendChild(evidenceDiv);
+
+                const replayActionsDiv = document.createElement('div');
+                replayActionsDiv.className = 'va-replay-actions';
+                const replayLabel = document.createElement('strong');
+                replayLabel.textContent = 'Replay Plan:';
+                replayActionsDiv.appendChild(replayLabel);
+                const exportJsonBtn = document.createElement('button');
+                exportJsonBtn.className = 'va-evidence-button';
+                exportJsonBtn.id = 'vaReplayExportJson';
+                exportJsonBtn.textContent = 'Export JSON';
+                replayActionsDiv.appendChild(exportJsonBtn);
+                const exportCsvBtn = document.createElement('button');
+                exportCsvBtn.className = 'va-evidence-button';
+                exportCsvBtn.id = 'vaReplayExportCsv';
+                exportCsvBtn.textContent = 'Export CSV';
+                replayActionsDiv.appendChild(exportCsvBtn);
+                summaryEl.appendChild(replayActionsDiv);
+
+                summaryEl.appendChild(buildSummaryRow('Blocked', String(blocked)));
+                summaryEl.appendChild(buildSummaryRow('Challenge', String(challenge)));
+                summaryEl.appendChild(buildSummaryRow('Allowed', String(allowed)));
+                summaryEl.appendChild(buildSummaryRow('Errors', String(errorCount)));
             }
 
             renderExplainabilityPanel(report, total, blocked, challenge, allowed, errorCount);
@@ -1723,6 +1609,22 @@ function escapeHtml(str) {
             }
 
             modal.classList.add('modal-open');
+        }
+
+        async function openVaReportModalFromHistory(reportId) {
+            try {
+                const response = await fetch(`/api/virtual-adversary/reports/${encodeURIComponent(reportId)}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load VA report');
+                }
+                const data = await response.json();
+                if (!data.success || !data.report) {
+                    throw new Error(data.error || 'VA report unavailable');
+                }
+                populateVaReportModal(data.report);
+            } catch (error) {
+                showErrorMessage(error.message || 'Failed to open VA report');
+            }
         }
 
         function renderVaReportTable(tableBody, rows) {
@@ -2560,11 +2462,6 @@ function escapeHtml(str) {
                             detectionData && detectionData.detection_time_ms ? `${detectionData.detection_time_ms}ms` :
                                 "0ms"}</div>
                     </div>
-                    <div class="ai-summary-actions">
-                        <button class="btn btn-secondary btn-compact" onclick="requestAiSummary(${index})">AI Summary</button>
-                    </div>
-                    <div class="ai-summary-panel" id="aiSummary-${index}" style="display:none;"></div>
-
                     ${isSmokeTest ? `
                         <div class="smoke-test-card">
                             <h4 class="smoke-test-title">WAF Smoke Test Results</h4>
