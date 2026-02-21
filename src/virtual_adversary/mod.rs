@@ -66,6 +66,9 @@ pub struct VirtualAdversaryConfig {
     pub request_delay: Duration,
     /// Maximum variants per payload template.
     pub max_variants_per_payload: u8,
+    /// Skip DNS validation in evaluate_probe (for hermetic tests).
+    #[serde(default)]
+    pub skip_dns_validation: bool,
 }
 
 impl Default for VirtualAdversaryConfig {
@@ -76,6 +79,7 @@ impl Default for VirtualAdversaryConfig {
             request_timeout: Duration::from_secs(15),
             request_delay: Duration::from_millis(750),
             max_variants_per_payload: 4,
+            skip_dns_validation: false,
         }
     }
 }
@@ -745,6 +749,56 @@ impl VaHttpAdapter for RealVaHttpAdapter {
     }
 
     fn send(&self, request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse> {
+        // When a resolved_ip is pinned, build a one-off reqwest client that pins
+        // DNS to the pre-validated IP, preventing TOCTOU rebinding attacks.
+        if let Some(ip) = request.resolved_ip {
+            let parsed = Url::parse(&request.url)
+                .or_else(|_| Url::parse(&format!("https://{}", &request.url)))?;
+            let hostname = parsed
+                .host_str()
+                .ok_or_else(|| anyhow::anyhow!("URL missing host"))?
+                .to_string();
+            let port = parsed.port_or_known_default().unwrap_or(443);
+            let socket_addr = std::net::SocketAddr::new(ip, port);
+
+            let mut builder = reqwest::Client::builder()
+                .resolve(&hostname, socket_addr)
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(std::time::Duration::from_secs(15))
+                .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+            if std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test) {
+                builder = builder.no_proxy();
+            }
+            if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+                builder = builder.danger_accept_invalid_certs(true);
+            }
+
+            let pinned_client = builder.build()?;
+            let method = reqwest::Method::from_bytes(request.method.as_bytes())?;
+            let mut req = pinned_client.request(method, &request.url);
+            for (name, value) in &request.headers {
+                req = req.header(name, value);
+            }
+            if let Some(body) = &request.body {
+                req = req.body(body.clone());
+            }
+            let resp = futures::executor::block_on(req.send())?;
+            let status = resp.status().as_u16();
+            let mut headers = std::collections::HashMap::new();
+            for (name, value) in resp.headers() {
+                if let Ok(v) = value.to_str() {
+                    headers.insert(name.to_string().to_lowercase(), v.to_string());
+                }
+            }
+            let body = futures::executor::block_on(resp.text()).unwrap_or_default();
+            return Ok(VaHttpResponse {
+                status,
+                headers,
+                body,
+            });
+        }
+
         let response = futures::executor::block_on(self.client.request(
             request.method,
             &request.url,
@@ -787,6 +841,10 @@ pub struct VaHttpRequest {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+    /// Pinned IP address from DNS resolution to prevent TOCTOU attacks.
+    /// When set, the HTTP adapter should connect to this IP while preserving
+    /// the original Host header.
+    pub resolved_ip: Option<IpAddr>,
 }
 
 #[derive(Debug, Clone)]
@@ -955,6 +1013,7 @@ impl VirtualAdversaryRunner {
             url: parsed.to_string(),
             headers: item.headers.clone(),
             body: item.body.clone(),
+            resolved_ip: None,
         };
         let display = format!(
             "{:?}::{:?} {} {}",
@@ -981,10 +1040,15 @@ impl VirtualAdversaryRunner {
         baseline: &BaselineRecord,
         item: &VaProbePlanItem,
     ) -> Result<VaProbeEvaluation> {
-        // DNS rebinding guard: re-validate that the target resolves to a public IP
-        validate_probe_target_public(&item.request.url)?;
+        // DNS TOCTOU guard: resolve once, validate all IPs are public, pin the
+        // resolved IP so the HTTP adapter connects to the same address we checked.
+        let mut pinned_request = item.request.clone();
+        if !self.config.skip_dns_validation {
+            let resolved_ip = resolve_and_validate(&item.request.url)?;
+            pinned_request.resolved_ip = Some(resolved_ip);
+        }
 
-        let response = self.http.send(&item.request)?;
+        let response = self.http.send(&pinned_request)?;
         let diff =
             ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
         let mut evaluation = classify_outcome(response.status, &diff, &response.body);
@@ -1161,11 +1225,22 @@ fn is_ip_public(ip: &IpAddr) -> bool {
     }
 }
 
-fn validate_probe_target_public(url: &str) -> Result<()> {
+/// Resolve DNS once and validate all IPs are public, returning a pinned IP.
+/// This prevents TOCTOU attacks where DNS changes between validation and connection.
+fn resolve_and_validate(url: &str) -> Result<IpAddr> {
     let parsed = Url::parse(url).or_else(|_| Url::parse(&format!("https://{url}")))?;
     let host = parsed
         .host_str()
         .ok_or_else(|| anyhow!("URL missing host"))?;
+
+    // If the host is already an IP literal, validate directly
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if !is_ip_public(&ip) {
+            return Err(anyhow!("DNS rebinding guard: {host} is a non-public IP"));
+        }
+        return Ok(ip);
+    }
+
     let port = parsed.port_or_known_default().unwrap_or(443);
     let addr = format!("{host}:{port}");
 
@@ -1178,16 +1253,16 @@ fn validate_probe_target_public(url: &str) -> Result<()> {
         return Err(anyhow!("DNS resolution returned no addresses for {host}"));
     }
 
-    for addr in &addrs {
-        if !is_ip_public(&addr.ip()) {
+    for a in &addrs {
+        if !is_ip_public(&a.ip()) {
             return Err(anyhow!(
                 "DNS rebinding guard: {host} resolves to non-public IP {}",
-                addr.ip()
+                a.ip()
             ));
         }
     }
 
-    Ok(())
+    Ok(addrs[0].ip())
 }
 
 fn build_probe_request(probe: &Probe, target_url: &str) -> Result<VaHttpRequest> {
@@ -1219,6 +1294,7 @@ fn build_probe_request(probe: &Probe, target_url: &str) -> Result<VaHttpRequest>
         url: url.to_string(),
         headers,
         body: probe.body.clone(),
+        resolved_ip: None,
     })
 }
 
@@ -1391,6 +1467,7 @@ mod tests {
 
             let config = VirtualAdversaryConfig {
                 request_budget: 1,
+                skip_dns_validation: true,
                 ..Default::default()
             };
 
@@ -1410,6 +1487,7 @@ mod tests {
             let config = VirtualAdversaryConfig {
                 request_budget: 6,
                 max_variants_per_payload: 1,
+                skip_dns_validation: true,
                 ..VirtualAdversaryConfig::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
@@ -1441,6 +1519,7 @@ mod tests {
             let config = VirtualAdversaryConfig {
                 request_budget: 6,
                 max_variants_per_payload: 1,
+                skip_dns_validation: true,
                 ..VirtualAdversaryConfig::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
@@ -1471,6 +1550,7 @@ mod tests {
 
             let config = VirtualAdversaryConfig {
                 request_budget: 2,
+                skip_dns_validation: true,
                 ..Default::default()
             };
 
@@ -1816,6 +1896,7 @@ mod tests {
 
             let config = VirtualAdversaryConfig {
                 request_budget: 2,
+                skip_dns_validation: true,
                 ..Default::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
@@ -1831,6 +1912,7 @@ mod tests {
     fn test_collect_baseline_from_http_adapter() {
         let config = VirtualAdversaryConfig {
             request_budget: 2,
+            skip_dns_validation: true,
             ..Default::default()
         };
         let runner = VirtualAdversaryRunner::new(config)
@@ -1846,6 +1928,7 @@ mod tests {
     fn test_evaluate_payload_classifies_outcome() {
         let config = VirtualAdversaryConfig {
             request_budget: 2,
+            skip_dns_validation: true,
             ..Default::default()
         };
         let runner = VirtualAdversaryRunner::new(config)
@@ -1882,6 +1965,7 @@ mod tests {
                 tier: 1,
                 request_budget: 5,
                 max_variants_per_payload: 1,
+                skip_dns_validation: true,
                 ..Default::default()
             };
 
@@ -1929,6 +2013,7 @@ mod tests {
                 tier: 1,
                 request_budget: 8,
                 max_variants_per_payload: 1,
+                skip_dns_validation: true,
                 ..Default::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
@@ -1956,6 +2041,7 @@ mod tests {
             write_test_consent(temp_dir, vec!["93.184.216.34".to_string()]);
             let config = VirtualAdversaryConfig {
                 request_budget: 3,
+                skip_dns_validation: true,
                 ..Default::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
@@ -1982,6 +2068,7 @@ mod tests {
             write_test_consent(temp_dir, vec!["93.184.216.34".to_string()]);
             let config = VirtualAdversaryConfig {
                 request_budget: 3,
+                skip_dns_validation: true,
                 ..Default::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
@@ -2011,6 +2098,7 @@ mod tests {
             write_test_consent(temp_dir, vec!["127.0.0.1".to_string()]);
             let config = VirtualAdversaryConfig {
                 request_budget: 1,
+                skip_dns_validation: true,
                 ..Default::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
@@ -2080,24 +2168,24 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_probe_target_public_rejects_localhost() {
-        let result = validate_probe_target_public("https://localhost/test");
+    fn test_resolve_and_validate_rejects_localhost() {
+        let result = resolve_and_validate("https://localhost/test");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("DNS rebinding guard") || err.contains("non-public IP"));
     }
 
     #[test]
-    fn test_validate_probe_target_public_rejects_127() {
-        let result = validate_probe_target_public("https://127.0.0.1/test");
+    fn test_resolve_and_validate_rejects_127() {
+        let result = resolve_and_validate("https://127.0.0.1/test");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("DNS rebinding guard") || err.contains("non-public IP"));
     }
 
     #[test]
-    fn test_validate_probe_target_public_rejects_private_10() {
-        let result = validate_probe_target_public("https://10.0.0.1/test");
+    fn test_resolve_and_validate_rejects_private_10() {
+        let result = resolve_and_validate("https://10.0.0.1/test");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("DNS rebinding guard") || err.contains("non-public IP"));

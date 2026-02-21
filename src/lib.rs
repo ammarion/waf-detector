@@ -151,8 +151,10 @@ pub struct DetectionMetadata {
 pub struct SecurityPosture {
     /// Whether TLS certificate validation was disabled
     pub insecure_tls: bool,
-    /// CORS policy mode: "restricted" or "permissive"
+    /// CORS policy mode: "restricted" or "default"
     pub cors_mode: String,
+    /// Human-readable description of the CORS tier policy
+    pub cors_policy_detail: String,
     /// Whether API token authentication is enabled
     pub api_auth_enabled: bool,
     /// List of authorized consent targets active during run
@@ -167,12 +169,18 @@ impl SecurityPosture {
         let api_auth_enabled = std::env::var("WAF_DETECTOR_API_TOKEN")
             .map(|t| !t.is_empty())
             .unwrap_or(false);
-        let cors_mode = if std::env::var("WAF_DETECTOR_ALLOWED_ORIGINS").is_ok() || api_auth_enabled
-        {
-            "restricted".to_string()
-        } else {
-            "permissive".to_string()
-        };
+        let (cors_mode, cors_policy_detail) =
+            if std::env::var("WAF_DETECTOR_ALLOWED_ORIGINS").is_ok() || api_auth_enabled {
+                (
+                    "restricted".to_string(),
+                    "all tiers: custom origins + localhost".to_string(),
+                )
+            } else {
+                (
+                    "default".to_string(),
+                    "public: any origin, sensitive: localhost, active: localhost".to_string(),
+                )
+            };
         let consent_scope = crate::effectiveness::consent::ConsentManager::new()
             .status()
             .map(|s| s.authorized_targets)
@@ -181,6 +189,7 @@ impl SecurityPosture {
         Self {
             insecure_tls,
             cors_mode,
+            cors_policy_detail,
             api_auth_enabled,
             consent_scope,
         }
@@ -709,7 +718,11 @@ mod tests {
         let posture = SecurityPosture::from_env();
         assert!(!posture.insecure_tls);
         assert!(!posture.api_auth_enabled);
-        assert_eq!(posture.cors_mode, "permissive");
+        assert_eq!(posture.cors_mode, "default");
+        assert_eq!(
+            posture.cors_policy_detail,
+            "public: any origin, sensitive: localhost, active: localhost"
+        );
 
         std::env::remove_var("WAF_DETECTOR_INSECURE_TLS");
     }

@@ -111,25 +111,47 @@ pub async fn run_benchmark(
         let result = batch_results.get(&entry.url);
         match result {
             Some(detection) => {
-                let detected_waf = detection.waf_name().map(normalize_provider_name);
-                let detected_cdn = detection.cdn_name().map(normalize_provider_name);
-                let expected_waf = entry.expected_waf.as_deref().map(normalize_provider_name);
-                let expected_cdn = entry.expected_cdn.as_deref().map(normalize_provider_name);
+                // detect_batch synthesizes empty results for failures
+                // (detection_time_ms == 0, no evidence, no detections)
+                let is_failed = detection.detection_time_ms == 0
+                    && detection.evidence.is_empty()
+                    && detection.detected_waf.is_none()
+                    && detection.detected_cdn.is_none();
 
-                let waf_correct = expected_waf == detected_waf;
-                let cdn_correct = expected_cdn == detected_cdn;
+                if is_failed {
+                    entries_errored += 1;
+                    entry_results.push(EntryResult {
+                        url: entry.url.clone(),
+                        expected_waf: entry.expected_waf.clone(),
+                        detected_waf: None,
+                        waf_correct: false,
+                        expected_cdn: entry.expected_cdn.clone(),
+                        detected_cdn: None,
+                        cdn_correct: false,
+                        detection_time_ms: 0,
+                        error: Some("Detection failed (no HTTP response)".to_string()),
+                    });
+                } else {
+                    let detected_waf = detection.waf_name().map(normalize_provider_name);
+                    let detected_cdn = detection.cdn_name().map(normalize_provider_name);
+                    let expected_waf = entry.expected_waf.as_deref().map(normalize_provider_name);
+                    let expected_cdn = entry.expected_cdn.as_deref().map(normalize_provider_name);
 
-                entry_results.push(EntryResult {
-                    url: entry.url.clone(),
-                    expected_waf: entry.expected_waf.clone(),
-                    detected_waf: detection.waf_name().map(String::from),
-                    waf_correct,
-                    expected_cdn: entry.expected_cdn.clone(),
-                    detected_cdn: detection.cdn_name().map(String::from),
-                    cdn_correct,
-                    detection_time_ms: detection.detection_time_ms,
-                    error: None,
-                });
+                    let waf_correct = expected_waf == detected_waf;
+                    let cdn_correct = expected_cdn == detected_cdn;
+
+                    entry_results.push(EntryResult {
+                        url: entry.url.clone(),
+                        expected_waf: entry.expected_waf.clone(),
+                        detected_waf: detection.waf_name().map(String::from),
+                        waf_correct,
+                        expected_cdn: entry.expected_cdn.clone(),
+                        detected_cdn: detection.cdn_name().map(String::from),
+                        cdn_correct,
+                        detection_time_ms: detection.detection_time_ms,
+                        error: None,
+                    });
+                }
             }
             None => {
                 entries_errored += 1;
