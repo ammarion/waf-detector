@@ -28,6 +28,11 @@ WAF Detector - A high-performance tool for detecting and testing Web Application
 - `./target/release/waf-detect --smoke-test example.com` - Run basic WAF smoke testing
 - `./target/release/waf-detect --effectiveness example.com` - Run advanced effectiveness testing (requires consent)
 
+### Posture Report Commands
+- `./target/release/waf-detect --posture example.com` - Generate unified posture report (detection only)
+- `./target/release/waf-detect --posture example.com --posture-va2` - Include VA2 behavioral profiling (requires consent)
+- `./target/release/waf-detect --posture example.com --posture-json` - Output posture report as JSON
+
 ### Effectiveness Testing Commands
 - `./target/release/waf-detect --consent` - Check consent status and authorized targets
 - `./target/release/waf-detect --consent request` - Request user consent for effectiveness testing
@@ -48,6 +53,7 @@ src/
 ├── registry/           # Provider registration and management
 ├── confidence/         # Advanced scoring algorithms
 ├── effectiveness/      # WAF effectiveness testing (consent required)
+├── posture/            # Unified posture report (grade A-F, risk 0-100)
 ├── payload/            # WAF smoke testing payloads
 ├── web/               # Axum-based web server
 └── http/              # HTTP client with retry logic
