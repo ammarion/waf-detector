@@ -26,6 +26,7 @@ pub mod tls;
 
 // NEW: WAF Effectiveness Testing module
 pub mod effectiveness;
+pub mod posture;
 pub mod virtual_adversary;
 pub mod virtual_adversary2;
 
@@ -130,6 +131,9 @@ pub struct DetectionResult {
     /// Security configuration active during this scan
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_posture: Option<SecurityPosture>,
+    /// Error message if detection failed for this URL
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -570,6 +574,7 @@ mod tests {
             },
             caveats: Vec::new(),
             security_posture: None,
+            error: None,
         };
 
         result.generate_caveats();
@@ -598,6 +603,7 @@ mod tests {
             },
             caveats: Vec::new(),
             security_posture: None,
+            error: None,
         };
 
         result.generate_caveats();
@@ -644,6 +650,7 @@ mod tests {
             },
             caveats: Vec::new(),
             security_posture: None,
+            error: None,
         };
 
         result.generate_caveats();
@@ -698,6 +705,7 @@ mod tests {
             },
             caveats: Vec::new(),
             security_posture: None,
+            error: None,
         };
 
         result.generate_caveats();

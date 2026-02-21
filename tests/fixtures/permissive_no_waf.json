@@ -1,0 +1,90 @@
+{
+  "name": "permissive_no_waf",
+  "base_url": "https://noprotection.example.com",
+  "responses": [
+    {
+      "key": "GET:/:",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=eq0",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=eq1",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=eq2",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:search=test",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Search: test</html>"
+    },
+    {
+      "key": "GET:/:search=1'+OR+'1'='1",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Search: 1' OR '1'='1</html>"
+    },
+    {
+      "key": "GET:/:q=hello",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Q: hello</html>"
+    },
+    {
+      "key": "GET:/:q=<script>alert(1)</script>",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Q: <script>alert(1)</script></html>"
+    },
+    {
+      "key": "GET:/api/v1/status:",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "{\"status\":\"ok\"}"
+    },
+    {
+      "key": "GET:/../../etc/passwd:",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "root:x:0:0:root"
+    },
+    {
+      "key": "GET:/:cmd=list",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>list</html>"
+    },
+    {
+      "key": "GET:/:cmd=;cat+/etc/passwd",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "root:x:0:0:root"
+    },
+    {
+      "key": "GET:/:format=json",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "{\"format\":\"json\"}"
+    },
+    {
+      "key": "GET:/:format=../../etc/passwd%00.json",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "root:x:0:0:root"
+    }
+  ]
+}
