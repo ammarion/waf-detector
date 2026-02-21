@@ -13,26 +13,13 @@ pub fn dashboard_html() -> &'static str {
 }
 
 fn load_dashboard_html() -> String {
-    let dual_mode_enabled = std::env::var("WAF_DETECTOR_DUAL_MODE_UI")
-        .map(|value| {
-            let normalized = value.trim().to_lowercase();
-            normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on"
-        })
-        .unwrap_or(true);
-
     if let Some(path) = resolve_dashboard_template_path() {
         if let Ok(contents) = fs::read_to_string(&path) {
-            return contents.replace(
-                "__DUAL_MODE_ENABLED__",
-                if dual_mode_enabled { "1" } else { "0" },
-            );
+            return contents;
         }
     }
 
-    DASHBOARD_HTML_EMBEDDED.replace(
-        "__DUAL_MODE_ENABLED__",
-        if dual_mode_enabled { "1" } else { "0" },
-    )
+    DASHBOARD_HTML_EMBEDDED.to_string()
 }
 
 fn resolve_dashboard_template_path() -> Option<PathBuf> {
@@ -720,5 +707,68 @@ mod tests {
         assert!(html.contains("smokeTestText"));
         assert!(html.contains("singleScanForm"));
         assert!(html.contains("batchScanForm"));
+    }
+
+    #[test]
+    fn dashboard_html_has_accessible_landmarks_and_skip_link() {
+        let html = dashboard_html();
+        assert!(html.contains("class=\"skip-link\""));
+        assert!(html.contains("href=\"#mainContent\""));
+        assert!(html.contains("<main id=\"mainContent\""));
+        assert!(html.contains("role=\"main\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_experience_mode_controls() {
+        let html = dashboard_html();
+        assert!(html.contains("id=\"experienceMode\""));
+        assert!(html.contains("value=\"beginner\""));
+        assert!(html.contains("value=\"analyst\""));
+        assert!(html.contains("id=\"experienceHint\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_explicit_aria_labels_for_critical_controls() {
+        let html = dashboard_html();
+        assert!(html.contains("aria-label=\"Close report modal\""));
+        assert!(html.contains("aria-label=\"Close evidence modal\""));
+        assert!(html.contains("aria-label=\"Replay class filter\""));
+        assert!(html.contains("aria-label=\"Replay channel filter\""));
+        assert!(html.contains("aria-label=\"Replay method filter\""));
+        assert!(html.contains("aria-label=\"Replay outcome filter\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_mode_specific_assistant_panels() {
+        let html = dashboard_html();
+        assert!(html.contains("id=\"beginnerAssistantPanel\""));
+        assert!(html.contains("data-experience=\"beginner\""));
+        assert!(html.contains("id=\"analystAssistantPanel\""));
+        assert!(html.contains("data-experience=\"analyst\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_virtual_adversary_quick_presets() {
+        let html = dashboard_html();
+        assert!(html.contains("id=\"vaPresetSafe\""));
+        assert!(html.contains("id=\"vaPresetBalanced\""));
+        assert!(html.contains("id=\"vaPresetDeep\""));
+        assert!(html.contains("id=\"vaPresetStatus\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_results_insight_strip() {
+        let html = dashboard_html();
+        assert!(html.contains("id=\"resultsInsightBar\""));
+        assert!(html.contains("id=\"resultsInsightTitle\""));
+        assert!(html.contains("id=\"resultsInsightMetric\""));
+        assert!(html.contains("id=\"resultsInsightAction\""));
+    }
+
+    #[test]
+    fn dashboard_html_updates_results_insight_strip_from_render_flow() {
+        let html = dashboard_html();
+        assert!(html.contains("function renderResultsInsightStrip("));
+        assert!(html.contains("renderResultsInsightStrip(allResults);"));
     }
 }

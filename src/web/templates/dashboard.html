@@ -1,349 +1,354 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WAF Detector Dashboard</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%2306b6d4'/><path d='M30 50 L50 30 L70 50 L50 70 Z' fill='white'/></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
-        rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-
 <body>
-    <div class="container">
+    <a class="skip-link" href="#mainContent">Skip to main content</a>
+    <main id="mainContent" class="container" role="main">
         <div class="header">
-            <h1>🛡️ WAF Detector</h1>
-            <p>Advanced Security Infrastructure Analysis & Visualization</p>
-            <p
-                style="font-size: 0.8rem; color: #f8fafc; background-color: rgba(0,0,0,0.3); padding: 0.5rem; border-radius: 6px; margin-top: 0.5rem;">
-                ⚠️ <strong>Important:</strong> This tool should only be used against your own web services or with
-                explicit authorization. Unauthorized scanning may violate terms of service or laws in your jurisdiction.
-            </p>
+            <h1>WAF Detector</h1>
+            <p class="subtitle">Security infrastructure analysis</p>
         </div>
 
-        <div class="mode-switch" id="dashboardModeSwitch">
-            <button type="button" class="mode-btn active" data-mode="analyst">Analyst Mode</button>
-            <button type="button" class="mode-btn" data-mode="executive">Executive Mode</button>
+        <div class="experience-toolbar" aria-label="Experience controls">
+            <label for="experienceMode">Experience Mode</label>
+            <select id="experienceMode" class="input-field experience-select">
+                <option value="beginner">Beginner</option>
+                <option value="analyst">Analyst</option>
+            </select>
+            <p id="experienceHint" class="experience-hint" aria-live="polite"></p>
         </div>
 
-        <div class="card executive-only" id="executiveSummaryCard">
-            <h2>📌 Executive Risk Snapshot</h2>
-            <div id="executiveSummaryContent" class="executive-summary-empty">
-                <div style="text-align: center; padding: 1.5rem 0; color: var(--text-muted);">
-                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">📊</div>
-                    <div>Run a scan to generate an executive posture narrative.</div>
+        <div class="experience-panels">
+            <section id="beginnerAssistantPanel" class="experience-panel" data-experience="beginner">
+                <h2>Quick Start Guide</h2>
+                <p class="card-desc">Use this path for a clean first run with minimal risk.</p>
+                <ol class="assistant-checklist">
+                    <li>Confirm consent once using <code>./waf-detect --consent request</code>.</li>
+                    <li>Start with <strong>Safe preset</strong> in Virtual Adversary.</li>
+                    <li>Review blocked vs challenge outcomes before increasing intensity.</li>
+                </ol>
+            </section>
+            <section id="analystAssistantPanel" class="experience-panel" data-experience="analyst" hidden>
+                <h2>Analyst Workflow</h2>
+                <p class="card-desc">Fast path for deeper testing and higher signal extraction.</p>
+                <ul class="assistant-checklist">
+                    <li>Run VA2 with fixed seed to preserve replayability.</li>
+                    <li>Compare channel coverage and blind spots in the report panel.</li>
+                    <li>Export JSON and CSV for triage and evidence tracking.</li>
+                </ul>
+            </section>
+        </div>
+
+        <div class="tab-bar" role="tablist" aria-label="Dashboard sections">
+            <button class="tab-btn active" data-tab="detect" id="tab-detect-btn" role="tab" aria-selected="true" aria-controls="tab-detect">Detect</button>
+            <button class="tab-btn" data-tab="test" id="tab-test-btn" role="tab" aria-selected="false" aria-controls="tab-test" tabindex="-1">Test</button>
+            <button class="tab-btn" data-tab="reports" id="tab-reports-btn" role="tab" aria-selected="false" aria-controls="tab-reports" tabindex="-1">Reports</button>
+        </div>
+
+        <div class="tab-panel active" id="tab-detect" role="tabpanel" aria-labelledby="tab-detect-btn">
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h2>Single URL Scan</h2>
+                    <p class="card-desc">Detect WAF and CDN protecting a URL.</p>
+                    <form id="singleScanForm">
+                        <div class="input-group">
+                            <label for="singleUrl">Target URL</label>
+                            <input type="url" id="singleUrl" class="input-field" placeholder="https://example.com" required>
+                        </div>
+                        <button type="submit" class="btn">
+                            <span id="singleScanIcon"></span>
+                            <span id="singleScanText">Scan</span>
+                        </button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h2>Batch Scan</h2>
+                    <p class="card-desc">Scan multiple URLs at once.</p>
+                    <form id="batchScanForm">
+                        <div class="input-group">
+                            <label for="batchUrls">URLs (one per line)</label>
+                            <textarea id="batchUrls" class="input-field" rows="4" placeholder="https://example1.com&#10;https://example2.com" required></textarea>
+                        </div>
+                        <button type="submit" class="btn">
+                            <span id="batchScanIcon"></span>
+                            <span id="batchScanText">Scan Batch</span>
+                        </button>
+                    </form>
                 </div>
             </div>
         </div>
 
-        <div class="dashboard-grid" id="detectionInputGrid">
-            <div class="card">
-                <h2>🚀 Single URL Detection (CDN & WAF)</h2>
-                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">Detect which CDN and WAF are protecting
-                    a single target URL.</p>
-                <form id="singleScanForm">
-                    <div class="input-group">
-                        <label for="singleUrl">Enter URL to scan:</label>
-                        <input type="url" id="singleUrl" class="input-field" placeholder="https://example.com" required>
-                    </div>
-                    <button type="submit" class="btn">
-                        <span id="singleScanIcon">🚀</span>
-                        <span id="singleScanText">Scan URL</span>
-                    </button>
-                </form>
-            </div>
+        <div class="tab-panel" id="tab-test" role="tabpanel" aria-labelledby="tab-test-btn" hidden>
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h2>WAF Smoke Test</h2>
+                    <p class="card-desc">Test payload blocking with detailed results.</p>
+                    <form id="smokeTestForm">
+                        <div class="input-group">
+                            <label for="smokeTestUrl">Target URL</label>
+                            <input type="url" id="smokeTestUrl" class="input-field" placeholder="https://example.com" required>
+                        </div>
+                        <button type="submit" class="btn">
+                            <span id="smokeTestIcon"></span>
+                            <span id="smokeTestText">Run Smoke Test</span>
+                        </button>
+                    </form>
+                </div>
 
-            <div class="card">
-                <h2>⚡ Batch URL Detection (CDN & WAF)</h2>
-                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">Detect which CDN and WAF are protecting
-                    multiple target URLs at once.</p>
-                <form id="batchScanForm">
-                    <div class="input-group">
-                        <label for="batchUrls">Enter URLs (one per line):</label>
-                        <textarea id="batchUrls" class="input-field" rows="4"
-                            placeholder="https://example1.com&#10;https://example2.com" required></textarea>
-                    </div>
-                    <button type="submit" class="btn">
-                        <span id="batchScanIcon">⚡</span>
-                        <span id="batchScanText">Scan Batch</span>
-                    </button>
-                </form>
-            </div>
-        </div>
-
-        <div class="dashboard-grid analyst-only">
-            <div class="card">
-                <h2>🛡️ WAF Smoke Test</h2>
-                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
-                    Live payload testing with detailed results - see every attack tested and blocked!
-                </p>
-                <form id="smokeTestForm">
-                    <div class="input-group">
-                        <label for="smokeTestUrl">Enter URL to test:</label>
-                        <input type="url" id="smokeTestUrl" class="input-field" placeholder="https://example.com"
-                            required>
-                    </div>
-                    <button type="submit" class="btn">
-                        <span id="smokeTestIcon">🛡️</span>
-                        <span id="smokeTestText">Run Smoke Test</span>
-                    </button>
-                </form>
-            </div>
-
-            <div class="card">
-                <h2>🧠 Virtual Adversary (Beta)</h2>
-                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
-                    Adaptive effectiveness testing with consent gates, budgets, and baseline-aware response analysis.
-                </p>
-                <form id="vaTestForm">
-                    <div class="input-group">
-                        <label for="vaUrl">Enter URL to test:</label>
-                        <input type="url" id="vaUrl" class="input-field" placeholder="https://example.com" required>
-                    </div>
-                    <details class="va-advanced-toggle">
-                        <summary>Advanced Options</summary>
-                        <div class="va-grid">
-                            <div class="input-group">
-                                <label for="vaTier">Tier</label>
-                                <select id="vaTier" class="input-field">
-                                    <option value="1">Tier 1 (Safe)</option>
-                                    <option value="2">Tier 2</option>
-                                    <option value="3">Tier 3 (Advanced)</option>
+                <div class="card">
+                    <h2>Virtual Adversary</h2>
+                    <p class="card-desc">Adaptive effectiveness testing.</p>
+                    <form id="vaTestForm">
+                        <div class="input-group">
+                            <label for="vaUrl">Target URL</label>
+                            <input type="url" id="vaUrl" class="input-field" placeholder="https://example.com" required>
+                        </div>
+                        <div class="va-preset-row" role="group" aria-label="Virtual Adversary presets">
+                            <span class="va-preset-label">Presets</span>
+                            <button type="button" id="vaPresetSafe" class="btn btn-secondary btn-compact va-preset-btn">Safe</button>
+                            <button type="button" id="vaPresetBalanced" class="btn btn-secondary btn-compact va-preset-btn">Balanced</button>
+                            <button type="button" id="vaPresetDeep" class="btn btn-secondary btn-compact va-preset-btn">Deep</button>
+                            <span id="vaPresetStatus" class="va-preset-status" aria-live="polite"></span>
+                        </div>
+                        <details class="va-advanced-toggle">
+                            <summary>Advanced Options</summary>
+                            <div class="va-grid">
+                                <div class="input-group">
+                                    <label for="vaTier">Intensity</label>
+                                    <select id="vaTier" class="input-field">
+                                        <option value="1">Level 1 (Safe)</option>
+                                        <option value="2">Level 2</option>
+                                        <option value="3">Level 3 (Thorough)</option>
+                                    </select>
+                                </div>
+                                <div class="input-group">
+                                    <label for="vaBudget">Max requests</label>
+                                    <input type="number" id="vaBudget" class="input-field" min="10" value="120">
+                                </div>
+                                <div class="input-group">
+                                    <label for="vaTimeout">Timeout (ms)</label>
+                                    <input type="number" id="vaTimeout" class="input-field" min="1000" value="15000">
+                                </div>
+                                <div class="input-group">
+                                    <label for="vaDelay">Delay (ms)</label>
+                                    <input type="number" id="vaDelay" class="input-field" min="250" value="750">
+                                </div>
+                                <div class="input-group">
+                                    <label for="vaVariants">Variants</label>
+                                    <input type="number" id="vaVariants" class="input-field" min="1" max="6" value="4">
+                                </div>
+                            </div>
+                        </details>
+                        <p class="card-desc" style="margin-top:0">Consent required. Run <code>./waf-detect --consent request</code> first.</p>
+                        <button type="submit" class="btn">
+                            <span id="vaTestIcon"></span>
+                            <span id="vaTestText">Run Security Test</span>
+                        </button>
+                    </form>
+                    <div class="va-activity">
+                        <div class="va-activity-header">
+                            <div class="va-activity-title">Live Activity</div>
+                            <div class="va-activity-controls">
+                                <label for="vaActivityFilter">Filter</label>
+                                <select id="vaActivityFilter" class="input-field va-activity-select">
+                                    <option value="all">All</option>
+                                    <option value="blocked_challenge">Blocked + Challenge</option>
+                                    <option value="blocked">Blocked</option>
+                                    <option value="challenge">Challenge</option>
+                                    <option value="allowed">Allowed</option>
+                                    <option value="error">Error</option>
                                 </select>
-                            </div>
-                            <div class="input-group">
-                                <label for="vaBudget">Budget</label>
-                                <input type="number" id="vaBudget" class="input-field" min="10" value="120">
-                            </div>
-                            <div class="input-group">
-                                <label for="vaTimeout">Timeout (ms)</label>
-                                <input type="number" id="vaTimeout" class="input-field" min="1000" value="15000">
-                            </div>
-                            <div class="input-group">
-                                <label for="vaDelay">Delay (ms)</label>
-                                <input type="number" id="vaDelay" class="input-field" min="250" value="750">
-                            </div>
-                            <div class="input-group">
-                                <label for="vaVariants">Variants</label>
-                                <input type="number" id="vaVariants" class="input-field" min="1" max="6" value="4">
+                                <label for="vaEvidenceFilter">Evidence</label>
+                                <select id="vaEvidenceFilter" class="input-field va-activity-select">
+                                    <option value="all">All</option>
+                                    <option value="StatusCode">StatusCode</option>
+                                    <option value="ChallengeHeader">ChallengeHeader</option>
+                                    <option value="BlockedKeyword">BlockedKeyword</option>
+                                    <option value="ChallengeKeyword">ChallengeKeyword</option>
+                                    <option value="BaselineDeviation">BaselineDeviation</option>
+                                    <option value="StatusChange">StatusChange</option>
+                                    <option value="HeaderDiff">HeaderDiff</option>
+                                    <option value="LengthDelta">LengthDelta</option>
+                                </select>
+                                <input id="vaActivitySearch" class="input-field va-activity-input" type="text" placeholder="Search payloads">
+                                <label for="vaReasonLevel">Detail</label>
+                                <select id="vaReasonLevel" class="input-field va-activity-select">
+                                    <option value="compact">Compact</option>
+                                    <option value="full">Full</option>
+                                </select>
+                                <label class="va-activity-toggle">
+                                    <input type="checkbox" id="vaAutoScroll" checked> Auto-scroll
+                                </label>
                             </div>
                         </div>
-                    </details>
-                    <p style="margin-bottom: 1rem; color: #94a3b8; font-size: 0.85rem;">
-                        Consent is required. Use <code>./waf-detect --consent request</code> before running tests.
-                    </p>
-                    <button type="submit" class="btn">
-                        <span id="vaTestIcon">🧠</span>
-                        <span id="vaTestText">Run Virtual Adversary</span>
-                    </button>
-                </form>
-                <div class="va-activity">
-                    <div class="va-activity-header">
-                        <div class="va-activity-title">Live Activity</div>
-                        <div class="va-activity-controls">
-                            <label for="vaActivityFilter">Filter</label>
-                            <select id="vaActivityFilter" class="input-field va-activity-select">
-                                <option value="all">All</option>
-                                <option value="blocked_challenge">Blocked + Challenge</option>
-                                <option value="blocked">Blocked</option>
-                                <option value="challenge">Challenge</option>
-                                <option value="allowed">Allowed</option>
-                                <option value="error">Error</option>
-                            </select>
-                            <label for="vaEvidenceFilter">Evidence</label>
-                            <select id="vaEvidenceFilter" class="input-field va-activity-select">
-                                <option value="all">All</option>
-                                <option value="StatusCode">StatusCode</option>
-                                <option value="ChallengeHeader">ChallengeHeader</option>
-                                <option value="BlockedKeyword">BlockedKeyword</option>
-                                <option value="ChallengeKeyword">ChallengeKeyword</option>
-                                <option value="BaselineDeviation">BaselineDeviation</option>
-                                <option value="StatusChange">StatusChange</option>
-                                <option value="HeaderDiff">HeaderDiff</option>
-                                <option value="LengthDelta">LengthDelta</option>
-                            </select>
-                            <input id="vaActivitySearch" class="input-field va-activity-input" type="text"
-                                placeholder="Search payloads">
-                            <label for="vaReasonLevel">Detail</label>
-                            <select id="vaReasonLevel" class="input-field va-activity-select">
-                                <option value="compact">Compact</option>
-                                <option value="full">Full</option>
-                            </select>
-                            <label class="va-activity-toggle">
-                                <input type="checkbox" id="vaAutoScroll" checked>
-                                Auto-scroll
-                            </label>
-                        </div>
+                        <div id="vaActivityEmpty" class="va-activity-empty" style="text-align:center;padding:1rem 0;">Run a security test to see live activity here.</div>
+                        <ul id="vaActivityLog" class="va-activity-log"></ul>
                     </div>
-                    <div id="vaActivityEmpty" class="va-activity-empty" style="text-align: center; padding: 1rem 0;">Run a Virtual Adversary test to see live activity here.</div>
-                    <ul id="vaActivityLog" class="va-activity-log"></ul>
                 </div>
-            </div>
 
-            <div class="card">
-                <h2>📊 Quick Actions</h2>
-                <div class="quick-actions-bar">
-                    <button onclick="clearResults()" class="btn btn-secondary btn-compact">
-                        🗑️ Clear
-                    </button>
-                    <button onclick="window.open('/api-docs', '_blank')" class="btn btn-secondary btn-compact">
-                        📖 API Docs
-                    </button>
-                    <button onclick="exportResults()" class="btn btn-secondary btn-compact">
-                        💾 Export
-                    </button>
+                <div class="card full-width">
+                    <h2>Advanced Security Profiling</h2>
+                    <p class="card-desc">Behavioral profiling with deterministic, replayable campaigns.</p>
+                    <form id="va2TestForm">
+                        <div class="dashboard-grid" style="margin-bottom:0">
+                            <div>
+                                <div class="input-group">
+                                    <label for="va2Url">Target URL</label>
+                                    <input type="url" id="va2Url" class="input-field" placeholder="https://example.com" required>
+                                </div>
+                            </div>
+                            <div>
+                                <details class="va-advanced-toggle">
+                                    <summary>Advanced Options</summary>
+                                    <div class="va-grid">
+                                        <div class="input-group">
+                                            <label for="va2Phases">Phases</label>
+                                            <input type="text" id="va2Phases" class="input-field" value="baseline,protocol-variance">
+                                        </div>
+                                        <div class="input-group">
+                                            <label for="va2Seed">Seed</label>
+                                            <input type="number" id="va2Seed" class="input-field" min="1" value="1337">
+                                        </div>
+                                        <div class="input-group">
+                                            <label for="va2Budget">Max requests</label>
+                                            <input type="number" id="va2Budget" class="input-field" min="5" value="60">
+                                        </div>
+                                    </div>
+                                </details>
+                            </div>
+                        </div>
+                        <p class="card-desc" style="margin-top:0.5rem">Consent required. Run <code>./waf-detect --consent request</code> first.</p>
+                        <div class="va-action-row">
+                            <button type="submit" class="btn" id="va2RunBtn" style="width:auto;padding:0.6rem 1.5rem">
+                                <span id="va2RunIcon"></span>
+                                <span id="va2RunText">Run Profiling</span>
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-compact" id="va2PlanBtn">Preview Plan</button>
+                            <button type="button" class="btn btn-secondary btn-compact" id="va2DownloadJsonBtn">JSON</button>
+                            <button type="button" class="btn btn-secondary btn-compact" id="va2DownloadCsvBtn">CSV</button>
+                        </div>
+                    </form>
+                    <div class="va2-result" id="va2Result" style="display:none;"></div>
                 </div>
-            </div>
-
-            <div class="card">
-                <h2>🔐 Consent Status</h2>
-                <div class="consent-status">
-                    <div id="consentStatusBadge" class="consent-badge consent-badge-pending">Checking...</div>
-                    <div class="consent-meta">
-                        <div>Terms: <span id="consentTerms">-</span></div>
-                        <div>Expires in: <span id="consentExpires">-</span> days</div>
-                    </div>
-                    <div class="consent-targets">
-                        <div class="consent-targets-title">Authorized Targets</div>
-                        <div class="consent-actions">
-                            <input id="consentTargetInput" class="input-field consent-input" type="text"
-                                placeholder="example.com">
-                            <button type="button" class="btn btn-secondary consent-add" onclick="addAuthorizedTarget()">
-                                ➕ Add
-                            </button>
-                        </div>
-                        <ul id="consentTargetsList" class="consent-targets-list"></ul>
-                        <div id="consentTargetsEmpty" class="consent-targets-empty">No authorized targets.</div>
-                    </div>
-                    <p class="consent-note">Run <code>./waf-detect --consent</code> to update.</p>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>📂 Virtual Adversary History</h2>
-                <div class="va-history">
-                    <div class="va-history-header">
-                        <button type="button" class="btn btn-secondary" onclick="loadVaHistory()">
-                            🔄 Refresh
-                        </button>
-                        <button type="button" class="btn btn-secondary" id="vaHistoryCsvBtn" onclick="downloadVaHistoryCsv()" style="display:none">
-                            📄 CSV
-                        </button>
-                    </div>
-                    <div id="vaHistoryToolbar" style="display:none">
-                        <div class="va-history-filters">
-                            <label for="vaHistoryDate">Date</label>
-                            <select id="vaHistoryDate" class="input-field va-history-select">
-                                <option value="all">All</option>
-                                <option value="7">Last 7 days</option>
-                                <option value="30">Last 30 days</option>
-                                <option value="custom">Custom</option>
-                            </select>
-                            <label for="vaHistorySort">Sort</label>
-                            <select id="vaHistorySort" class="input-field va-history-select">
-                                <option value="newest">Newest</option>
-                                <option value="oldest">Oldest</option>
-                                <option value="risk">Risk (High → Low)</option>
-                                <option value="blocked">Blocked Rate</option>
-                            </select>
-                            <input id="vaHistoryStart" class="input-field va-history-date" type="date" disabled>
-                            <input id="vaHistoryEnd" class="input-field va-history-date" type="date" disabled>
-                            <button type="button" class="btn btn-secondary" onclick="applyVaHistoryFilter()">
-                                Apply
-                            </button>
-                            <button type="button" class="btn btn-secondary" onclick="deleteVaHistoryRange()">
-                                🗑️ Delete range
-                            </button>
-                        </div>
-                        <div class="va-history-search">
-                            <label for="vaHistorySearch">Search</label>
-                            <input id="vaHistorySearch" class="input-field va-history-input" type="text"
-                                placeholder="Filter by target URL">
-                        </div>
-                        <div class="va-history-retention">
-                            <label for="vaRetentionInput">Keep last</label>
-                            <input id="vaRetentionInput" class="input-field va-retention-input" type="number" min="5"
-                                value="50">
-                            <button type="button" class="btn btn-secondary" onclick="cleanupVaHistory()">
-                                🧹 Cleanup
-                            </button>
-                        </div>
-                    </div>
-                    <div id="vaHistoryEmpty" class="va-history-empty">No saved reports yet. Run a Virtual Adversary scan to see history here.</div>
-                    <ul id="vaHistoryList" class="va-history-list"></ul>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>🧪 VA2 Behavioral Campaign</h2>
-                <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
-                    Research-grade behavioral profiling with deterministic, replayable campaigns (no OWASP payload overlap).
-                </p>
-                <form id="va2TestForm">
-                    <div class="input-group">
-                        <label for="va2Url">Enter URL to test:</label>
-                        <input type="url" id="va2Url" class="input-field" placeholder="https://example.com" required>
-                    </div>
-                    <div class="va-grid">
-                        <div class="input-group">
-                            <label for="va2Phases">Phases</label>
-                            <input type="text" id="va2Phases" class="input-field"
-                                value="baseline,protocol-variance">
-                        </div>
-                        <div class="input-group">
-                            <label for="va2Seed">Seed</label>
-                            <input type="number" id="va2Seed" class="input-field" min="1" value="1337">
-                        </div>
-                        <div class="input-group">
-                            <label for="va2Budget">Budget</label>
-                            <input type="number" id="va2Budget" class="input-field" min="5" value="60">
-                        </div>
-                    </div>
-                    <p style="margin-bottom: 1rem; color: #94a3b8; font-size: 0.85rem;">
-                        Consent required. Use <code>./waf-detect --consent request</code> before running.
-                    </p>
-                    <button type="submit" class="btn" id="va2RunBtn" style="margin-bottom: 0.75rem;">
-                        <span id="va2RunIcon">🧪</span>
-                        <span id="va2RunText">Run VA2</span>
-                    </button>
-                    <div class="va2-secondary-actions">
-                        <button type="button" class="btn btn-secondary btn-compact" id="va2PlanBtn">
-                            🧭 Plan
-                        </button>
-                        <button type="button" class="btn btn-secondary btn-compact" id="va2DownloadJsonBtn">
-                            ⬇️ JSON
-                        </button>
-                        <button type="button" class="btn btn-secondary btn-compact" id="va2DownloadCsvBtn">
-                            ⬇️ CSV
-                        </button>
-                    </div>
-                </form>
-                <div class="va2-result" id="va2Result" style="display:none;"></div>
             </div>
         </div>
 
-        <!-- Results Section -->
-        <div id="resultsSection" class="results-section" style="display: none;">
+        <div class="tab-panel" id="tab-reports" role="tabpanel" aria-labelledby="tab-reports-btn" hidden>
+            <div class="dashboard-grid">
+                <div class="card">
+                    <h2>Quick Actions</h2>
+                    <div class="quick-actions-bar">
+                        <button onclick="clearResults()" class="btn btn-secondary btn-compact">Clear Results</button>
+                        <button onclick="window.open('/api-docs','_blank')" class="btn btn-secondary btn-compact">API Docs</button>
+                        <button onclick="exportResults()" class="btn btn-secondary btn-compact">Export JSON</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Consent Status</h2>
+                    <div class="consent-status">
+                        <div id="consentStatusBadge" class="consent-badge consent-badge-pending">Checking...</div>
+                        <div class="consent-meta">
+                            <div>Terms: <span id="consentTerms">-</span></div>
+                            <div>Expires in: <span id="consentExpires">-</span> days</div>
+                        </div>
+                        <div class="consent-targets">
+                            <div class="consent-targets-title">Authorized Targets</div>
+                            <div class="consent-actions">
+                                <input id="consentTargetInput" class="input-field consent-input" type="text" placeholder="example.com">
+                                <button type="button" class="btn btn-secondary consent-add" onclick="addAuthorizedTarget()">Add</button>
+                            </div>
+                            <ul id="consentTargetsList" class="consent-targets-list"></ul>
+                            <div id="consentTargetsEmpty" class="consent-targets-empty">No authorized targets.</div>
+                        </div>
+                        <p class="consent-note">Run <code>./waf-detect --consent</code> to update.</p>
+                    </div>
+                </div>
+
+                <div class="card full-width">
+                    <h2>Virtual Adversary History</h2>
+                    <div class="va-history">
+                        <div class="va-history-header">
+                            <button type="button" class="btn btn-secondary btn-compact" onclick="loadVaHistory()">Refresh</button>
+                            <button type="button" class="btn btn-secondary btn-compact" id="vaHistoryCsvBtn" onclick="downloadVaHistoryCsv()" style="display:none">CSV</button>
+                            <button type="button" class="btn btn-secondary btn-compact" id="downloadVaReportCsv" onclick="downloadVaHistoryCsv()">Download CSV</button>
+                        </div>
+                        <div id="vaHistoryToolbar" style="display:none">
+                            <div class="va-history-filters">
+                                <label for="vaHistoryDate">Date</label>
+                                <select id="vaHistoryDate" class="input-field va-history-select">
+                                    <option value="all">All</option>
+                                    <option value="7">Last 7 days</option>
+                                    <option value="30">Last 30 days</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                                <label for="vaHistorySort">Sort</label>
+                                <select id="vaHistorySort" class="input-field va-history-select">
+                                    <option value="newest">Newest</option>
+                                    <option value="oldest">Oldest</option>
+                                    <option value="risk">Risk (High to Low)</option>
+                                    <option value="blocked">Blocked Rate</option>
+                                </select>
+                                <input id="vaHistoryStart" class="input-field va-history-date" type="date" disabled>
+                                <input id="vaHistoryEnd" class="input-field va-history-date" type="date" disabled>
+                                <button type="button" class="btn btn-secondary btn-compact" onclick="applyVaHistoryFilter()">Apply</button>
+                                <button type="button" class="btn btn-secondary btn-compact" id="deleteVaHistoryRange" onclick="deleteVaHistoryRange()">Delete range</button>
+                            </div>
+                            <div class="va-history-search">
+                                <label for="vaHistorySearch">Search</label>
+                                <input id="vaHistorySearch" class="input-field va-history-input" type="text" placeholder="Filter by target URL">
+                            </div>
+                            <div class="va-history-retention">
+                                <label for="vaRetentionInput">Keep last</label>
+                                <input id="vaRetentionInput" class="input-field va-retention-input" type="number" min="5" value="50">
+                                <button type="button" class="btn btn-secondary btn-compact" onclick="cleanupVaHistory()">Cleanup</button>
+                            </div>
+                        </div>
+                        <div id="vaHistoryEmpty" class="va-history-empty">No saved reports. Run a security test to build history.</div>
+                        <ul id="vaHistoryList" class="va-history-list"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="resultsSection" class="results-section" style="display:none;">
             <div class="results-header">
-                <h2>📊 Detection Results</h2>
+                <h2>Detection Results</h2>
                 <span id="resultsCount">0 results</span>
             </div>
-            <div id="resultsContainer">
-                <!-- Results will be populated here -->
+            <div id="resultsInsightBar" class="results-insight-strip" aria-live="polite">
+                <div class="insight-pill">
+                    <span class="insight-label">Summary</span>
+                    <strong id="resultsInsightTitle">No scan results yet.</strong>
+                </div>
+                <div class="insight-pill">
+                    <span class="insight-label">Signal</span>
+                    <strong id="resultsInsightMetric">Run a scan to populate this panel.</strong>
+                </div>
+                <div class="insight-pill insight-pill-action">
+                    <span class="insight-label">Next Action</span>
+                    <strong id="resultsInsightAction">Run Single URL Scan for the fastest baseline.</strong>
+                </div>
             </div>
+            <div id="resultsContainer"></div>
         </div>
-    </div>
+    </main>
 
     <div id="vaReportModal" class="modal-overlay" onclick="closeVaReportModal()">
         <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">
-                <h3 id="vaReportTitle">VA Report</h3>
-                <button class="modal-close" onclick="closeVaReportModal()">✕</button>
+                <h3 id="vaReportTitle">Security Test Report</h3>
+                <button class="modal-close" aria-label="Close report modal" onclick="closeVaReportModal()">×</button>
             </div>
             <div id="vaReportMeta" class="modal-meta"></div>
             <div id="vaPinnedSummary" class="va-pinned-summary"></div>
@@ -357,10 +362,10 @@
                 </div>
                 <div class="va-replay-filters">
                     <input id="vaReplaySearch" class="input-field" type="text" placeholder="Filter replay plan">
-                    <select id="vaReplayClassFilter" class="input-field"></select>
-                    <select id="vaReplayChannelFilter" class="input-field"></select>
-                    <select id="vaReplayMethodFilter" class="input-field"></select>
-                    <select id="vaReplayOutcomeFilter" class="input-field"></select>
+                    <select id="vaReplayClassFilter" class="input-field" aria-label="Replay class filter"></select>
+                    <select id="vaReplayChannelFilter" class="input-field" aria-label="Replay channel filter"></select>
+                    <select id="vaReplayMethodFilter" class="input-field" aria-label="Replay method filter"></select>
+                    <select id="vaReplayOutcomeFilter" class="input-field" aria-label="Replay outcome filter"></select>
                 </div>
                 <div id="vaReplayPlanList" class="va-replay-list">No replay plan loaded.</div>
             </div>
@@ -368,14 +373,7 @@
             <div class="payload-table-wrapper">
                 <table class="payload-table">
                     <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Category</th>
-                            <th>Payload</th>
-                            <th>Outcome</th>
-                            <th>Reason</th>
-                            <th>Evidence</th>
-                        </tr>
+                        <tr><th>#</th><th>Category</th><th>Payload</th><th>Outcome</th><th>Reason</th><th>Evidence</th></tr>
                     </thead>
                     <tbody id="vaReportTableBody"></tbody>
                 </table>
@@ -388,10 +386,10 @@
             <div class="modal-header">
                 <h3 id="vaEvidenceTitle">Probe Evidence</h3>
                 <div class="va-modal-actions">
-                    <button class="va-evidence-button" id="vaEvidenceCopy">Copy Evidence</button>
-                    <button class="va-evidence-button" id="vaEvidenceExportJson">Export JSON</button>
-                    <button class="va-evidence-button" id="vaEvidenceExportCsv">Export CSV</button>
-                    <button class="modal-close" onclick="closeVaEvidenceModal()">✕</button>
+                    <button class="va-evidence-button" id="vaEvidenceCopy">Copy</button>
+                    <button class="va-evidence-button" id="vaEvidenceExportJson">JSON</button>
+                    <button class="va-evidence-button" id="vaEvidenceExportCsv">CSV</button>
+                    <button class="modal-close" aria-label="Close evidence modal" onclick="closeVaEvidenceModal()">×</button>
                 </div>
             </div>
             <div id="vaEvidenceMeta" class="modal-meta"></div>
@@ -403,65 +401,104 @@
         </div>
     </div>
 
-    <script>
-        let allResults = [];
-        const dualModeEnabled = "__DUAL_MODE_ENABLED__" === "1";
-        let dashboardMode = 'analyst';
+<script>
+let allResults = [];
+const EXPERIENCE_HINTS = {
+    beginner: "Beginner mode keeps controls simple and safe defaults visible.",
+    analyst: "Analyst mode keeps advanced tuning and diagnostics within immediate reach."
+};
+const VA_PRESETS = {
+    safe: { label: "Safe", tier: "1", budget: "40", timeout: "12000", delay: "900", variants: "3" },
+    balanced: { label: "Balanced", tier: "2", budget: "120", timeout: "15000", delay: "750", variants: "4" },
+    deep: { label: "Deep", tier: "3", budget: "180", timeout: "18000", delay: "600", variants: "6" }
+};
+let vaPresetManuallySelected = false;
 
-        function renderExecutiveSummary() {
-            const container = document.getElementById('executiveSummaryContent');
-            if (!container) return;
-            const latest = Array.isArray(allResults) && allResults.length > 0 ? allResults[0] : null;
-            if (!latest) {
-                container.className = 'executive-summary-empty';
-                container.textContent = 'Run a scan to generate an executive posture narrative.';
-                return;
-            }
+function updateExperiencePanels(mode) {
+    const sections = document.querySelectorAll('.experience-panel[data-experience]');
+    sections.forEach((section) => {
+        section.hidden = section.dataset.experience !== mode;
+    });
+}
 
-            const wafConfidence = latest.detected_waf && latest.detected_waf.confidence
-                ? Math.round(Number(latest.detected_waf.confidence) * 100)
-                : 0;
-            const risk = wafConfidence >= 80 ? 'Lower residual risk' : (wafConfidence >= 50 ? 'Moderate residual risk' : 'Elevated residual risk');
-            const signal = latest.detected_waf
-                ? `${latest.detected_waf.name} detected (${wafConfidence}% confidence)`
-                : 'No explicit WAF signature detected';
+function applyVaPreset(presetKey, manualSelection = true) {
+    const preset = VA_PRESETS[presetKey] || VA_PRESETS.balanced;
+    const tier = document.getElementById('vaTier');
+    const budget = document.getElementById('vaBudget');
+    const timeout = document.getElementById('vaTimeout');
+    const delay = document.getElementById('vaDelay');
+    const variants = document.getElementById('vaVariants');
+    if (tier) tier.value = preset.tier;
+    if (budget) budget.value = preset.budget;
+    if (timeout) timeout.value = preset.timeout;
+    if (delay) delay.value = preset.delay;
+    if (variants) variants.value = preset.variants;
+    const status = document.getElementById('vaPresetStatus');
+    if (status) {
+        status.textContent = `Preset: ${preset.label} (${preset.budget} requests, tier ${preset.tier})`;
+    }
+    document.querySelectorAll('.va-preset-btn').forEach((button) => {
+        const active = button.id === `vaPreset${preset.label}`;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    if (manualSelection) {
+        vaPresetManuallySelected = true;
+    }
+}
 
-            container.className = 'executive-summary';
-            container.innerHTML = `
-                <div class="executive-pill">${escapeHtml(risk)}</div>
-                <div class="executive-line"><strong>Target:</strong> ${escapeHtml(latest.url || 'Unknown')}</div>
-                <div class="executive-line"><strong>Signal:</strong> ${escapeHtml(signal)}</div>
-                <div class="executive-line"><strong>Action:</strong> Validate monitor-mode blind spots using VA2 paired-control.</div>
-            `;
+function applyExperienceMode(mode) {
+    const normalized = mode === 'analyst' ? 'analyst' : 'beginner';
+    document.body.dataset.experienceMode = normalized;
+    updateExperiencePanels(normalized);
+    const hint = document.getElementById('experienceHint');
+    if (hint) {
+        hint.textContent = EXPERIENCE_HINTS[normalized];
+    }
+    const advanced = document.querySelectorAll('.va-advanced-toggle');
+    advanced.forEach((section) => {
+        if (normalized === 'beginner') {
+            section.removeAttribute('open');
         }
+    });
+    if (!vaPresetManuallySelected) {
+        applyVaPreset(normalized === 'beginner' ? 'safe' : 'balanced', false);
+    }
+    renderResultsInsightStrip(allResults);
+}
 
-        function setDashboardMode(mode) {
-            dashboardMode = mode === 'executive' ? 'executive' : 'analyst';
-            document.body.setAttribute('data-dashboard-mode', dashboardMode);
-            localStorage.setItem('waf-detector-dashboard-mode', dashboardMode);
-            document.querySelectorAll('#dashboardModeSwitch .mode-btn').forEach((btn) => {
-                btn.classList.toggle('active', btn.getAttribute('data-mode') === dashboardMode);
-            });
-            renderExecutiveSummary();
-        }
+function setActiveTab(tabName) {
+    document.querySelectorAll('.tab-btn').forEach((button) => {
+        const isActive = button.dataset.tab === tabName;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        button.setAttribute('tabindex', isActive ? '0' : '-1');
+    });
+    document.querySelectorAll('.tab-panel').forEach((panel) => {
+        const isActive = panel.id === `tab-${tabName}`;
+        panel.classList.toggle('active', isActive);
+        panel.hidden = !isActive;
+    });
+}
 
-        function initDashboardMode() {
-            const switcher = document.getElementById('dashboardModeSwitch');
-            if (!dualModeEnabled) {
-                if (switcher) switcher.style.display = 'none';
-                setDashboardMode('analyst');
-                return;
-            }
-            const saved = localStorage.getItem('waf-detector-dashboard-mode');
-            const initial = (saved === 'executive' || saved === 'analyst') ? saved : 'analyst';
-            setDashboardMode(initial);
-            document.querySelectorAll('#dashboardModeSwitch .mode-btn').forEach((btn) => {
-                btn.addEventListener('click', () => setDashboardMode(btn.getAttribute('data-mode')));
-            });
-        }
+                                // HTML escaping utility to prevent XSS
+        function formatRawData(str) {
+    if (typeof str !== 'string') return str || '';
+    let cleaned = str;
+    // Unwrap outer Some("...") / Some(...)
+    cleaned = cleaned.replace(/^Some\("(.*)"\)$/s, '$1');
+    cleaned = cleaned.replace(/^Some\((.*)\)$/s, '$1');
+    if (cleaned === 'None') return '';
+    // Replace embedded Some("value") with just value
+    cleaned = cleaned.replace(/Some\("([^"]*)"\)/g, '$1');
+    // Replace embedded Some(value) with just value
+    cleaned = cleaned.replace(/Some\(([^)]*)\)/g, '$1');
+    // Replace standalone None with empty or dash
+    cleaned = cleaned.replace(/\bNone\b/g, '-');
+    return cleaned;
+}
 
-        // HTML escaping utility to prevent XSS
-        function escapeHtml(str) {
+function escapeHtml(str) {
             if (typeof str !== 'string') return str;
             return str.replace(/[&<>\"'`=\\/]/g, function (s) {
                 return ({
@@ -875,7 +912,7 @@
                 showVa2Result(`Error: ${error.message}`, true);
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = '<span>🧭</span><span>Generate Plan</span>';
+                btn.innerHTML = '<span>Preview Plan</span>';
             }
         }
 
@@ -1447,55 +1484,107 @@
             }
         }
 
+        // AI Summary - sends correct payload format: {result: ..., context: {mode: ...}}
+        // All user-facing strings are escaped via escapeHtml() before insertion.
         async function requestAiSummary(index) {
             const result = allResults[index];
             if (!result) return;
-
-            if (result.ai_summary) {
-                const panel = document.getElementById(`aiSummary-${index}`);
-                if (panel) {
-                    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-                }
-                return;
-            }
-
+            const containerId = 'aiSummary-' + index;
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.textContent = 'Generating AI summary...';
+            container.className = 'ai-summary-loading';
+            container.style.display = 'block';
+            const isSmokeTest = result.is_smoke_test === true;
+            const detectionData = isSmokeTest ? null : result;
+            const contextMode = isSmokeTest ? 'smoke_test' : (result._ai_context || 'single');
             const payload = {
-                url: result.url,
-                detected_waf: result.detected_waf,
-                detected_cdn: result.detected_cdn,
-                evidence: result.evidence || [],
-                caveats: result.caveats || []
+                result: buildAiResultPayload(result, isSmokeTest, detectionData),
+                context: { mode: contextMode }
             };
-
-            const panel = document.getElementById(`aiSummary-${index}`);
-            if (panel) {
-                panel.style.display = 'block';
-                // NOTE: innerHTML used here with escapeHtml() for safe rendering of AI summary HTML
-                panel.innerHTML = '<div class="ai-summary-loading">Generating AI summary...</div>';
-            }
-
             try {
                 const response = await fetch('/api/ai/summary', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
+                if (!response.ok) {
+                    container.textContent = 'AI summary unavailable (' + response.status + ')';
+                    container.className = 'ai-summary-error';
+                    return;
+                }
                 const data = await response.json();
                 if (data.success && data.summary) {
                     result.ai_summary = data.summary;
-                    if (panel) {
-                        panel.innerHTML = renderAiSummary(data.summary);
-                    }
+                    renderAiSummaryPanel(container, data.summary);
                 } else {
-                    if (panel) {
-                        panel.textContent = data.error || 'AI summaries are unavailable.';
-                    }
+                    container.textContent = data.error || 'AI summary failed';
+                    container.className = 'ai-summary-error';
                 }
             } catch (error) {
-                if (panel) {
-                    panel.textContent = error.message || 'Failed to generate AI summary';
-                }
+                container.textContent = 'AI summary unavailable';
+                container.className = 'ai-summary-error';
             }
+        }
+
+        function renderAiSummaryPanel(container, s) {
+            container.className = '';
+            // Build panel using DOM methods to avoid raw innerHTML with untrusted content
+            const panel = document.createElement('div');
+            panel.className = 'ai-summary-panel';
+
+            const header = document.createElement('div');
+            header.className = 'ai-summary-header';
+            const verdict = document.createElement('div');
+            verdict.className = 'ai-verdict';
+            verdict.textContent = s.verdict || '';
+            const badge = document.createElement('span');
+            badge.className = 'ai-verdict-badge';
+            badge.textContent = 'AI';
+            verdict.appendChild(badge);
+            header.appendChild(verdict);
+            const oneLiner = document.createElement('div');
+            oneLiner.className = 'ai-one-liner';
+            oneLiner.textContent = s.one_liner || '';
+            header.appendChild(oneLiner);
+            panel.appendChild(header);
+
+            const grid = document.createElement('div');
+            grid.className = 'ai-summary-grid';
+            grid.appendChild(buildAiList('Key Points', s.key_points));
+            grid.appendChild(buildAiList('Next Steps', s.next_steps));
+            panel.appendChild(grid);
+
+            if (s.caveats && s.caveats.length > 0) {
+                panel.appendChild(buildAiList('Caveats', s.caveats));
+            }
+
+            container.textContent = '';
+            container.appendChild(panel);
+        }
+
+        function buildAiList(title, items) {
+            const wrap = document.createElement('div');
+            const t = document.createElement('div');
+            t.className = 'ai-summary-title';
+            t.textContent = title;
+            wrap.appendChild(t);
+            if (items && items.length > 0) {
+                const ul = document.createElement('ul');
+                ul.className = 'ai-summary-list';
+                items.forEach(function(item) {
+                    const li = document.createElement('li');
+                    li.textContent = item;
+                    ul.appendChild(li);
+                });
+                wrap.appendChild(ul);
+            } else {
+                const empty = document.createElement('div');
+                empty.className = 'ai-summary-empty';
+                empty.textContent = 'None';
+                wrap.appendChild(empty);
+            }
+            return wrap;
         }
 
         function csvEscape(value) {
@@ -2275,22 +2364,90 @@
                 btn.disabled = false;
                 const buttonId = btn.closest('form').id;
                 if (buttonId === 'batchScanForm') {
-                    icon.innerHTML = '⚡';
+                    icon.textContent = '';
                     text.textContent = 'Scan Batch';
                 } else if (buttonId === 'smokeTestForm') {
-                    icon.innerHTML = '🛡️';
+                    icon.textContent = '';
                     text.textContent = customText || 'Run Smoke Test';
                 } else if (buttonId === 'vaTestForm') {
-                    icon.innerHTML = '🧠';
-                    text.textContent = customText || 'Run Virtual Adversary';
+                    icon.textContent = '';
+                    text.textContent = customText || 'Run Security Test';
                 } else if (buttonId === 'va2TestForm') {
-                    icon.innerHTML = '🧪';
-                    text.textContent = customText || 'Run VA2';
+                    icon.textContent = '';
+                    text.textContent = customText || 'Run Profiling';
                 } else {
-                    icon.innerHTML = '🚀';
-                    text.textContent = 'Scan URL';
+                    icon.textContent = '';
+                    text.textContent = 'Scan';
                 }
             }
+        }
+
+        function extractDetectionNames(result) {
+            const data = result && result.detection_result ? result.detection_result : result;
+            const formatName = (value) => {
+                if (!value || value === 'Unknown') return 'Not Detected';
+                if (typeof value === 'string') return value;
+                if (typeof value === 'object' && value.name) return value.name;
+                return 'Detected';
+            };
+            return {
+                waf: formatName(data && data.detected_waf),
+                cdn: formatName(data && data.detected_cdn)
+            };
+        }
+
+        function renderResultsInsightStrip(results) {
+            const titleEl = document.getElementById('resultsInsightTitle');
+            const metricEl = document.getElementById('resultsInsightMetric');
+            const actionEl = document.getElementById('resultsInsightAction');
+            if (!titleEl || !metricEl || !actionEl) return;
+
+            if (!Array.isArray(results) || results.length === 0) {
+                titleEl.textContent = 'No scan results yet.';
+                metricEl.textContent = 'Run a scan to populate this panel.';
+                actionEl.textContent = 'Run Single URL Scan for the fastest baseline.';
+                return;
+            }
+
+            const latest = results[0] || {};
+            const mode = document.body.dataset.experienceMode === 'analyst' ? 'analyst' : 'beginner';
+            const isVirtualAdversary = latest.is_virtual_adversary === true || (latest.summary && Array.isArray(latest.results));
+            const isSmokeTest = latest.is_smoke_test === true || (latest.summary && latest.summary.effectiveness_percentage !== undefined);
+
+            if (isVirtualAdversary) {
+                const summary = latest.summary || {};
+                const blocked = Number(summary.blocked || 0);
+                const challenge = Number(summary.challenge || 0);
+                const total = Number(summary.total || latest.plan_size || (Array.isArray(latest.results) ? latest.results.length : 0));
+                const efficacy = total > 0 ? Math.round(((blocked + challenge) / total) * 100) : 0;
+                titleEl.textContent = `Virtual Adversary coverage is ${efficacy}%`;
+                metricEl.textContent = `${blocked} blocked, ${challenge} challenged, ${Math.max(0, total - blocked - challenge)} allowed`;
+                actionEl.textContent = mode === 'analyst'
+                    ? 'Inspect channel blind spots and replay weak outcomes.'
+                    : 'Open report details and focus on outcomes marked Allowed.';
+                return;
+            }
+
+            if (isSmokeTest) {
+                const summary = latest.summary || {};
+                const effectiveness = Number(summary.effectiveness_percentage || 0);
+                const blocked = Number(summary.blocked_count || 0);
+                const total = Number(summary.total_tests || 0);
+                titleEl.textContent = `Smoke test effectiveness: ${effectiveness.toFixed(1)}%`;
+                metricEl.textContent = `${blocked} of ${total} payloads blocked`;
+                actionEl.textContent = mode === 'analyst'
+                    ? 'Correlate blocked payload classes with provider evidence.'
+                    : 'If effectiveness is low, run Virtual Adversary in Safe preset next.';
+                return;
+            }
+
+            const names = extractDetectionNames(latest);
+            titleEl.textContent = `WAF ${names.waf} | CDN ${names.cdn}`;
+            const elapsed = latest.total_time_ms || latest.detection_time_ms || 0;
+            metricEl.textContent = elapsed ? `Detection finished in ${elapsed}ms` : 'Detection complete';
+            actionEl.textContent = mode === 'analyst'
+                ? 'Escalate to VA2 for differential coverage and replay export.'
+                : 'Run WAF Smoke Test to validate active blocking behavior.';
         }
 
         function displayResults() {
@@ -2302,7 +2459,7 @@
             count.textContent = `${allResults.length} result${allResults.length !== 1 ? 's' : ''}`;
 
             container.innerHTML = allResults.map((result, index) => createResultCard(result, index)).join('');
-            renderExecutiveSummary();
+            renderResultsInsightStrip(allResults);
         }
 
         function createResultCard(result, index) {
@@ -2316,9 +2473,9 @@
             const isSmokeTest = (result.test_results !== undefined && Array.isArray(result.test_results) && result.test_results.length > 0) ||
                 result.is_smoke_test === true ||
                 (result.summary && result.summary.effectiveness_percentage !== undefined);
-            console.log("Creating result card for:", result);
-            console.log("isSmokeTest:", isSmokeTest, "is_smoke_test flag:", result.is_smoke_test, "detected_waf:", result.detected_waf, "detected_cdn:", result.detected_cdn);
-            console.log("test_results array:", Array.isArray(result.test_results), "length:", result.test_results ? result.test_results.length : 0);
+
+
+
             // Check if this is a combined result (has detection_result property)
             const isCombined = result.detection_result !== undefined;
             const detectionData = isCombined && result.detection_result ? result.detection_result : result;
@@ -2404,13 +2561,13 @@
                                 "0ms"}</div>
                     </div>
                     <div class="ai-summary-actions">
-                        <button class="btn btn-secondary" onclick="requestAiSummary(${index})">✨ AI Summary</button>
+                        <button class="btn btn-secondary btn-compact" onclick="requestAiSummary(${index})">AI Summary</button>
                     </div>
                     <div class="ai-summary-panel" id="aiSummary-${index}" style="display:none;"></div>
 
                     ${isSmokeTest ? `
                         <div class="smoke-test-card">
-                            <h4 class="smoke-test-title">🛡️ WAF Smoke Test Results</h4>
+                            <h4 class="smoke-test-title">WAF Smoke Test Results</h4>
                             <p class="smoke-test-note">Note: Scanner Detection tests use realistic User-Agent headers instead of query parameters to test if the WAF blocks security scanning tools.</p>
                             <div class="smoke-test-grid">
                                 <div><strong>Effectiveness:</strong> ${result.summary && result.summary.effectiveness_percentage !== undefined ? result.summary.effectiveness_percentage.toFixed(1) : '0.0'}%</div>
@@ -2431,21 +2588,20 @@
                                     </thead>
                                     <tbody>
                                         ${result.test_results && Array.isArray(result.test_results) ? result.test_results.map((test, index) => {
-                                const statusColor = test.classification === 'Blocked' || test.classification === 'Challenge' ? '#22c55e' :
-                                    test.classification === 'Allowed' ? '#ef4444' : '#f59e0b';
-                                const statusIcon = test.classification === 'Blocked' || test.classification === 'Challenge' ? '🛡️' :
-                                    test.classification === 'Allowed' ? '⚠️' : '❓';
-                                const rowColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
-                                console.log('Test row data:', test);
+                                const statusClass = test.classification === 'Blocked' || test.classification === 'Challenge' ? 'status-blocked' :
+                                    test.classification === 'Allowed' ? 'status-allowed' : 'status-error';
+                                const statusIcon = '';
+                                const rowColor = index % 2 === 0 ? 'var(--bg-base)' : 'var(--bg-surface)';
+
                                 // Add special tooltip for scanner detection tests
                                 const isScanner = test.category === 'ScannerDetection';
                                 const tooltipAttr = isScanner ?
                                     `title="Testing if WAF blocks ${escapeHtml(test.payload)} scanner signature via User-Agent header"` : '';
 
                                 return `<tr style="background: ${rowColor};" ${tooltipAttr}>
-                                                <td>${escapeHtml(test.category)}${isScanner ? ' 🔍' : ''}</td>
+                                                <td>${escapeHtml(test.category)}</td>
                                                 <td style="font-family: monospace;">${escapeHtml((test.payload !== undefined && test.payload !== null && test.payload !== '') ? test.payload : '(empty)')}</td>
-                                                <td><span style="background: ${statusColor}; color: white; padding: 0.125rem 0.5rem; border-radius: 12px; font-size: 0.75rem; font-weight: 600; display: inline-block;">${statusIcon} ${escapeHtml(test.classification)}</span></td>
+                                                <td><span class="status-badge ${statusClass}">${escapeHtml(test.classification)}</span></td>
                                                 <td>${escapeHtml(displayStatusCode(parseInt(test.response_status) || 0))}</td>
                                                 <td>${escapeHtml(String(test.response_time_ms))}</td>
                                             </tr>`;
@@ -2455,9 +2611,9 @@
                             </div>
                         </div>
                     ` : isCombined ? `
-                        <div style="margin-bottom: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #0ea5e9;">
-                            <h4 style="margin: 0 0 0.5rem 0; color: #0369a1;">🛡️ WAF Effectiveness Testing</h4>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; font-size: 0.9rem;">
+                        <div class="smoke-test-card">
+                            <h4 class="smoke-test-title">WAF Effectiveness Testing</h4>
+                            <div class="smoke-test-grid" style="grid-template-columns: 1fr 1fr 1fr;">
                                 <div><strong>Effectiveness:</strong> ${result.effectiveness_result ? result.effectiveness_result.effectiveness_score.toFixed(1) : 'N/A'}%</div>
                                 <div><strong>Tests:</strong> ${result.effectiveness_result ? result.effectiveness_result.total_tests : 'N/A'}</div>
                                 <div><strong>Blocked:</strong> ${result.effectiveness_result ? result.effectiveness_result.blocked_tests : 'N/A'}</div>
@@ -2521,10 +2677,7 @@
                                 const isDns = typeof ev.method_type === 'object' && ev.method_type && ev.method_type.DNS;
                                 const isPayload = ev.method_type === 'Payload';
 
-                                const timingIcon = isTiming ? '⏱️' : '';
-                                const dnsIcon = isDns ? '🌐' : '';
-                                const payloadIcon = isPayload ? '🛡️' : '';
-                                const icon = timingIcon || dnsIcon || payloadIcon;
+                                const icon = '';
 
                                 const timingClass = isTiming ? 'evidence-timing' : '';
                                 const dnsClass = isDns ? 'evidence-dns' : '';
@@ -2536,13 +2689,13 @@
                                             <strong>${icon} ${escapeHtml(ev.description || 'Unknown evidence')}</strong> 
                                             <span class="confidence-badge confidence-${getConfidenceLevel(ev.confidence || 0)}">${((ev.confidence || 0) * 100).toFixed(1)}%</span>
                                             <br><em>Method:</em> ${isDns ? 'DNS (CNAME)' : isPayload ? 'Payload (WAF Blocking)' : escapeHtml(formatMethodType(ev.method_type))}
-                                            ${isTiming ? `<br><em>Timing Data:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
-                                        isDns ? `<br><em>DNS Record:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
-                                            isPayload ? `<br><em>Blocked Payloads:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
-                                                `<br><em>Data:</em> ${escapeHtml(ev.raw_data || 'N/A')}`}
-                                            ${isTiming ? `<br><span class="timing-info">⚡ WAF processing delay detected</span>` : ''}
-                                            ${isDns ? `<br><span class="dns-info">🔒 Infrastructure-level detection</span>` : ''}
-                                            ${isPayload ? `<br><span class="payload-info">🚫 Malicious payload blocked by WAF</span>` : ''}
+                                            ${isTiming ? `<br><em>Timing Data:</em> ${escapeHtml(formatRawData(ev.raw_data) || 'N/A')}` :
+                                        isDns ? `<br><em>DNS Record:</em> ${escapeHtml(formatRawData(ev.raw_data) || 'N/A')}` :
+                                            isPayload ? `<br><em>Blocked Payloads:</em> ${escapeHtml(formatRawData(ev.raw_data) || 'N/A')}` :
+                                                `<br><em>Data:</em> ${escapeHtml(formatRawData(ev.raw_data) || 'N/A')}`}
+                                            ${isTiming ? '<br><span class="timing-info">WAF processing delay detected</span>' : ''}
+                                            ${isDns ? '<br><span class="dns-info">Infrastructure-level detection</span>' : ''}
+                                            ${isPayload ? '<br><span class="payload-info">Payload blocked by WAF</span>' : ''}
                                         </div>
                                     `;
                             }).join('')}
@@ -2599,7 +2752,7 @@
         function clearResults() {
             allResults = [];
             document.getElementById('resultsSection').style.display = 'none';
-            renderExecutiveSummary();
+            renderResultsInsightStrip(allResults);
             showSuccessMessage('Results cleared');
         }
 
@@ -2619,7 +2772,13 @@
             div.className = `${type}-message`;
             div.textContent = message;
 
-            document.querySelector('.container').insertBefore(div, document.querySelector('.dashboard-grid'));
+            const container = document.querySelector('.container');
+            const tabBar = container.querySelector('.tab-bar');
+            if (tabBar && tabBar.nextSibling) {
+                container.insertBefore(div, tabBar.nextSibling);
+            } else {
+                container.appendChild(div);
+            }
 
             setTimeout(() => div.remove(), 5000);
         }
@@ -2695,192 +2854,124 @@
         }
 
         // Page load handler
-        window.addEventListener('load', () => {
-            // Page loaded - ready for user input
-        });
-
-        // Fix for smoke test results display
-        function fixSmokeTestDisplay() {
-            // Override the runSmokeTest function
-            if (typeof window.runSmokeTest === 'function') {
-                window.originalRunSmokeTest = window.runSmokeTest;
-            }
-
-            window.runSmokeTest = async function (url) {
-                const btn = document.querySelector('#smokeTestForm button');
-                const icon = document.getElementById('smokeTestIcon');
-                const text = document.getElementById('smokeTestText');
-
-                setButtonLoading(btn, icon, text, true, 'Testing...');
-
-                try {
-                    const response = await fetch('/api/smoke-test', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url })
-                    });
-
-                    const data = await response.json();
-
-                    if (data.success && data.result) {
-                        // Process the smoke test result before adding to results
-                        const processedResult = processRawSmokeTestResult(data.result);
-                        allResults.unshift(processedResult);
-                        displayResults();
-                        showSuccessMessage(`Smoke test completed for ${url} - ${data.result.test_results.length} payloads tested`);
-                    } else {
-                        showErrorMessage(data.error || 'Smoke test failed');
-                    }
-                } catch (error) {
-                    showErrorMessage(`Error: ${error.message}`);
-                } finally {
-                    setButtonLoading(btn, icon, text, false, 'Run Smoke Test');
-                }
-            };
-
-            // Function to process raw smoke test results
-            function processRawSmokeTestResult(rawResult) {
-                console.log("Processing smoke test result:", rawResult);
-
-                // Ensure the result has the correct structure for smoke test display
-                let processedResult = {
-                    url: rawResult.url,
-                    // Flag this explicitly as a smoke test result
-                    is_smoke_test: true,
-                    test_results: [],
-                    summary: rawResult.summary || {
-                        effectiveness_percentage: 0,
-                        total_tests: 0,
-                        blocked_tests: 0
-                    },
-                    effectiveness_percentage: rawResult.summary ?
-                        rawResult.summary.effectiveness_percentage :
-                        (rawResult.effectiveness_percentage || 0),
-                    waf_mode: rawResult.waf_mode || "Unknown",
-                    // Handle null values safely
-                    detected_waf: rawResult.detected_waf === null ? null : (rawResult.detected_waf || null),
-                    detected_cdn: rawResult.detected_cdn === null ? null : (rawResult.detected_cdn || null),
-                    total_time_ms: rawResult.total_time_ms || 0,
-                    timestamp: rawResult.timestamp || new Date().toISOString()
-                };
-
-                // Process test results with careful handling of response_status
-                if (Array.isArray(rawResult.test_results)) {
-                    processedResult.test_results = rawResult.test_results.map(test => {
-                        // Log each test result for debugging
-                        console.log('Processing test result:', test);
-
-                        return {
-                            category: test.category || "Unknown",
-                            payload: (test.payload !== undefined && test.payload !== null) ? test.payload : '',
-                            response_status: parseInt(test.response_status) || 0,
-                            response_time_ms: test.response_time_ms || 0,
-                            classification: test.classification || "Unknown"
-                        };
-                    });
-                }
-
-                return processedResult;
-            }
-
-            console.log("Smoke test display fix applied");
-        }
+                // Fix for smoke test results display
 
         // Apply the fix when the page loads
-        document.addEventListener('DOMContentLoaded', function () {
-            fixSmokeTestDisplay();
-            initDashboardMode();
-            loadConsentStatus();
-            loadVaHistory();
-            const historySearch = document.getElementById('vaHistorySearch');
-            if (historySearch) {
-                historySearch.addEventListener('input', () => applyVaHistoryFilter());
-            }
-            const historyDate = document.getElementById('vaHistoryDate');
-            const historyStart = document.getElementById('vaHistoryStart');
-            const historyEnd = document.getElementById('vaHistoryEnd');
-            const historySort = document.getElementById('vaHistorySort');
-            if (historyDate) {
-                historyDate.addEventListener('change', (event) => {
-                    const isCustom = event.target.value === 'custom';
-                    if (historyStart) historyStart.disabled = !isCustom;
-                    if (historyEnd) historyEnd.disabled = !isCustom;
-                    applyVaHistoryFilter();
-                });
-            }
-            if (historyStart) {
-                historyStart.addEventListener('change', () => applyVaHistoryFilter());
-            }
-            if (historyEnd) {
-                historyEnd.addEventListener('change', () => applyVaHistoryFilter());
-            }
-            if (historySort) {
-                historySort.addEventListener('change', () => applyVaHistoryFilter());
-            }
-            document.addEventListener('keydown', (event) => {
-                if (event.key === 'Escape') {
-                    closeVaReportModal();
-                    closeVaEvidenceModal();
-                }
-            });
-            document.addEventListener('keydown', (event) => {
-                const modal = document.getElementById('vaEvidenceModal');
-                if (!modal || !modal.classList.contains('modal-open')) return;
-                if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
-                    event.preventDefault();
-                    copyCurrentEvidence();
-                }
-            });
-            const filter = document.getElementById('vaActivityFilter');
-            if (filter) {
-                filter.addEventListener('change', (event) => {
-                    vaActivityFilter = event.target.value;
-                    if (currentVaJobId) {
-                        renderVaActivity(currentVaJobId);
-                    }
-                });
-            }
-            const autoScrollToggle = document.getElementById('vaAutoScroll');
-            if (autoScrollToggle) {
-                autoScrollToggle.addEventListener('change', (event) => {
-                    vaAutoScroll = event.target.checked;
-                    if (currentVaJobId) {
-                        renderVaActivity(currentVaJobId);
-                    }
-                });
-            }
-            const activitySearch = document.getElementById('vaActivitySearch');
-            if (activitySearch) {
-                activitySearch.addEventListener('input', (event) => {
-                    vaActivitySearchTerm = event.target.value.trim().toLowerCase();
-                    if (currentVaJobId) {
-                        renderVaActivity(currentVaJobId);
-                    }
-                });
-            }
-
-            const evidenceFilter = document.getElementById('vaEvidenceFilter');
-            if (evidenceFilter) {
-                evidenceFilter.addEventListener('change', (event) => {
-                    vaEvidenceFilter = event.target.value;
-                    if (currentVaJobId) {
-                        renderVaActivity(currentVaJobId);
-                    }
-                });
-            }
-
-            const reasonLevel = document.getElementById('vaReasonLevel');
-            if (reasonLevel) {
-                reasonLevel.addEventListener('change', (event) => {
-                    vaReasonLevel = event.target.value;
-                    if (currentVaJobId) {
-                        renderVaActivity(currentVaJobId);
-                    }
-                });
-            }
-            console.log("Smoke test display fix applied on page load");
+document.addEventListener('DOMContentLoaded', function() {
+    loadConsentStatus();
+    loadVaHistory();
+    var experienceMode = document.getElementById('experienceMode');
+    var storedMode = localStorage.getItem('wafDetectorExperienceMode');
+    if (experienceMode) {
+        experienceMode.value = storedMode === 'analyst' ? 'analyst' : 'beginner';
+        applyExperienceMode(experienceMode.value);
+        experienceMode.addEventListener('change', function(event) {
+            var nextMode = event.target.value === 'analyst' ? 'analyst' : 'beginner';
+            localStorage.setItem('wafDetectorExperienceMode', nextMode);
+            applyExperienceMode(nextMode);
         });
+    } else {
+        applyExperienceMode(storedMode === 'analyst' ? 'analyst' : 'beginner');
+    }
+    [
+        ['vaPresetSafe', 'safe'],
+        ['vaPresetBalanced', 'balanced'],
+        ['vaPresetDeep', 'deep']
+    ].forEach(function(entry) {
+        var buttonId = entry[0];
+        var preset = entry[1];
+        var button = document.getElementById(buttonId);
+        if (!button) return;
+        button.addEventListener('click', function() {
+            applyVaPreset(preset, true);
+        });
+    });
+    document.querySelectorAll('.tab-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            setActiveTab(btn.dataset.tab);
+        });
+        btn.addEventListener('keydown', function(event) {
+            if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+            event.preventDefault();
+            var tabs = Array.from(document.querySelectorAll('.tab-btn'));
+            var currentIndex = tabs.indexOf(btn);
+            if (currentIndex < 0) return;
+            var nextIndex = event.key === 'ArrowRight'
+                ? (currentIndex + 1) % tabs.length
+                : (currentIndex - 1 + tabs.length) % tabs.length;
+            var nextButton = tabs[nextIndex];
+            setActiveTab(nextButton.dataset.tab);
+            nextButton.focus();
+        });
+    });
+    var initialTab = document.querySelector('.tab-btn.active') || document.querySelector('.tab-btn');
+    if (initialTab) {
+        setActiveTab(initialTab.dataset.tab);
+    }
+    var historySearch = document.getElementById('vaHistorySearch');
+    if (historySearch) historySearch.addEventListener('input', function() { applyVaHistoryFilter(); });
+    var historyDate = document.getElementById('vaHistoryDate');
+    var historyStart = document.getElementById('vaHistoryStart');
+    var historyEnd = document.getElementById('vaHistoryEnd');
+    var historySort = document.getElementById('vaHistorySort');
+    if (historyDate) {
+        historyDate.addEventListener('change', function(event) {
+            var isCustom = event.target.value === 'custom';
+            if (historyStart) historyStart.disabled = !isCustom;
+            if (historyEnd) historyEnd.disabled = !isCustom;
+            applyVaHistoryFilter();
+        });
+    }
+    if (historyStart) historyStart.addEventListener('change', function() { applyVaHistoryFilter(); });
+    if (historyEnd) historyEnd.addEventListener('change', function() { applyVaHistoryFilter(); });
+    if (historySort) historySort.addEventListener('change', function() { applyVaHistoryFilter(); });
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape') { closeVaReportModal(); closeVaEvidenceModal(); }
+    });
+    document.addEventListener('keydown', function(event) {
+        var modal = document.getElementById('vaEvidenceModal');
+        if (!modal || !modal.classList.contains('modal-open')) return;
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
+            event.preventDefault();
+            copyCurrentEvidence();
+        }
+    });
+    var filter = document.getElementById('vaActivityFilter');
+    if (filter) {
+        filter.addEventListener('change', function(event) {
+            vaActivityFilter = event.target.value;
+            if (currentVaJobId) renderVaActivity(currentVaJobId);
+        });
+    }
+    var autoScrollToggle = document.getElementById('vaAutoScroll');
+    if (autoScrollToggle) {
+        autoScrollToggle.addEventListener('change', function(event) {
+            vaAutoScroll = event.target.checked;
+            if (currentVaJobId) renderVaActivity(currentVaJobId);
+        });
+    }
+    var activitySearch = document.getElementById('vaActivitySearch');
+    if (activitySearch) {
+        activitySearch.addEventListener('input', function(event) {
+            vaActivitySearchTerm = event.target.value.trim().toLowerCase();
+            if (currentVaJobId) renderVaActivity(currentVaJobId);
+        });
+    }
+    var evidenceFilter = document.getElementById('vaEvidenceFilter');
+    if (evidenceFilter) {
+        evidenceFilter.addEventListener('change', function(event) {
+            vaEvidenceFilter = event.target.value;
+            if (currentVaJobId) renderVaActivity(currentVaJobId);
+        });
+    }
+    var reasonLevel = document.getElementById('vaReasonLevel');
+    if (reasonLevel) {
+        reasonLevel.addEventListener('change', function(event) {
+            vaReasonLevel = event.target.value;
+            if (currentVaJobId) renderVaActivity(currentVaJobId);
+        });
+    }
+});
     </script>
 </body>
-
 </html>
