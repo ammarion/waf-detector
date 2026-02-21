@@ -1121,6 +1121,18 @@
             poll();
         }
 
+        async function loadConsentStatus() {
+            try {
+                const response = await fetch('/api/consent-status');
+                const data = await response.json();
+                if (data.success && data.status) {
+                    applyConsentStatus(data.status);
+                }
+            } catch (error) {
+                // Consent status unavailable
+            }
+        }
+
         function applyConsentStatus(status) {
             const badge = document.getElementById('consentStatusBadge');
             const terms = document.getElementById('consentTerms');
@@ -1147,28 +1159,30 @@
             targetsList.innerHTML = '';
             if (targets.length === 0) {
                 targetsEmpty.style.display = 'block';
-        function setButtonLoading(btn, icon, text, loading, customText = null) {
-            if (loading) {
-                btn.disabled = true;
-                icon.innerHTML = '<div class="spinner"></div>';
-                text.textContent = customText || 'Scanning...';
             } else {
-                btn.disabled = false;
-                const buttonId = btn.closest('form').id;
-                if (buttonId === 'batchScanForm') {
-                    icon.innerHTML = '⚡';
-                    text.textContent = 'Scan Batch';
-                } else if (buttonId === 'smokeTestForm') {
-                    icon.innerHTML = '🛡️';
-                    text.textContent = customText || 'Run Smoke Test';
-                } else {
-                    icon.innerHTML = '🚀';
-                    text.textContent = 'Scan URL';
-                }
+                targetsEmpty.style.display = 'none';
+                targets.forEach(t => {
+                    const li = document.createElement('li');
+                    li.textContent = t;
+                    targetsList.appendChild(li);
+                });
             }
         }
 
         let vaHistoryCache = [];
+
+        async function loadVaHistory() {
+            try {
+                const response = await fetch('/api/virtual-adversary/reports');
+                const data = await response.json();
+                if (data.success && Array.isArray(data.reports)) {
+                    vaHistoryCache = data.reports;
+                    renderVaHistoryList(vaHistoryCache);
+                }
+            } catch (error) {
+                // VA history unavailable
+            }
+        }
 
         function renderVaHistoryList(reports) {
             const list = document.getElementById('vaHistoryList');
@@ -1276,6 +1290,34 @@
                 if (endDate) {
                     endDate.setHours(23, 59, 59, 999);
                 }
+            }
+
+            let filtered = vaHistoryCache.filter(report => {
+                if (term && !(report.target_url || '').toLowerCase().includes(term)) return false;
+                if (startDate) {
+                    const ts = new Date(report.timestamp || 0);
+                    if (ts < startDate) return false;
+                }
+                if (endDate) {
+                    const ts = new Date(report.timestamp || 0);
+                    if (ts > endDate) return false;
+                }
+                return true;
+            });
+
+            if (sortMode === 'oldest') {
+                filtered.sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+            } else if (sortMode === 'risk') {
+                filtered.sort((a, b) => historyRiskScore(b) - historyRiskScore(a));
+            } else if (sortMode === 'blocked') {
+                filtered.sort((a, b) => (b.blocked_rate || 0) - (a.blocked_rate || 0));
+            } else {
+                filtered.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+            }
+
+            renderVaHistoryList(filtered);
+        }
+
         function buildAiResultPayload(result, isSmokeTest, detectionData) {
             if (isSmokeTest) {
                 const summary = result.summary || {};
@@ -1321,6 +1363,26 @@
             const renderList = (items) => items.length
                 ? `<ul class="ai-summary-list">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
                 : '<div class="ai-summary-empty">No items</div>';
+
+            return `
+                <div class="ai-summary-header">
+                    <div class="ai-verdict">Verdict: <span class="ai-verdict-badge">${verdict}</span></div>
+                    <div class="ai-one-liner">${oneLiner}</div>
+                </div>
+                <div class="ai-summary-grid">
+                    <div>
+                        <div class="ai-summary-title">Key Points</div>
+                        ${renderList(keyPoints)}
+                    </div>
+                    <div>
+                        <div class="ai-summary-title">Next Steps</div>
+                        ${renderList(nextSteps)}
+                    </div>
+                </div>
+                <div class="ai-summary-title">Caveats</div>
+                ${renderList(caveats)}
+            `;
+        }
 
         async function downloadVaHistoryReportCsv(reportId) {
             try {
@@ -1370,26 +1432,6 @@
             }
         }
 
-            return `
-                <div class="ai-summary-header">
-                    <div class="ai-verdict">Verdict: <span class="ai-verdict-badge">${verdict}</span></div>
-                    <div class="ai-one-liner">${oneLiner}</div>
-                </div>
-                <div class="ai-summary-grid">
-                    <div>
-                        <div class="ai-summary-title">Key Points</div>
-                        ${renderList(keyPoints)}
-                    </div>
-                    <div>
-                        <div class="ai-summary-title">Next Steps</div>
-                        ${renderList(nextSteps)}
-                    </div>
-                </div>
-                <div class="ai-summary-title">Caveats</div>
-                ${renderList(caveats)}
-            `;
-        }
-
         async function requestAiSummary(index) {
             const result = allResults[index];
             if (!result) return;
@@ -1399,16 +1441,45 @@
                 if (panel) {
                     panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
                 }
-                const csvData = await response.text();
-                const blob = new Blob([csvData], { type: 'text/csv' });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `va-reports-${new Date().toISOString().split('T')[0]}.csv`;
-                link.click();
-                URL.revokeObjectURL(url);
+                return;
+            }
+
+            const payload = {
+                url: result.url,
+                detected_waf: result.detected_waf,
+                detected_cdn: result.detected_cdn,
+                evidence: result.evidence || [],
+                caveats: result.caveats || []
+            };
+
+            const panel = document.getElementById(`aiSummary-${index}`);
+            if (panel) {
+                panel.style.display = 'block';
+                // NOTE: innerHTML used here with escapeHtml() for safe rendering of AI summary HTML
+                panel.innerHTML = '<div class="ai-summary-loading">Generating AI summary...</div>';
+            }
+
+            try {
+                const response = await fetch('/api/ai/summary', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (data.success && data.summary) {
+                    result.ai_summary = data.summary;
+                    if (panel) {
+                        panel.innerHTML = renderAiSummary(data.summary);
+                    }
+                } else {
+                    if (panel) {
+                        panel.textContent = data.error || 'AI summaries are unavailable.';
+                    }
+                }
             } catch (error) {
-                showErrorMessage(error.message || 'Failed to download CSV');
+                if (panel) {
+                    panel.textContent = error.message || 'Failed to generate AI summary';
+                }
             }
         }
 
@@ -2162,28 +2233,18 @@
             const value = input ? parseInt(input.value, 10) : 0;
             const maxReports = Number.isFinite(value) && value > 0 ? value : 50;
 
-            const panel = document.getElementById(`aiSummary-${index}`);
-            if (panel) {
-                panel.style.display = 'block';
-                panel.innerHTML = '<div class="ai-summary-loading">Generating AI summary...</div>';
-            }
-
             try {
-                const response = await fetch('/api/ai/summary', {
+                const response = await fetch('/api/virtual-adversary/reports/cleanup', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify({ max_reports: maxReports })
                 });
                 const data = await response.json();
-                if (data.success && data.summary) {
-                    result.ai_summary = data.summary;
-                    if (panel) {
-                        panel.innerHTML = renderAiSummary(data.summary);
-                    }
+                if (data.success) {
+                    showSuccessMessage(`Cleanup complete: kept ${data.kept}, deleted ${data.deleted}`);
+                    loadVaHistory();
                 } else {
-                    if (panel) {
-                        panel.innerHTML = `<div class="ai-summary-error">${escapeHtml(data.error || 'AI summaries are unavailable.')}</div>`;
-                    }
+                    showErrorMessage(data.error || 'Failed to cleanup reports');
                 }
             } catch (error) {
                 showErrorMessage(error.message || 'Failed to delete reports');
@@ -2213,8 +2274,6 @@
                 } else {
                     icon.innerHTML = '🚀';
                     text.textContent = 'Scan URL';
-                if (panel) {
-                    panel.innerHTML = `<div class="ai-summary-error">AI summaries are unavailable.</div>`;
                 }
             }
         }
