@@ -43,6 +43,10 @@ pub struct BehavioralPosture {
     pub pmi_label: String,
     pub differential_score: f64,
     pub challenge_score: f64,
+    #[serde(default)]
+    pub blind_spot_count: usize,
+    #[serde(default)]
+    pub channel_coverage_score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +75,7 @@ pub struct PostureBuilder {
     detection_confidence: f64,
     behavioral: Option<BehavioralPosture>,
     pmi_normalized: f64,
+    channel_coverage_score: f64,
     enforcement: Option<EnforcementPosture>,
     enforcement_score: f64,
 }
@@ -83,6 +88,7 @@ impl PostureBuilder {
             detection_confidence: 0.0,
             behavioral: None,
             pmi_normalized: 0.0,
+            channel_coverage_score: 0.0,
             enforcement: None,
             enforcement_score: 0.0,
         }
@@ -103,13 +109,21 @@ impl PostureBuilder {
 
     pub fn with_va2(mut self, report: &Va2RunReport) -> Self {
         let pmi_normalized = report.pmi.score / 100.0;
+        let (blind_spot_count, cov_score) = report
+            .channel_coverage
+            .as_ref()
+            .map(|cc| (cc.blind_spots.len(), cc.coverage_score))
+            .unwrap_or((0, 0.0));
         self.behavioral = Some(BehavioralPosture {
             pmi_score: report.pmi.score,
             pmi_label: report.pmi.label.clone(),
             differential_score: report.wbf.differential_score,
             challenge_score: report.wbf.challenge_score,
+            blind_spot_count,
+            channel_coverage_score: cov_score,
         });
         self.pmi_normalized = pmi_normalized;
+        self.channel_coverage_score = cov_score;
         self
     }
 
@@ -153,9 +167,21 @@ impl PostureBuilder {
         }
 
         if self.behavioral.is_some() {
-            let reduction = 30.0 * self.pmi_normalized;
+            // Blind spots reduce the effective PMI benefit
+            let channel_factor = if self.channel_coverage_score > 0.0 {
+                self.channel_coverage_score
+            } else {
+                1.0 // No coverage data = no adjustment
+            };
+            let reduction = 30.0 * self.pmi_normalized * channel_factor;
             base -= reduction;
             parts.push(format!("VA2 PMI {:.0}/100", self.pmi_normalized * 100.0));
+            if self.channel_coverage_score > 0.0 {
+                parts.push(format!(
+                    "channel coverage {:.0}%",
+                    self.channel_coverage_score * 100.0
+                ));
+            }
         }
 
         if self.enforcement.is_some() {
@@ -265,6 +291,7 @@ mod tests {
                 },
             },
             differential: vec![],
+            channel_coverage: None,
         }
     }
 
@@ -359,5 +386,46 @@ mod tests {
         // base = 100 - 20 - 30 - (20 * 1.0) = 30
         assert_eq!(report.grade, PostureGrade::B);
         assert!(report.risk_score > 29.0 && report.risk_score < 31.0);
+    }
+
+    #[test]
+    fn test_posture_with_channel_coverage() {
+        use crate::virtual_adversary2::*;
+        use std::collections::HashMap as StdHashMap;
+
+        let det = mock_detection_result(0.95);
+        let mut va2 = mock_va2_report(80.0, 0.8);
+        // Set partial channel coverage (blind spots reduce effective protection)
+        va2.channel_coverage = Some(Va2ChannelCoverage {
+            channels: {
+                let mut ch = StdHashMap::new();
+                ch.insert(Va2ProbeChannel::Query, 1.0);
+                ch.insert(Va2ProbeChannel::Path, 1.0);
+                ch.insert(Va2ProbeChannel::Header, 0.0); // blind spot
+                ch.insert(Va2ProbeChannel::Body, 0.5);
+                ch.insert(Va2ProbeChannel::Method, 0.0); // blind spot
+                ch
+            },
+            blind_spots: vec![Va2ProbeChannel::Header, Va2ProbeChannel::Method],
+            coverage_score: 0.5,
+        });
+
+        let report = PostureBuilder::new("https://example.com")
+            .with_detection(&det)
+            .with_va2(&va2)
+            .compute();
+
+        // With channel_coverage_score = 0.5, the VA2 reduction is halved:
+        // base = 100 - (20 * 0.95) - (30 * 0.80 * 0.50) = 100 - 19 - 12 = 69
+        assert!(
+            report.risk_score > 68.0 && report.risk_score < 70.0,
+            "expected risk ~69, got {}",
+            report.risk_score
+        );
+        assert_eq!(report.grade, PostureGrade::D);
+        assert!(report.behavioral.is_some());
+        let beh = report.behavioral.unwrap();
+        assert_eq!(beh.blind_spot_count, 2);
+        assert!((beh.channel_coverage_score - 0.5).abs() < 0.01);
     }
 }

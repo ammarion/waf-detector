@@ -85,6 +85,54 @@
       "status": 403,
       "headers": {},
       "body": "access denied"
+    },
+    {
+      "key": "GET:/:va2=hdr1:H{Referer=https://example.com}",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=hdr1:H{Referer=<script>alert(1)</script>}",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=hdr2:H{X-Search=test}",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=hdr2:H{X-Search=1' OR '1'='1}",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "POST:/:va2=body1:H{Content-Type=application/x-www-form-urlencoded}:B{search=test}",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Search: test</html>"
+    },
+    {
+      "key": "POST:/:va2=body1:H{Content-Type=application/x-www-form-urlencoded}:B{search=1'+OR+'1'='1}",
+      "status": 503,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3", "set-cookie": "ak_bmsc=challenge" },
+      "body": "<html><head><script>javascript challenge</script></head><body>Checking your browser before accessing...</body></html>"
+    },
+    {
+      "key": "OPTIONS:/api/v1/status:",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": ""
+    },
+    {
+      "key": "DELETE:/api/v1/status:",
+      "status": 405,
+      "headers": {},
+      "body": "method not allowed"
     }
   ]
 }

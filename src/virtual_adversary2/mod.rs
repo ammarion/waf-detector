@@ -35,6 +35,28 @@ pub enum Va2StepKind {
     ChallengeProbe,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum Va2ProbeChannel {
+    Path,
+    Query,
+    Header,
+    Body,
+    Method,
+}
+
+impl std::fmt::Display for Va2ProbeChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Va2ProbeChannel::Path => write!(f, "path"),
+            Va2ProbeChannel::Query => write!(f, "query"),
+            Va2ProbeChannel::Header => write!(f, "header"),
+            Va2ProbeChannel::Body => write!(f, "body"),
+            Va2ProbeChannel::Method => write!(f, "method"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Va2CampaignStep {
     pub id: u32,
@@ -48,6 +70,9 @@ pub struct Va2CampaignStep {
     pub delay_ms: u64,
     pub notes: String,
     pub expected_equivalence: Option<u32>,
+    /// Which request channel this step perturbs (None for non-probe steps)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<Va2ProbeChannel>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -203,6 +228,19 @@ pub struct Va2DifferentialResult {
     pub body_length_pct_change: f64,
     /// WAF discriminated between baseline and this variant
     pub discriminated: bool,
+    /// Which channel this differential result corresponds to
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<Va2ProbeChannel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Va2ChannelCoverage {
+    /// Per-channel discrimination rate (0.0 = no discrimination, 1.0 = all probes discriminated)
+    pub channels: HashMap<Va2ProbeChannel, f64>,
+    /// Channels where WAF showed zero discrimination
+    pub blind_spots: Vec<Va2ProbeChannel>,
+    /// Overall multi-channel coverage score (0.0-1.0)
+    pub coverage_score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -234,6 +272,8 @@ pub struct Va2RunReport {
     pub pmi: Va2PmiScore,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub differential: Vec<Va2DifferentialResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_coverage: Option<Va2ChannelCoverage>,
 }
 
 pub struct Va2Runner {
@@ -290,8 +330,13 @@ impl Va2Runner {
                         }
                         if let Some(ref_id) = step.expected_equivalence {
                             if let Some(ref_resp) = baseline_responses.get(&ref_id) {
-                                differential_results
-                                    .push(compute_differential(step.id, ref_id, ref_resp, &resp));
+                                differential_results.push(compute_differential(
+                                    step.id,
+                                    ref_id,
+                                    ref_resp,
+                                    &resp,
+                                    step.channel,
+                                ));
                             }
                         }
                     }
@@ -347,6 +392,7 @@ impl Va2Runner {
             &differential_results,
         );
         let pmi = compute_pmi(&wbf);
+        let channel_coverage = compute_channel_coverage(&differential_results);
 
         Ok(Va2RunReport {
             target_url: plan.target_url.clone(),
@@ -368,6 +414,7 @@ impl Va2Runner {
             wbf,
             pmi,
             differential: differential_results,
+            channel_coverage,
         })
     }
 }
@@ -455,6 +502,7 @@ fn compute_differential(
     baseline_id: u32,
     baseline: &Va2HttpResponse,
     variant: &Va2HttpResponse,
+    channel: Option<Va2ProbeChannel>,
 ) -> Va2DifferentialResult {
     let status_delta = baseline.status.abs_diff(variant.status);
     let baseline_len = baseline.body.len() as f64;
@@ -474,7 +522,48 @@ fn compute_differential(
         status_delta,
         body_length_pct_change: pct_change,
         discriminated,
+        channel,
     }
+}
+
+fn compute_channel_coverage(results: &[Va2DifferentialResult]) -> Option<Va2ChannelCoverage> {
+    let mut per_channel: HashMap<Va2ProbeChannel, (usize, usize)> = HashMap::new();
+    for r in results {
+        if let Some(ch) = r.channel {
+            let entry = per_channel.entry(ch).or_insert((0, 0));
+            entry.0 += 1; // total
+            if r.discriminated {
+                entry.1 += 1; // discriminated
+            }
+        }
+    }
+    if per_channel.is_empty() {
+        return None;
+    }
+    let mut channels = HashMap::new();
+    let mut blind_spots = Vec::new();
+    for (ch, (total, disc)) in &per_channel {
+        let rate = if *total > 0 {
+            *disc as f64 / *total as f64
+        } else {
+            0.0
+        };
+        channels.insert(*ch, rate);
+        if rate == 0.0 {
+            blind_spots.push(*ch);
+        }
+    }
+    blind_spots.sort_by_key(|c| format!("{c:?}"));
+    let coverage_score = if channels.is_empty() {
+        0.0
+    } else {
+        channels.values().sum::<f64>() / channels.len() as f64
+    };
+    Some(Va2ChannelCoverage {
+        channels,
+        blind_spots,
+        coverage_score,
+    })
 }
 
 fn update_statefulness(
@@ -749,6 +838,7 @@ pub fn build_va2_campaign_plan(
                         delay_ms: 350,
                         notes: "baseline request".to_string(),
                         expected_equivalence: None,
+                        channel: None,
                     });
                     next_id += 1;
                 }
@@ -769,92 +859,213 @@ pub fn build_va2_campaign_plan(
                         delay_ms: 400,
                         notes: "equivalent path variance".to_string(),
                         expected_equivalence: Some(1),
+                        channel: None,
                     });
                     next_id += 1;
                 }
 
-                // Paired-control probes matching VA1 attack categories.
+                // Multi-channel paired-control probes.
                 // Each pair: benign control, then suspicious variant referencing it.
                 struct PairedProbe {
+                    channel: Va2ProbeChannel,
                     benign_note: &'static str,
+                    benign_method: &'static str,
                     benign_path: &'static str,
                     benign_query: Option<&'static str>,
+                    benign_headers: &'static [(&'static str, &'static str)],
+                    benign_body: Option<&'static str>,
                     attack_note: &'static str,
+                    attack_method: &'static str,
                     attack_path: &'static str,
                     attack_query: Option<&'static str>,
+                    attack_headers: &'static [(&'static str, &'static str)],
+                    attack_body: Option<&'static str>,
                 }
 
                 let paired_probes = [
+                    // Existing query-channel probes
                     PairedProbe {
+                        channel: Va2ProbeChannel::Query,
                         benign_note: "sqli-control",
+                        benign_method: "GET",
                         benign_path: "/",
                         benign_query: Some("search=test"),
+                        benign_headers: &[],
+                        benign_body: None,
                         attack_note: "sqli-probe",
+                        attack_method: "GET",
                         attack_path: "/",
                         attack_query: Some("search=1'+OR+'1'='1"),
+                        attack_headers: &[],
+                        attack_body: None,
                     },
                     PairedProbe {
+                        channel: Va2ProbeChannel::Query,
                         benign_note: "xss-control",
+                        benign_method: "GET",
                         benign_path: "/",
                         benign_query: Some("q=hello"),
+                        benign_headers: &[],
+                        benign_body: None,
                         attack_note: "xss-probe",
+                        attack_method: "GET",
                         attack_path: "/",
                         attack_query: Some("q=<script>alert(1)</script>"),
+                        attack_headers: &[],
+                        attack_body: None,
                     },
+                    // Path-channel probe
                     PairedProbe {
+                        channel: Va2ProbeChannel::Path,
                         benign_note: "pt-control",
+                        benign_method: "GET",
                         benign_path: "/api/v1/status",
                         benign_query: None,
+                        benign_headers: &[],
+                        benign_body: None,
                         attack_note: "pt-probe",
+                        attack_method: "GET",
                         attack_path: "/../../etc/passwd",
                         attack_query: None,
+                        attack_headers: &[],
+                        attack_body: None,
                     },
+                    // Query-channel probes
                     PairedProbe {
+                        channel: Va2ProbeChannel::Query,
                         benign_note: "cmdi-control",
+                        benign_method: "GET",
                         benign_path: "/",
                         benign_query: Some("cmd=list"),
+                        benign_headers: &[],
+                        benign_body: None,
                         attack_note: "cmdi-probe",
+                        attack_method: "GET",
                         attack_path: "/",
                         attack_query: Some("cmd=;cat+/etc/passwd"),
+                        attack_headers: &[],
+                        attack_body: None,
                     },
                     PairedProbe {
+                        channel: Va2ProbeChannel::Query,
                         benign_note: "proto-control",
+                        benign_method: "GET",
                         benign_path: "/",
                         benign_query: Some("format=json"),
+                        benign_headers: &[],
+                        benign_body: None,
                         attack_note: "proto-probe",
+                        attack_method: "GET",
                         attack_path: "/",
                         attack_query: Some("format=../../etc/passwd%00.json"),
+                        attack_headers: &[],
+                        attack_body: None,
+                    },
+                    // Header-channel probes
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Header,
+                        benign_note: "hdr-xss-control",
+                        benign_method: "GET",
+                        benign_path: "/",
+                        benign_query: Some("va2=hdr1"),
+                        benign_headers: &[("Referer", "https://example.com")],
+                        benign_body: None,
+                        attack_note: "hdr-xss-probe",
+                        attack_method: "GET",
+                        attack_path: "/",
+                        attack_query: Some("va2=hdr1"),
+                        attack_headers: &[("Referer", "<script>alert(1)</script>")],
+                        attack_body: None,
+                    },
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Header,
+                        benign_note: "hdr-sqli-control",
+                        benign_method: "GET",
+                        benign_path: "/",
+                        benign_query: Some("va2=hdr2"),
+                        benign_headers: &[("X-Search", "test")],
+                        benign_body: None,
+                        attack_note: "hdr-sqli-probe",
+                        attack_method: "GET",
+                        attack_path: "/",
+                        attack_query: Some("va2=hdr2"),
+                        attack_headers: &[("X-Search", "1' OR '1'='1")],
+                        attack_body: None,
+                    },
+                    // Body-channel probe
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Body,
+                        benign_note: "body-sqli-control",
+                        benign_method: "POST",
+                        benign_path: "/",
+                        benign_query: Some("va2=body1"),
+                        benign_headers: &[("Content-Type", "application/x-www-form-urlencoded")],
+                        benign_body: Some("search=test"),
+                        attack_note: "body-sqli-probe",
+                        attack_method: "POST",
+                        attack_path: "/",
+                        attack_query: Some("va2=body1"),
+                        attack_headers: &[("Content-Type", "application/x-www-form-urlencoded")],
+                        attack_body: Some("search=1'+OR+'1'='1"),
+                    },
+                    // Method-channel probe
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Method,
+                        benign_note: "method-control",
+                        benign_method: "OPTIONS",
+                        benign_path: "/api/v1/status",
+                        benign_query: None,
+                        benign_headers: &[],
+                        benign_body: None,
+                        attack_note: "method-probe",
+                        attack_method: "DELETE",
+                        attack_path: "/api/v1/status",
+                        attack_query: None,
+                        attack_headers: &[],
+                        attack_body: None,
                     },
                 ];
 
                 for pair in &paired_probes {
                     let control_id = next_id;
+                    let benign_headers: HashMap<String, String> = pair
+                        .benign_headers
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .collect();
                     steps.push(Va2CampaignStep {
                         id: next_id,
                         phase: *phase,
                         kind: Va2StepKind::Equivalence,
-                        method: "GET".to_string(),
+                        method: pair.benign_method.to_string(),
                         path: pair.benign_path.to_string(),
                         query: pair.benign_query.map(String::from),
-                        headers: HashMap::new(),
-                        body: None,
+                        headers: benign_headers,
+                        body: pair.benign_body.map(String::from),
                         delay_ms: 400,
                         notes: format!("paired-control: {}", pair.benign_note),
                         expected_equivalence: None,
+                        channel: Some(pair.channel),
                     });
                     next_id += 1;
+                    let attack_headers: HashMap<String, String> = pair
+                        .attack_headers
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .collect();
                     steps.push(Va2CampaignStep {
                         id: next_id,
                         phase: *phase,
                         kind: Va2StepKind::Equivalence,
-                        method: "GET".to_string(),
+                        method: pair.attack_method.to_string(),
                         path: pair.attack_path.to_string(),
                         query: pair.attack_query.map(String::from),
-                        headers: HashMap::new(),
-                        body: None,
+                        headers: attack_headers,
+                        body: pair.attack_body.map(String::from),
                         delay_ms: 400,
                         notes: format!("paired-control: {}", pair.attack_note),
                         expected_equivalence: Some(control_id),
+                        channel: Some(pair.channel),
                     });
                     next_id += 1;
                 }
@@ -874,6 +1085,7 @@ pub fn build_va2_campaign_plan(
                     delay_ms: 450,
                     notes: "state mutation probe".to_string(),
                     expected_equivalence: None,
+                    channel: None,
                 });
                 next_id += 1;
             }
@@ -891,6 +1103,7 @@ pub fn build_va2_campaign_plan(
                         delay_ms: 150,
                         notes: "rate ramp step".to_string(),
                         expected_equivalence: None,
+                        channel: None,
                     });
                     next_id += 1;
                 }
@@ -913,6 +1126,7 @@ pub fn build_va2_campaign_plan(
                     delay_ms: 500,
                     notes: "challenge interaction probe".to_string(),
                     expected_equivalence: None,
+                    channel: None,
                 });
                 next_id += 1;
             }
@@ -969,11 +1183,44 @@ mod tests {
     impl Va2HttpAdapter for StubAdapter {
         async fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
             let url = &request.url;
-            // Detect attack patterns for paired-probe differential testing
-            let is_attack = url.contains("OR")
+
+            // Check for DELETE method → 405
+            if request.method == "DELETE" {
+                return Ok(Va2HttpResponse {
+                    status: 405,
+                    headers: HashMap::new(),
+                    body: "method not allowed".to_string(),
+                });
+            }
+
+            // Detect attack patterns in URL for paired-probe differential testing
+            let url_attack = url.contains("OR")
                 || url.contains("script")
                 || url.contains("passwd")
                 || url.contains("cat+");
+
+            // Detect attack patterns in headers
+            let header_attack = request.headers.iter().any(|(_, v)| {
+                v.contains("OR")
+                    || v.contains("script")
+                    || v.contains("passwd")
+                    || v.contains("cat+")
+            });
+
+            // Detect attack patterns in body
+            let body_attack = request
+                .body
+                .as_ref()
+                .map(|b| {
+                    b.contains("OR")
+                        || b.contains("script")
+                        || b.contains("passwd")
+                        || b.contains("cat+")
+                })
+                .unwrap_or(false);
+
+            let is_attack = url_attack || header_attack || body_attack;
+
             let (status, body) = if is_attack {
                 (403, "access denied".to_string())
             } else if url.contains("protocol") {
@@ -1089,7 +1336,7 @@ mod tests {
                 &phases,
                 Va2CampaignConfig {
                     seed: 1,
-                    budget: 30,
+                    budget: 40,
                 },
             )
             .unwrap();
@@ -1277,7 +1524,7 @@ mod tests {
             headers: HashMap::new(),
             body: "baseline ok".to_string(),
         };
-        let result = compute_differential(2, 1, &baseline, &variant);
+        let result = compute_differential(2, 1, &baseline, &variant, None);
         assert_eq!(result.step_id, 2);
         assert_eq!(result.baseline_step_id, 1);
         assert_eq!(result.status_delta, 0);
@@ -1297,9 +1544,10 @@ mod tests {
             headers: HashMap::new(),
             body: "access denied".to_string(),
         };
-        let result = compute_differential(2, 1, &baseline, &variant);
+        let result = compute_differential(2, 1, &baseline, &variant, Some(Va2ProbeChannel::Query));
         assert_eq!(result.status_delta, 203);
         assert!(result.discriminated);
+        assert_eq!(result.channel, Some(Va2ProbeChannel::Query));
     }
 
     #[test]
@@ -1311,6 +1559,7 @@ mod tests {
                 status_delta: 203,
                 body_length_pct_change: 0.5,
                 discriminated: true,
+                channel: Some(Va2ProbeChannel::Query),
             },
             Va2DifferentialResult {
                 step_id: 4,
@@ -1318,6 +1567,7 @@ mod tests {
                 status_delta: 0,
                 body_length_pct_change: 0.0,
                 discriminated: false,
+                channel: Some(Va2ProbeChannel::Header),
             },
         ];
         let wbf = compute_wbf(
@@ -1339,15 +1589,15 @@ mod tests {
             budget: 60,
         };
         let plan = build_va2_campaign_plan("https://example.com", &phases, config).unwrap();
-        // Should have baseline (3) + path variance (3) + paired probes (5 pairs = 10) = 16 steps
-        assert_eq!(plan.steps.len(), 16);
+        // Should have baseline (3) + path variance (3) + paired probes (9 pairs = 18) = 24 steps
+        assert_eq!(plan.steps.len(), 24);
         // Check paired probes have correct expected_equivalence references
         let paired_steps: Vec<_> = plan
             .steps
             .iter()
             .filter(|s| s.notes.starts_with("paired-control:"))
             .collect();
-        assert_eq!(paired_steps.len(), 10);
+        assert_eq!(paired_steps.len(), 18);
         // Every second paired step should reference the one before it
         for chunk in paired_steps.chunks(2) {
             assert!(chunk[0].expected_equivalence.is_none());
@@ -1386,5 +1636,232 @@ mod tests {
             assert!(report.wbf.differential_score > 0.0);
         })
         .await;
+    }
+
+    #[test]
+    fn test_va2_multichannel_probes_in_plan() {
+        let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
+        let config = Va2CampaignConfig {
+            seed: 1,
+            budget: 60,
+        };
+        let plan = build_va2_campaign_plan("https://example.com", &phases, config).unwrap();
+        let paired_steps: Vec<_> = plan
+            .steps
+            .iter()
+            .filter(|s| s.notes.starts_with("paired-control:"))
+            .collect();
+        // Verify all 5 channel types are represented
+        let channels: std::collections::HashSet<_> =
+            paired_steps.iter().filter_map(|s| s.channel).collect();
+        assert!(channels.contains(&Va2ProbeChannel::Query));
+        assert!(channels.contains(&Va2ProbeChannel::Path));
+        assert!(channels.contains(&Va2ProbeChannel::Header));
+        assert!(channels.contains(&Va2ProbeChannel::Body));
+        assert!(channels.contains(&Va2ProbeChannel::Method));
+        assert_eq!(channels.len(), 5);
+        // All paired steps should have a channel tag
+        assert!(paired_steps.iter().all(|s| s.channel.is_some()));
+    }
+
+    #[tokio::test]
+    async fn test_va2_header_channel_discrimination() {
+        with_temp_home(|temp| async move {
+            write_consent(&temp, &["example.com"]);
+            let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
+            let mut plan = build_va2_campaign_plan(
+                "https://example.com",
+                &phases,
+                Va2CampaignConfig {
+                    seed: 1,
+                    budget: 60,
+                },
+            )
+            .unwrap();
+            for step in &mut plan.steps {
+                step.delay_ms = 0;
+            }
+            let runner = Va2Runner::with_adapter(Box::new(StubAdapter)).unwrap();
+            let report = runner.run_plan(plan).await.unwrap();
+            // StubAdapter blocks header-based attacks (containing OR, script)
+            let header_disc: Vec<_> = report
+                .differential
+                .iter()
+                .filter(|d| d.channel == Some(Va2ProbeChannel::Header) && d.discriminated)
+                .collect();
+            assert!(
+                !header_disc.is_empty(),
+                "expected header channel discrimination"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_va2_body_channel_discrimination() {
+        with_temp_home(|temp| async move {
+            write_consent(&temp, &["example.com"]);
+            let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
+            let mut plan = build_va2_campaign_plan(
+                "https://example.com",
+                &phases,
+                Va2CampaignConfig {
+                    seed: 1,
+                    budget: 60,
+                },
+            )
+            .unwrap();
+            for step in &mut plan.steps {
+                step.delay_ms = 0;
+            }
+            let runner = Va2Runner::with_adapter(Box::new(StubAdapter)).unwrap();
+            let report = runner.run_plan(plan).await.unwrap();
+            let body_disc: Vec<_> = report
+                .differential
+                .iter()
+                .filter(|d| d.channel == Some(Va2ProbeChannel::Body) && d.discriminated)
+                .collect();
+            assert!(
+                !body_disc.is_empty(),
+                "expected body channel discrimination"
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_va2_method_channel_discrimination() {
+        with_temp_home(|temp| async move {
+            write_consent(&temp, &["example.com"]);
+            let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
+            let mut plan = build_va2_campaign_plan(
+                "https://example.com",
+                &phases,
+                Va2CampaignConfig {
+                    seed: 1,
+                    budget: 60,
+                },
+            )
+            .unwrap();
+            for step in &mut plan.steps {
+                step.delay_ms = 0;
+            }
+            let runner = Va2Runner::with_adapter(Box::new(StubAdapter)).unwrap();
+            let report = runner.run_plan(plan).await.unwrap();
+            // StubAdapter returns 405 for DELETE, 200 for OPTIONS → discrimination
+            let method_disc: Vec<_> = report
+                .differential
+                .iter()
+                .filter(|d| d.channel == Some(Va2ProbeChannel::Method) && d.discriminated)
+                .collect();
+            assert!(
+                !method_disc.is_empty(),
+                "expected method channel discrimination"
+            );
+        })
+        .await;
+    }
+
+    #[test]
+    fn test_va2_channel_coverage_computation() {
+        let results = vec![
+            Va2DifferentialResult {
+                step_id: 2,
+                baseline_step_id: 1,
+                status_delta: 203,
+                body_length_pct_change: 0.5,
+                discriminated: true,
+                channel: Some(Va2ProbeChannel::Query),
+            },
+            Va2DifferentialResult {
+                step_id: 4,
+                baseline_step_id: 3,
+                status_delta: 0,
+                body_length_pct_change: 0.0,
+                discriminated: false,
+                channel: Some(Va2ProbeChannel::Header),
+            },
+            Va2DifferentialResult {
+                step_id: 6,
+                baseline_step_id: 5,
+                status_delta: 200,
+                body_length_pct_change: 0.8,
+                discriminated: true,
+                channel: Some(Va2ProbeChannel::Header),
+            },
+        ];
+        let coverage = compute_channel_coverage(&results).unwrap();
+        // Query: 1/1 = 1.0, Header: 1/2 = 0.5
+        assert!((coverage.channels[&Va2ProbeChannel::Query] - 1.0).abs() < 0.01);
+        assert!((coverage.channels[&Va2ProbeChannel::Header] - 0.5).abs() < 0.01);
+        assert!(coverage.blind_spots.is_empty());
+        // Coverage = (1.0 + 0.5) / 2 = 0.75
+        assert!((coverage.coverage_score - 0.75).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_va2_channel_coverage_all_blocked() {
+        let results = vec![
+            Va2DifferentialResult {
+                step_id: 2,
+                baseline_step_id: 1,
+                status_delta: 203,
+                body_length_pct_change: 0.5,
+                discriminated: true,
+                channel: Some(Va2ProbeChannel::Query),
+            },
+            Va2DifferentialResult {
+                step_id: 4,
+                baseline_step_id: 3,
+                status_delta: 200,
+                body_length_pct_change: 0.8,
+                discriminated: true,
+                channel: Some(Va2ProbeChannel::Header),
+            },
+            Va2DifferentialResult {
+                step_id: 6,
+                baseline_step_id: 5,
+                status_delta: 100,
+                body_length_pct_change: 0.9,
+                discriminated: true,
+                channel: Some(Va2ProbeChannel::Body),
+            },
+        ];
+        let coverage = compute_channel_coverage(&results).unwrap();
+        assert!(coverage.blind_spots.is_empty());
+        assert!((coverage.coverage_score - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_va2_channel_coverage_no_waf() {
+        let results = vec![
+            Va2DifferentialResult {
+                step_id: 2,
+                baseline_step_id: 1,
+                status_delta: 0,
+                body_length_pct_change: 0.0,
+                discriminated: false,
+                channel: Some(Va2ProbeChannel::Query),
+            },
+            Va2DifferentialResult {
+                step_id: 4,
+                baseline_step_id: 3,
+                status_delta: 0,
+                body_length_pct_change: 0.0,
+                discriminated: false,
+                channel: Some(Va2ProbeChannel::Header),
+            },
+            Va2DifferentialResult {
+                step_id: 6,
+                baseline_step_id: 5,
+                status_delta: 0,
+                body_length_pct_change: 0.0,
+                discriminated: false,
+                channel: Some(Va2ProbeChannel::Body),
+            },
+        ];
+        let coverage = compute_channel_coverage(&results).unwrap();
+        assert_eq!(coverage.blind_spots.len(), 3);
+        assert!((coverage.coverage_score - 0.0).abs() < 0.01);
     }
 }
