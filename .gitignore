@@ -19,3 +19,7 @@ waf-detect.pub
 
 # Local docs
 PRD_*.md
+node_modules
+
+# Session memory (local only)
+MEMORY.md
