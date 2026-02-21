@@ -2,6 +2,8 @@
 //!
 //! Behavioral WAF profiling with deterministic, replayable campaigns.
 
+pub mod fixture;
+
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -194,11 +196,22 @@ pub struct Va2ThrottleCurve {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Va2DifferentialResult {
+    pub step_id: u32,
+    pub baseline_step_id: u32,
+    pub status_delta: u16,
+    pub body_length_pct_change: f64,
+    /// WAF discriminated between baseline and this variant
+    pub discriminated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Va2WbfSummary {
     pub normalization_score: f64,
     pub statefulness_score: f64,
     pub challenge_score: f64,
     pub throttle_score: f64,
+    pub differential_score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -219,6 +232,8 @@ pub struct Va2RunReport {
     pub throttle: Option<Va2ThrottleCurve>,
     pub wbf: Va2WbfSummary,
     pub pmi: Va2PmiScore,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub differential: Vec<Va2DifferentialResult>,
 }
 
 pub struct Va2Runner {
@@ -247,6 +262,8 @@ impl Va2Runner {
         let mut results = Vec::with_capacity(plan.steps.len());
         let mut baseline_samples = Vec::new();
         let mut variance_samples: Vec<(u16, usize)> = Vec::new();
+        let mut baseline_responses: HashMap<u32, Va2HttpResponse> = HashMap::new();
+        let mut differential_results: Vec<Va2DifferentialResult> = Vec::new();
         let mut state_summary = Va2StateSummary::default();
         let mut challenge_profile = Va2ChallengeProfile::default();
         let mut throttle_samples: Vec<u128> = Vec::new();
@@ -262,10 +279,21 @@ impl Va2Runner {
             match response {
                 Ok(resp) => {
                     if step.phase == Va2Phase::Baseline {
+                        baseline_responses.insert(step.id, resp.clone());
                         baseline_samples.push(resp.clone());
                     }
                     if step.phase == Va2Phase::ProtocolVariance {
                         variance_samples.push((resp.status, resp.body.len()));
+                        if step.expected_equivalence.is_none() {
+                            // Control step — store for paired comparison
+                            baseline_responses.insert(step.id, resp.clone());
+                        }
+                        if let Some(ref_id) = step.expected_equivalence {
+                            if let Some(ref_resp) = baseline_responses.get(&ref_id) {
+                                differential_results
+                                    .push(compute_differential(step.id, ref_id, ref_resp, &resp));
+                            }
+                        }
                     }
                     if step.phase == Va2Phase::StateEscalation {
                         update_statefulness(&mut state_summary, &resp, baseline_samples.first());
@@ -316,6 +344,7 @@ impl Va2Runner {
             &state_summary,
             &challenge_profile,
             &throttle,
+            &differential_results,
         );
         let pmi = compute_pmi(&wbf);
 
@@ -338,6 +367,7 @@ impl Va2Runner {
             throttle,
             wbf,
             pmi,
+            differential: differential_results,
         })
     }
 }
@@ -417,6 +447,33 @@ fn compute_normalization_variance(
         baseline_status,
         max_status_delta: max_delta,
         avg_length_delta: avg_len_delta,
+    }
+}
+
+fn compute_differential(
+    step_id: u32,
+    baseline_id: u32,
+    baseline: &Va2HttpResponse,
+    variant: &Va2HttpResponse,
+) -> Va2DifferentialResult {
+    let status_delta = baseline.status.abs_diff(variant.status);
+    let baseline_len = baseline.body.len() as f64;
+    let variant_len = variant.body.len() as f64;
+    let pct_change = if baseline_len > 0.0 {
+        ((variant_len - baseline_len) / baseline_len).abs()
+    } else if variant_len > 0.0 {
+        1.0
+    } else {
+        0.0
+    };
+    // Discrimination: status changed OR body length shifted >15%
+    let discriminated = status_delta > 0 || pct_change > 0.15;
+    Va2DifferentialResult {
+        step_id,
+        baseline_step_id: baseline_id,
+        status_delta,
+        body_length_pct_change: pct_change,
+        discriminated,
     }
 }
 
@@ -571,6 +628,7 @@ fn compute_wbf(
     statefulness: &Va2StateSummary,
     challenge: &Va2ChallengeProfile,
     throttle: &Option<Va2ThrottleCurve>,
+    differential: &[Va2DifferentialResult],
 ) -> Va2WbfSummary {
     let normalization_score = normalization
         .as_ref()
@@ -586,19 +644,27 @@ fn compute_wbf(
         .as_ref()
         .map(|t| if t.triggered { 1.0 } else { 0.2 })
         .unwrap_or(0.0);
+    let differential_score = if differential.is_empty() {
+        0.0
+    } else {
+        let disc = differential.iter().filter(|d| d.discriminated).count();
+        (disc as f64 / differential.len() as f64).min(1.0)
+    };
     Va2WbfSummary {
         normalization_score,
         statefulness_score,
         challenge_score,
         throttle_score,
+        differential_score,
     }
 }
 
 fn compute_pmi(wbf: &Va2WbfSummary) -> Va2PmiScore {
-    let raw = (wbf.normalization_score * 0.25)
-        + (wbf.statefulness_score * 0.25)
-        + (wbf.challenge_score * 0.3)
-        + (wbf.throttle_score * 0.2);
+    let raw = (wbf.normalization_score * 0.20)
+        + (wbf.statefulness_score * 0.20)
+        + (wbf.challenge_score * 0.25)
+        + (wbf.throttle_score * 0.15)
+        + (wbf.differential_score * 0.20);
     let score = (raw * 100.0).round();
     let label = if score >= 80.0 {
         "strong"
@@ -703,6 +769,92 @@ pub fn build_va2_campaign_plan(
                         delay_ms: 400,
                         notes: "equivalent path variance".to_string(),
                         expected_equivalence: Some(1),
+                    });
+                    next_id += 1;
+                }
+
+                // Paired-control probes matching VA1 attack categories.
+                // Each pair: benign control, then suspicious variant referencing it.
+                struct PairedProbe {
+                    benign_note: &'static str,
+                    benign_path: &'static str,
+                    benign_query: Option<&'static str>,
+                    attack_note: &'static str,
+                    attack_path: &'static str,
+                    attack_query: Option<&'static str>,
+                }
+
+                let paired_probes = [
+                    PairedProbe {
+                        benign_note: "sqli-control",
+                        benign_path: "/",
+                        benign_query: Some("search=test"),
+                        attack_note: "sqli-probe",
+                        attack_path: "/",
+                        attack_query: Some("search=1'+OR+'1'='1"),
+                    },
+                    PairedProbe {
+                        benign_note: "xss-control",
+                        benign_path: "/",
+                        benign_query: Some("q=hello"),
+                        attack_note: "xss-probe",
+                        attack_path: "/",
+                        attack_query: Some("q=<script>alert(1)</script>"),
+                    },
+                    PairedProbe {
+                        benign_note: "pt-control",
+                        benign_path: "/api/v1/status",
+                        benign_query: None,
+                        attack_note: "pt-probe",
+                        attack_path: "/../../etc/passwd",
+                        attack_query: None,
+                    },
+                    PairedProbe {
+                        benign_note: "cmdi-control",
+                        benign_path: "/",
+                        benign_query: Some("cmd=list"),
+                        attack_note: "cmdi-probe",
+                        attack_path: "/",
+                        attack_query: Some("cmd=;cat+/etc/passwd"),
+                    },
+                    PairedProbe {
+                        benign_note: "proto-control",
+                        benign_path: "/",
+                        benign_query: Some("format=json"),
+                        attack_note: "proto-probe",
+                        attack_path: "/",
+                        attack_query: Some("format=../../etc/passwd%00.json"),
+                    },
+                ];
+
+                for pair in &paired_probes {
+                    let control_id = next_id;
+                    steps.push(Va2CampaignStep {
+                        id: next_id,
+                        phase: *phase,
+                        kind: Va2StepKind::Equivalence,
+                        method: "GET".to_string(),
+                        path: pair.benign_path.to_string(),
+                        query: pair.benign_query.map(String::from),
+                        headers: HashMap::new(),
+                        body: None,
+                        delay_ms: 400,
+                        notes: format!("paired-control: {}", pair.benign_note),
+                        expected_equivalence: None,
+                    });
+                    next_id += 1;
+                    steps.push(Va2CampaignStep {
+                        id: next_id,
+                        phase: *phase,
+                        kind: Va2StepKind::Equivalence,
+                        method: "GET".to_string(),
+                        path: pair.attack_path.to_string(),
+                        query: pair.attack_query.map(String::from),
+                        headers: HashMap::new(),
+                        body: None,
+                        delay_ms: 400,
+                        notes: format!("paired-control: {}", pair.attack_note),
+                        expected_equivalence: Some(control_id),
                     });
                     next_id += 1;
                 }
@@ -816,19 +968,27 @@ mod tests {
     #[async_trait]
     impl Va2HttpAdapter for StubAdapter {
         async fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
-            let (status, body) = if request.url.contains("protocol") {
+            let url = &request.url;
+            // Detect attack patterns for paired-probe differential testing
+            let is_attack = url.contains("OR")
+                || url.contains("script")
+                || url.contains("passwd")
+                || url.contains("cat+");
+            let (status, body) = if is_attack {
+                (403, "access denied".to_string())
+            } else if url.contains("protocol") {
                 (418, "teapot".to_string())
-            } else if request.url.contains("state") {
+            } else if url.contains("state") {
                 (401, "state escalation".to_string())
-            } else if request.url.contains("challenge") {
+            } else if url.contains("challenge") {
                 (403, "javascript challenge captcha".to_string())
-            } else if request.url.contains("error") {
+            } else if url.contains("error") {
                 (500, "server error".to_string())
             } else {
                 (200, "baseline ok".to_string())
             };
             let mut headers = HashMap::new();
-            if request.url.contains("state") || request.url.contains("challenge") {
+            if url.contains("state") || url.contains("challenge") {
                 headers.insert("set-cookie".to_string(), "va2=1".to_string());
             }
             Ok(Va2HttpResponse {
@@ -929,7 +1089,7 @@ mod tests {
                 &phases,
                 Va2CampaignConfig {
                     seed: 1,
-                    budget: 10,
+                    budget: 30,
                 },
             )
             .unwrap();
@@ -1009,6 +1169,7 @@ mod tests {
             statefulness_score: 1.0,
             challenge_score: 1.0,
             throttle_score: 1.0,
+            differential_score: 1.0,
         };
         let pmi = compute_pmi(&wbf);
         assert_eq!(pmi.label, "strong");
@@ -1102,5 +1263,128 @@ mod tests {
             ChallengeType::RateLimitSoftBlock
         );
         assert_eq!(profile.detected_challenges[0].confidence, 0.95);
+    }
+
+    #[test]
+    fn test_va2_differential_no_discrimination() {
+        let baseline = Va2HttpResponse {
+            status: 200,
+            headers: HashMap::new(),
+            body: "baseline ok".to_string(),
+        };
+        let variant = Va2HttpResponse {
+            status: 200,
+            headers: HashMap::new(),
+            body: "baseline ok".to_string(),
+        };
+        let result = compute_differential(2, 1, &baseline, &variant);
+        assert_eq!(result.step_id, 2);
+        assert_eq!(result.baseline_step_id, 1);
+        assert_eq!(result.status_delta, 0);
+        assert!(result.body_length_pct_change < 0.01);
+        assert!(!result.discriminated);
+    }
+
+    #[test]
+    fn test_va2_differential_detects_discrimination() {
+        let baseline = Va2HttpResponse {
+            status: 200,
+            headers: HashMap::new(),
+            body: "baseline ok".to_string(),
+        };
+        let variant = Va2HttpResponse {
+            status: 403,
+            headers: HashMap::new(),
+            body: "access denied".to_string(),
+        };
+        let result = compute_differential(2, 1, &baseline, &variant);
+        assert_eq!(result.status_delta, 203);
+        assert!(result.discriminated);
+    }
+
+    #[test]
+    fn test_va2_wbf_includes_differential() {
+        let diff_results = vec![
+            Va2DifferentialResult {
+                step_id: 2,
+                baseline_step_id: 1,
+                status_delta: 203,
+                body_length_pct_change: 0.5,
+                discriminated: true,
+            },
+            Va2DifferentialResult {
+                step_id: 4,
+                baseline_step_id: 3,
+                status_delta: 0,
+                body_length_pct_change: 0.0,
+                discriminated: false,
+            },
+        ];
+        let wbf = compute_wbf(
+            &None,
+            &Va2StateSummary::default(),
+            &Va2ChallengeProfile::default(),
+            &None,
+            &diff_results,
+        );
+        // 1 out of 2 discriminated = 0.5
+        assert!((wbf.differential_score - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_va2_paired_probes_in_plan() {
+        let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
+        let config = Va2CampaignConfig {
+            seed: 1,
+            budget: 60,
+        };
+        let plan = build_va2_campaign_plan("https://example.com", &phases, config).unwrap();
+        // Should have baseline (3) + path variance (3) + paired probes (5 pairs = 10) = 16 steps
+        assert_eq!(plan.steps.len(), 16);
+        // Check paired probes have correct expected_equivalence references
+        let paired_steps: Vec<_> = plan
+            .steps
+            .iter()
+            .filter(|s| s.notes.starts_with("paired-control:"))
+            .collect();
+        assert_eq!(paired_steps.len(), 10);
+        // Every second paired step should reference the one before it
+        for chunk in paired_steps.chunks(2) {
+            assert!(chunk[0].expected_equivalence.is_none());
+            assert_eq!(chunk[1].expected_equivalence, Some(chunk[0].id));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_va2_differential_scoring_with_stub() {
+        with_temp_home(|temp| async move {
+            write_consent(&temp, &["example.com"]);
+            let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
+            let mut plan = build_va2_campaign_plan(
+                "https://example.com",
+                &phases,
+                Va2CampaignConfig {
+                    seed: 1,
+                    budget: 60,
+                },
+            )
+            .unwrap();
+            for step in &mut plan.steps {
+                step.delay_ms = 0;
+            }
+            let runner = Va2Runner::with_adapter(Box::new(StubAdapter)).unwrap();
+            let report = runner.run_plan(plan).await.unwrap();
+            // StubAdapter returns 403 for attack URLs (containing OR, script, passwd, cat+)
+            // so differential results should show discrimination
+            assert!(!report.differential.is_empty());
+            let discriminated = report
+                .differential
+                .iter()
+                .filter(|d| d.discriminated)
+                .count();
+            assert!(discriminated > 0, "expected some discriminated results");
+            assert!(report.wbf.differential_score > 0.0);
+        })
+        .await;
     }
 }

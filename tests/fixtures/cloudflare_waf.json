@@ -1,0 +1,90 @@
+{
+  "name": "cloudflare_waf",
+  "base_url": "https://example.com",
+  "responses": [
+    {
+      "key": "GET:/:",
+      "status": 200,
+      "headers": { "cf-ray": "abc123-SEA", "server": "cloudflare" },
+      "body": "<html>Welcome to example.com</html>"
+    },
+    {
+      "key": "GET:/:va2=eq0",
+      "status": 200,
+      "headers": { "cf-ray": "abc124-SEA", "server": "cloudflare" },
+      "body": "<html>Welcome to example.com</html>"
+    },
+    {
+      "key": "GET:/:va2=eq1",
+      "status": 200,
+      "headers": { "cf-ray": "abc125-SEA", "server": "cloudflare" },
+      "body": "<html>Welcome to example.com</html>"
+    },
+    {
+      "key": "GET:/:va2=eq2",
+      "status": 200,
+      "headers": { "cf-ray": "abc126-SEA", "server": "cloudflare" },
+      "body": "<html>Welcome to example.com</html>"
+    },
+    {
+      "key": "GET:/:search=test",
+      "status": 200,
+      "headers": { "cf-ray": "abc127-SEA" },
+      "body": "<html>Search results for test</html>"
+    },
+    {
+      "key": "GET:/:search=1'+OR+'1'='1",
+      "status": 403,
+      "headers": { "cf-ray": "abc128-SEA" },
+      "body": "<!DOCTYPE html><html><head><title>Attention Required!</title></head><body>access denied by Cloudflare WAF</body></html>"
+    },
+    {
+      "key": "GET:/:q=hello",
+      "status": 200,
+      "headers": { "cf-ray": "abc129-SEA" },
+      "body": "<html>Hello results</html>"
+    },
+    {
+      "key": "GET:/:q=<script>alert(1)</script>",
+      "status": 403,
+      "headers": { "cf-ray": "abc130-SEA" },
+      "body": "access denied"
+    },
+    {
+      "key": "GET:/api/v1/status:",
+      "status": 200,
+      "headers": {},
+      "body": "{\"status\":\"ok\"}"
+    },
+    {
+      "key": "GET:/../../etc/passwd:",
+      "status": 403,
+      "headers": {},
+      "body": "access denied"
+    },
+    {
+      "key": "GET:/:cmd=list",
+      "status": 200,
+      "headers": {},
+      "body": "<html>Command list</html>"
+    },
+    {
+      "key": "GET:/:cmd=;cat+/etc/passwd",
+      "status": 403,
+      "headers": {},
+      "body": "access denied"
+    },
+    {
+      "key": "GET:/:format=json",
+      "status": 200,
+      "headers": {},
+      "body": "{\"format\":\"json\"}"
+    },
+    {
+      "key": "GET:/:format=../../etc/passwd%00.json",
+      "status": 403,
+      "headers": {},
+      "body": "access denied"
+    }
+  ]
+}

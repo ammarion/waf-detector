@@ -1,0 +1,90 @@
+{
+  "name": "akamai_challenge",
+  "base_url": "https://akamai-protected.example.com",
+  "responses": [
+    {
+      "key": "GET:/:",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3", "server": "AkamaiGHost" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=eq0",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=eq1",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=eq2",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:search=test",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Search: test</html>"
+    },
+    {
+      "key": "GET:/:search=1'+OR+'1'='1",
+      "status": 503,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3", "set-cookie": "ak_bmsc=challenge" },
+      "body": "<html><head><script>javascript challenge</script></head><body>Checking your browser before accessing...</body></html>"
+    },
+    {
+      "key": "GET:/:q=hello",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "<html>Q: hello</html>"
+    },
+    {
+      "key": "GET:/:q=<script>alert(1)</script>",
+      "status": 403,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "access denied"
+    },
+    {
+      "key": "GET:/api/v1/status:",
+      "status": 200,
+      "headers": { "x-akamai-transformed": "9 12345 0 pmb=mRUM,3" },
+      "body": "{\"status\":\"ok\"}"
+    },
+    {
+      "key": "GET:/../../etc/passwd:",
+      "status": 403,
+      "headers": {},
+      "body": "access denied"
+    },
+    {
+      "key": "GET:/:cmd=list",
+      "status": 200,
+      "headers": {},
+      "body": "<html>list</html>"
+    },
+    {
+      "key": "GET:/:cmd=;cat+/etc/passwd",
+      "status": 403,
+      "headers": {},
+      "body": "access denied"
+    },
+    {
+      "key": "GET:/:format=json",
+      "status": 200,
+      "headers": {},
+      "body": "{\"format\":\"json\"}"
+    },
+    {
+      "key": "GET:/:format=../../etc/passwd%00.json",
+      "status": 403,
+      "headers": {},
+      "body": "access denied"
+    }
+  ]
+}

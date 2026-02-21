@@ -2,6 +2,7 @@
 
 use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, WafSmokeTest};
+use crate::posture::PostureBuilder;
 use crate::providers::{
     akamai::AkamaiProvider, aws::AwsProvider, azure::AzureProvider, cloudflare::CloudFlareProvider,
     f5::F5Provider, fastly::FastlyProvider, fortiweb::FortiWebProvider, imperva::ImpervaProvider,
@@ -132,6 +133,59 @@ impl SimpleCliApp {
         if matches.get_flag("va-schema") {
             let schema = crate::virtual_adversary::va_report_schema();
             println!("{}", serde_json::to_string_pretty(&schema)?);
+            return Ok(());
+        }
+
+        // Handle posture report
+        if let Some(url) = matches.get_one::<String>("posture") {
+            let normalized = self.normalize_url(url)?;
+            let detection_result = engine.detect(&normalized).await?;
+            let mut builder = PostureBuilder::new(&normalized).with_detection(&detection_result);
+
+            if matches.get_flag("posture-va2") {
+                let phases_raw = "baseline,protocol-variance";
+                let phases = parse_va2_phases(phases_raw)?;
+                let config = Va2CampaignConfig::default();
+                let mut plan = build_va2_campaign_plan(&normalized, &phases, config)?;
+                for step in &mut plan.steps {
+                    step.delay_ms = 0;
+                }
+                let runner = Va2Runner::new()?;
+                let report = runner.run_plan(plan).await?;
+                builder = builder.with_va2(&report);
+            }
+
+            let posture = builder.compute();
+
+            if matches.get_flag("posture-json") {
+                println!("{}", serde_json::to_string_pretty(&posture)?);
+            } else {
+                println!("Posture Report: {}", posture.target_url);
+                println!("  Grade:      {}", posture.grade);
+                println!("  Risk Score: {:.1}", posture.risk_score);
+                if let Some(det) = &posture.detection {
+                    if det.waf_detected {
+                        println!(
+                            "  WAF:        {} ({:.0}%)",
+                            det.waf_name.as_deref().unwrap_or("Unknown"),
+                            det.waf_confidence * 100.0
+                        );
+                    } else {
+                        println!("  WAF:        Not detected");
+                    }
+                }
+                if let Some(beh) = &posture.behavioral {
+                    println!("  VA2 PMI:    {:.0} ({})", beh.pmi_score, beh.pmi_label);
+                }
+                if let Some(enf) = &posture.enforcement {
+                    println!(
+                        "  VA1:        {} ({:.0}%)",
+                        enf.enforcement,
+                        enf.confidence_score * 100.0
+                    );
+                }
+                println!("  Summary:    {}", posture.summary);
+            }
             return Ok(());
         }
 
@@ -1272,6 +1326,27 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .value_parser(clap::value_parser!(u32))
                 .default_value("60")
                 .requires("va2"),
+        )
+        .arg(
+            Arg::new("posture")
+                .long("posture")
+                .help("Generate unified posture report (detection + optional VA2/VA1)")
+                .value_name("URL")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("posture-va2")
+                .long("posture-va2")
+                .help("Include VA2 behavioral profiling in posture report (requires consent)")
+                .action(clap::ArgAction::SetTrue)
+                .requires("posture"),
+        )
+        .arg(
+            Arg::new("posture-json")
+                .long("posture-json")
+                .help("Output posture report as JSON")
+                .action(clap::ArgAction::SetTrue)
+                .requires("posture"),
         )
         .arg(
             Arg::new("va")
