@@ -112,6 +112,7 @@ impl DetectionEngine {
                             },
                             caveats: Vec::new(),
                             security_posture: Some(crate::SecurityPosture::from_env()),
+                            error: Some(e.to_string()),
                         };
                         Some((url.to_string(), failed_result))
                     }

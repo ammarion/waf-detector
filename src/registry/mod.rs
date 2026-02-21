@@ -470,6 +470,7 @@ impl ProviderRegistry {
             metadata,
             caveats: Vec::new(),
             security_posture: Some(crate::SecurityPosture::from_env()),
+            error: None,
         };
 
         // Generate caveats based on detection conditions
