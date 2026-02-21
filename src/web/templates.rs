@@ -718,15 +718,6 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_html_has_experience_mode_controls() {
-        let html = dashboard_html();
-        assert!(html.contains("id=\"experienceMode\""));
-        assert!(html.contains("value=\"beginner\""));
-        assert!(html.contains("value=\"analyst\""));
-        assert!(html.contains("id=\"experienceHint\""));
-    }
-
-    #[test]
     fn dashboard_html_has_explicit_aria_labels_for_critical_controls() {
         let html = dashboard_html();
         assert!(html.contains("aria-label=\"Close report modal\""));
@@ -735,15 +726,6 @@ mod tests {
         assert!(html.contains("aria-label=\"Replay channel filter\""));
         assert!(html.contains("aria-label=\"Replay method filter\""));
         assert!(html.contains("aria-label=\"Replay outcome filter\""));
-    }
-
-    #[test]
-    fn dashboard_html_has_mode_specific_assistant_panels() {
-        let html = dashboard_html();
-        assert!(html.contains("id=\"beginnerAssistantPanel\""));
-        assert!(html.contains("data-experience=\"beginner\""));
-        assert!(html.contains("id=\"analystAssistantPanel\""));
-        assert!(html.contains("data-experience=\"analyst\""));
     }
 
     #[test]
@@ -756,18 +738,16 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_html_has_results_insight_strip() {
+    fn dashboard_html_updates_results_status_from_render_flow() {
         let html = dashboard_html();
-        assert!(html.contains("id=\"resultsInsightBar\""));
-        assert!(html.contains("id=\"resultsInsightTitle\""));
-        assert!(html.contains("id=\"resultsInsightMetric\""));
-        assert!(html.contains("id=\"resultsInsightAction\""));
+        assert!(html.contains("function updateResultsStatus("));
+        assert!(html.contains("updateResultsStatus(allResults);"));
     }
 
     #[test]
-    fn dashboard_html_updates_results_insight_strip_from_render_flow() {
+    fn dashboard_html_has_va2_collapsible_card() {
         let html = dashboard_html();
-        assert!(html.contains("function renderResultsInsightStrip("));
-        assert!(html.contains("renderResultsInsightStrip(allResults);"));
+        assert!(html.contains("class=\"va2-collapsible\""));
+        assert!(html.contains("class=\"va2-summary\""));
     }
 }
