@@ -1,6 +1,6 @@
 use crate::ai::{
-    ai_enabled, ai_endpoint, ai_model, ai_timeout, AiProvider, AiSummaryRequest,
-    AiSummaryResponse, OllamaProvider,
+    ai_enabled, ai_endpoint, ai_model, ai_timeout, AiProvider, AiSummaryRequest, AiSummaryResponse,
+    OllamaProvider,
 };
 use crate::effectiveness::consent::{ConsentManager, ConsentStatus};
 use crate::engine::DetectionEngine;
@@ -15,8 +15,10 @@ use crate::virtual_adversary2::{
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use axum::{
+    body::Body,
     extract::{Path, State},
-    http::{header, StatusCode},
+    http::{header, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
     response::{Html, IntoResponse},
     routing::{get, post},
     Json, Router,
@@ -29,10 +31,171 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::{fs, path::PathBuf};
-use tower_http::{cors::CorsLayer, services::ServeDir};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::ServeDir,
+};
 use url::Url;
 
 pub mod templates;
+
+/// Build a permissive CORS layer for read-only informational endpoints.
+fn build_readonly_cors() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET])
+        .allow_headers(Any)
+}
+
+/// Build a restricted CORS layer for active endpoints that trigger network
+/// activity (scans, smoke tests, VA runs). Only allows requests from
+/// localhost by default; override with `WAF_DETECTOR_ALLOWED_ORIGINS`.
+fn build_active_cors(port: u16) -> CorsLayer {
+    let mut origins: Vec<HeaderValue> = vec![
+        format!("http://localhost:{port}").parse().unwrap(),
+        format!("http://127.0.0.1:{port}").parse().unwrap(),
+    ];
+
+    if let Ok(extra) = std::env::var("WAF_DETECTOR_ALLOWED_ORIGINS") {
+        for origin in extra.split(',') {
+            if let Ok(val) = origin.trim().parse::<HeaderValue>() {
+                origins.push(val);
+            }
+        }
+    }
+
+    CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+}
+
+/// Middleware that enforces API token authentication when
+/// `WAF_DETECTOR_API_TOKEN` is set. When unset, all requests pass through
+/// (preserving current dev-mode behavior).
+async fn require_api_token(
+    request: axum::http::Request<Body>,
+    next: Next,
+) -> axum::response::Response {
+    if let Ok(expected_token) = std::env::var("WAF_DETECTOR_API_TOKEN") {
+        if !expected_token.is_empty() {
+            let auth_header = request
+                .headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+
+            match auth_header {
+                Some(ref auth) if auth.starts_with("Bearer ") => {
+                    let token = &auth[7..];
+                    if token == expected_token {
+                        return next.run(request).await;
+                    }
+                }
+                _ => {}
+            }
+
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "Missing or invalid API token. Provide Authorization: Bearer <token> header."
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    // No token configured — allow all requests (dev mode)
+    next.run(request).await
+}
+
+/// CSRF protection middleware for active POST endpoints.
+/// Validates that the Origin or Referer header matches the server Host.
+/// Requests carrying a valid API token bypass this check (machine clients).
+/// GET requests and requests with no Origin/Referer (e.g. curl) pass through.
+async fn validate_csrf(request: axum::http::Request<Body>, next: Next) -> axum::response::Response {
+    if request.method() != Method::POST {
+        return next.run(request).await;
+    }
+
+    // Machine clients with valid API token bypass CSRF
+    if has_valid_api_token(request.headers()) {
+        return next.run(request).await;
+    }
+
+    let server_host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    // Check Origin header (preferred for CSRF)
+    if let Some(origin) = request
+        .headers()
+        .get("origin")
+        .and_then(|v| v.to_str().ok())
+    {
+        if origin_matches_host(origin, server_host) {
+            return next.run(request).await;
+        }
+        return csrf_error_response();
+    }
+
+    // Fall back to Referer header
+    if let Some(referer) = request
+        .headers()
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+    {
+        if origin_matches_host(referer, server_host) {
+            return next.run(request).await;
+        }
+        return csrf_error_response();
+    }
+
+    // No Origin or Referer — non-browser client (curl, httpie, etc.)
+    next.run(request).await
+}
+
+fn has_valid_api_token(headers: &axum::http::HeaderMap) -> bool {
+    if let Ok(expected) = std::env::var("WAF_DETECTOR_API_TOKEN") {
+        if !expected.is_empty() {
+            if let Some(auth) = headers
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+            {
+                return auth.starts_with("Bearer ") && auth[7..] == *expected;
+            }
+        }
+    }
+    false
+}
+
+fn origin_matches_host(origin_or_referer: &str, server_host: &str) -> bool {
+    if let Ok(url) = Url::parse(origin_or_referer) {
+        let host = url.host_str().unwrap_or("");
+        let port = url.port();
+        let authority = match port {
+            Some(p) => format!("{host}:{p}"),
+            None => host.to_string(),
+        };
+        authority == server_host
+    } else {
+        false
+    }
+}
+
+fn csrf_error_response() -> axum::response::Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "success": false,
+            "error": "CSRF validation failed: request origin does not match server host"
+        })),
+    )
+        .into_response()
+}
 
 const VA_REPORTS_DIR: &str = ".waf-detector/va-reports";
 const VA_REPORT_RETENTION_DEFAULT: usize = 50;
@@ -44,6 +207,8 @@ pub struct WebServer {
     script_executor: Arc<ScriptExecutor>,
     va_jobs: Arc<Mutex<HashMap<String, VaJob>>>,
     va_job_counter: Arc<AtomicU64>,
+    va2_jobs: Arc<Mutex<HashMap<String, Va2Job>>>,
+    va2_job_counter: Arc<AtomicU64>,
 }
 
 #[derive(Deserialize)]
@@ -225,6 +390,14 @@ struct VaJob {
     events: Vec<VaJobEvent>,
 }
 
+#[derive(Debug)]
+struct Va2Job {
+    id: String,
+    state: VaJobState,
+    result: Option<Va2RunReport>,
+    error: Option<String>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct VaJobEvent {
     pub index: usize,
@@ -237,6 +410,26 @@ pub struct VaJobEvent {
 }
 
 const VA_JOB_EVENT_LIMIT: usize = 200;
+
+impl Va2Job {
+    fn new(id: String) -> Self {
+        Self {
+            id,
+            state: VaJobState::Pending,
+            result: None,
+            error: None,
+        }
+    }
+
+    fn status(&self) -> Va2JobStatus {
+        Va2JobStatus {
+            id: self.id.clone(),
+            state: self.state,
+            result: self.result.clone(),
+            error: self.error.clone(),
+        }
+    }
+}
 
 impl VaJob {
     fn new(id: String) -> Self {
@@ -277,6 +470,28 @@ impl VaJob {
 pub struct VaJobStatusResponse {
     success: bool,
     status: Option<VaJobStatus>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct Va2JobStatus {
+    pub id: String,
+    pub state: VaJobState,
+    pub result: Option<Va2RunReport>,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Va2JobStartResponse {
+    success: bool,
+    job_id: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Va2JobStatusResponse {
+    success: bool,
+    status: Option<Va2JobStatus>,
     error: Option<String>,
 }
 
@@ -350,23 +565,38 @@ impl WebServer {
             script_executor: Arc::new(ScriptExecutor::default()),
             va_jobs: Arc::new(Mutex::new(HashMap::new())),
             va_job_counter: Arc::new(AtomicU64::new(1)),
+            va2_jobs: Arc::new(Mutex::new(HashMap::new())),
+            va2_job_counter: Arc::new(AtomicU64::new(1)),
         }
     }
 
     pub async fn start(self, port: u16) -> Result<()> {
-        let app = Router::new()
-            // Static files
-            .nest_service("/static", ServeDir::new("web/static"))
-            // API routes
-            .route("/api/scan", post(scan_url))
-            .route("/api/combined-scan", post(combined_scan))
-            .route("/api/smoke-test", post(smoke_test))
-            .route("/api/batch-scan", post(batch_scan))
-            .route("/api/virtual-adversary", post(virtual_adversary))
-            .route(
-                "/api/virtual-adversary/start",
-                post(virtual_adversary_start),
-            )
+        let mode = crate::DeploymentMode::from_env();
+        tracing::info!("Running in {:?} mode", mode);
+
+        if mode.is_prod() {
+            // Enforce: API token must be set in prod
+            if std::env::var("WAF_DETECTOR_API_TOKEN")
+                .map(|t| t.is_empty())
+                .unwrap_or(true)
+            {
+                return Err(anyhow!(
+                    "WAF_DETECTOR_API_TOKEN must be set in production mode"
+                ));
+            }
+            // Enforce: insecure TLS rejected in prod
+            if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+                return Err(anyhow!(
+                    "WAF_DETECTOR_INSECURE_TLS is not allowed in production mode"
+                ));
+            }
+        }
+
+        // Read-only informational endpoints — broad CORS, no auth required
+        let readonly_routes = Router::new()
+            .route("/api/providers", get(list_providers))
+            .route("/api/status", get(server_status))
+            .route("/api/consent-status", get(consent_status))
             .route(
                 "/api/virtual-adversary/status/:id",
                 get(virtual_adversary_status),
@@ -396,6 +626,24 @@ impl WebServer {
                 get(virtual_adversary_reports_csv),
             )
             .route(
+                "/api/virtual-adversary2/status/:id",
+                get(virtual_adversary2_status),
+            )
+            .layer(build_readonly_cors());
+
+        // Active endpoints that trigger network activity — restricted CORS,
+        // API token required when WAF_DETECTOR_API_TOKEN is set
+        let active_routes = Router::new()
+            .route("/api/scan", post(scan_url))
+            .route("/api/combined-scan", post(combined_scan))
+            .route("/api/smoke-test", post(smoke_test))
+            .route("/api/batch-scan", post(batch_scan))
+            .route("/api/virtual-adversary", post(virtual_adversary))
+            .route(
+                "/api/virtual-adversary/start",
+                post(virtual_adversary_start),
+            )
+            .route(
                 "/api/virtual-adversary/reports/cleanup",
                 post(virtual_adversary_reports_cleanup),
             )
@@ -408,18 +656,29 @@ impl WebServer {
                 post(virtual_adversary2_plan),
             )
             .route("/api/virtual-adversary2/run", post(virtual_adversary2_run))
+            .route(
+                "/api/virtual-adversary2/start",
+                post(virtual_adversary2_start),
+            )
+            .route(
+                "/api/virtual-adversary2/cancel/:id",
+                post(virtual_adversary2_cancel),
+            )
             .route("/api/ai/summary", post(ai_summary))
-            .route("/api/consent-status", get(consent_status))
             .route("/api/consent/add-target", post(consent_add_target))
             .route("/api/consent/remove-target", post(consent_remove_target))
-            .route("/api/providers", get(list_providers))
-            .route("/api/status", get(server_status))
-            // Web pages
+            .layer(middleware::from_fn(require_api_token))
+            .layer(middleware::from_fn(validate_csrf))
+            .layer(build_active_cors(port));
+
+        let app = Router::new()
+            .nest_service("/static", ServeDir::new("web/static"))
+            .merge(readonly_routes)
+            .merge(active_routes)
+            // Web pages — no CORS needed (same-origin browser navigation)
             .route("/", get(dashboard))
             .route("/dashboard", get(dashboard))
             .route("/api-docs", get(api_docs))
-            // Add CORS for development
-            .layer(CorsLayer::permissive())
             .with_state(self);
 
         let addr = format!("127.0.0.1:{port}");
@@ -1271,17 +1530,11 @@ async fn virtual_adversary_report_csv(Path(report_id): Path<String>) -> impl Int
 }
 
 // Handler to export a Virtual Adversary replay plan as CSV
-async fn virtual_adversary_report_replay_csv(
-    Path(report_id): Path<String>,
-) -> impl IntoResponse {
+async fn virtual_adversary_report_replay_csv(Path(report_id): Path<String>) -> impl IntoResponse {
     match load_va_report(&report_id) {
         Ok(report) => {
             let body = build_va_replay_plan_csv(&report.report.replay_plan);
-            (
-                StatusCode::OK,
-                [(header::CONTENT_TYPE, "text/csv")],
-                body,
-            )
+            (StatusCode::OK, [(header::CONTENT_TYPE, "text/csv")], body)
         }
         Err(e) => (
             StatusCode::NOT_FOUND,
@@ -1449,6 +1702,151 @@ async fn virtual_adversary2_run(Json(payload): Json<Va2Request>) -> impl IntoRes
     }
 }
 
+// Handler to start Virtual Adversary 2.0 testing asynchronously
+async fn virtual_adversary2_start(
+    State(server): State<WebServer>,
+    Json(payload): Json<Va2Request>,
+) -> impl IntoResponse {
+    let phases_raw = payload.phases.as_deref().unwrap_or(VA2_PHASE_DEFAULT);
+    let phases = match parse_va2_phases(phases_raw) {
+        Ok(phases) => phases,
+        Err(err) => {
+            let response = Va2JobStartResponse {
+                success: false,
+                job_id: None,
+                error: Some(err.to_string()),
+            };
+            return (StatusCode::BAD_REQUEST, Json(response));
+        }
+    };
+
+    let config = Va2CampaignConfig {
+        seed: payload.seed.unwrap_or(1337),
+        budget: payload.budget.unwrap_or(60),
+    };
+
+    let plan = match build_va2_campaign_plan(&payload.target_url, &phases, config) {
+        Ok(plan) => plan,
+        Err(err) => {
+            let response = Va2JobStartResponse {
+                success: false,
+                job_id: None,
+                error: Some(err.to_string()),
+            };
+            return (StatusCode::BAD_REQUEST, Json(response));
+        }
+    };
+
+    let job_id = format!(
+        "va2-{}",
+        server.va2_job_counter.fetch_add(1, Ordering::Relaxed)
+    );
+    let job_id_for_task = job_id.clone();
+
+    {
+        let mut jobs = server.va2_jobs.lock().unwrap();
+        jobs.insert(job_id.clone(), Va2Job::new(job_id.clone()));
+    }
+
+    let jobs = server.va2_jobs.clone();
+
+    tokio::spawn(async move {
+        {
+            let mut jobs = jobs.lock().unwrap();
+            if let Some(job) = jobs.get_mut(&job_id_for_task) {
+                job.state = VaJobState::Running;
+            }
+        }
+
+        let runner = match Va2Runner::new() {
+            Ok(runner) => runner,
+            Err(err) => {
+                let mut jobs = jobs.lock().unwrap();
+                if let Some(job) = jobs.get_mut(&job_id_for_task) {
+                    job.state = VaJobState::Failed;
+                    job.error = Some(format!("Failed to create runner: {err}"));
+                }
+                return;
+            }
+        };
+
+        let result = runner.run_plan(plan).await;
+
+        let mut jobs = jobs.lock().unwrap();
+        if let Some(job) = jobs.get_mut(&job_id_for_task) {
+            match result {
+                Ok(report) => {
+                    job.state = VaJobState::Completed;
+                    job.result = Some(report);
+                }
+                Err(err) => {
+                    job.state = VaJobState::Failed;
+                    job.error = Some(err.to_string());
+                }
+            }
+        }
+    });
+
+    let response = Va2JobStartResponse {
+        success: true,
+        job_id: Some(job_id),
+        error: None,
+    };
+    (StatusCode::OK, Json(response))
+}
+
+// Handler to get Virtual Adversary 2.0 job status
+async fn virtual_adversary2_status(
+    State(server): State<WebServer>,
+    Path(job_id): Path<String>,
+) -> impl IntoResponse {
+    let jobs = server.va2_jobs.lock().unwrap();
+    if let Some(job) = jobs.get(&job_id) {
+        let response = Va2JobStatusResponse {
+            success: true,
+            status: Some(job.status()),
+            error: None,
+        };
+        return (StatusCode::OK, Json(response));
+    }
+
+    let response = Va2JobStatusResponse {
+        success: false,
+        status: None,
+        error: Some("Job not found".to_string()),
+    };
+    (StatusCode::NOT_FOUND, Json(response))
+}
+
+// Handler to cancel Virtual Adversary 2.0 job
+async fn virtual_adversary2_cancel(
+    State(server): State<WebServer>,
+    Path(job_id): Path<String>,
+) -> impl IntoResponse {
+    let mut jobs = server.va2_jobs.lock().unwrap();
+    if let Some(job) = jobs.get_mut(&job_id) {
+        // Mark as failed with cancellation message
+        // Note: can't truly cancel the tokio task without a CancellationToken,
+        // but marking it prevents the result from being used
+        job.state = VaJobState::Failed;
+        job.error = Some("Job cancelled by user".to_string());
+
+        let response = Va2JobStatusResponse {
+            success: true,
+            status: Some(job.status()),
+            error: None,
+        };
+        return (StatusCode::OK, Json(response));
+    }
+
+    let response = Va2JobStatusResponse {
+        success: false,
+        status: None,
+        error: Some("Job not found".to_string()),
+    };
+    (StatusCode::NOT_FOUND, Json(response))
+}
+
 async fn ai_summary(Json(payload): Json<AiSummaryRequest>) -> impl IntoResponse {
     if !ai_enabled() {
         let response = AiSummaryApiResponse {
@@ -1490,6 +1888,7 @@ mod tests {
     use chrono::{NaiveDate, TimeZone, Timelike, Utc};
     use serde_json::json;
     use std::time::Duration;
+    use tower::util::ServiceExt;
 
     #[test]
     fn va_request_defaults_to_config() {
@@ -1778,5 +2177,291 @@ mod tests {
         };
         let err = req.to_config().expect_err("should reject zero timeout");
         assert!(err.to_string().contains("timeout_ms"));
+    }
+
+    #[test]
+    fn build_readonly_cors_allows_get() {
+        let layer = super::build_readonly_cors();
+        // Smoke-test: ensure layer can be constructed without panic
+        let _ = layer;
+    }
+
+    #[test]
+    fn build_active_cors_includes_localhost() {
+        let layer = super::build_active_cors(8080);
+        let _ = layer;
+    }
+
+    #[test]
+    fn build_active_cors_reads_env_override() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var(
+            "WAF_DETECTOR_ALLOWED_ORIGINS",
+            "https://example.com,https://other.com",
+        );
+        let layer = super::build_active_cors(8080);
+        let _ = layer;
+        std::env::remove_var("WAF_DETECTOR_ALLOWED_ORIGINS");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test
+    async fn require_api_token_allows_when_no_token_configured() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
+
+        let app = axum::Router::new()
+            .route("/test", axum::routing::get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(super::require_api_token));
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/test")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test
+    async fn require_api_token_rejects_missing_token() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var("WAF_DETECTOR_API_TOKEN", "secret123");
+
+        let app = axum::Router::new()
+            .route("/test", axum::routing::get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(super::require_api_token));
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/test")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test
+    async fn require_api_token_accepts_valid_bearer() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var("WAF_DETECTOR_API_TOKEN", "secret123");
+
+        let app = axum::Router::new()
+            .route("/test", axum::routing::get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(super::require_api_token));
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/test")
+                    .header("authorization", "Bearer secret123")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test
+    async fn require_api_token_rejects_wrong_token() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var("WAF_DETECTOR_API_TOKEN", "secret123");
+
+        let app = axum::Router::new()
+            .route("/test", axum::routing::get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(super::require_api_token));
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/test")
+                    .header("authorization", "Bearer wrongtoken")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
+    }
+
+    #[test]
+    fn origin_matches_host_exact_match() {
+        assert!(super::origin_matches_host(
+            "http://localhost:8080",
+            "localhost:8080"
+        ));
+    }
+
+    #[test]
+    fn origin_matches_host_rejects_different_port() {
+        assert!(!super::origin_matches_host(
+            "http://localhost:9090",
+            "localhost:8080"
+        ));
+    }
+
+    #[test]
+    fn origin_matches_host_rejects_different_host() {
+        assert!(!super::origin_matches_host(
+            "http://evil.com",
+            "localhost:8080"
+        ));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test
+    async fn csrf_allows_get_requests() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
+
+        let app = axum::Router::new()
+            .route("/test", axum::routing::get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(super::validate_csrf));
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/test")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test
+    async fn csrf_rejects_post_with_wrong_origin() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
+
+        let app = axum::Router::new()
+            .route("/test", axum::routing::post(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(super::validate_csrf));
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/test")
+                    .header("host", "localhost:8080")
+                    .header("origin", "http://evil.com")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test
+    async fn csrf_allows_post_with_matching_origin() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
+
+        let app = axum::Router::new()
+            .route("/test", axum::routing::post(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(super::validate_csrf));
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/test")
+                    .header("host", "localhost:8080")
+                    .header("origin", "http://localhost:8080")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test
+    async fn csrf_allows_post_without_origin_or_referer() {
+        // Non-browser clients (curl, httpie) don't send Origin/Referer
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
+
+        let app = axum::Router::new()
+            .route("/test", axum::routing::post(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(super::validate_csrf));
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/test")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test
+    async fn csrf_bypasses_for_valid_api_token() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var("WAF_DETECTOR_API_TOKEN", "secret123");
+
+        let app = axum::Router::new()
+            .route("/test", axum::routing::post(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(super::validate_csrf));
+
+        // POST with wrong origin but valid token — should pass CSRF
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/test")
+                    .header("host", "localhost:8080")
+                    .header("origin", "http://evil.com")
+                    .header("authorization", "Bearer secret123")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
     }
 }

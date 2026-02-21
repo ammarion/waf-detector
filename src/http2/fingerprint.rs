@@ -14,7 +14,9 @@ use tokio_rustls::rustls::client::danger::{
     HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
 };
 use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use tokio_rustls::rustls::{ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme};
+use tokio_rustls::rustls::{
+    ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme,
+};
 use tokio_rustls::TlsConnector;
 
 /// HTTP/2 SETTINGS frame parameters
@@ -194,74 +196,74 @@ impl H2FingerprintAnalyzer {
         let profiles = vec![
             // CloudFlare HTTP/2 profile
             H2Profile {
-            provider: "CloudFlare".to_string(),
-            settings: H2Settings {
-                header_table_size: Some(65536),
-                enable_push: Some(false),
-                max_concurrent_streams: Some(256),
-                initial_window_size: Some(65535),
-                max_frame_size: Some(16384),
-                max_header_list_size: Some(16384),
+                provider: "CloudFlare".to_string(),
+                settings: H2Settings {
+                    header_table_size: Some(65536),
+                    enable_push: Some(false),
+                    max_concurrent_streams: Some(256),
+                    initial_window_size: Some(65535),
+                    max_frame_size: Some(16384),
+                    max_header_list_size: Some(16384),
+                },
+                confidence: 0.95,
+                description: "CloudFlare HTTP/2 settings profile".to_string(),
             },
-            confidence: 0.95,
-            description: "CloudFlare HTTP/2 settings profile".to_string(),
-        },
             // AWS CloudFront HTTP/2 profile
             H2Profile {
-            provider: "AWS".to_string(),
-            settings: H2Settings {
-                header_table_size: Some(4096),
-                enable_push: Some(false),
-                max_concurrent_streams: Some(128),
-                initial_window_size: Some(65535),
-                max_frame_size: Some(16384),
-                max_header_list_size: None,
+                provider: "AWS".to_string(),
+                settings: H2Settings {
+                    header_table_size: Some(4096),
+                    enable_push: Some(false),
+                    max_concurrent_streams: Some(128),
+                    initial_window_size: Some(65535),
+                    max_frame_size: Some(16384),
+                    max_header_list_size: None,
+                },
+                confidence: 0.93,
+                description: "AWS CloudFront HTTP/2 settings profile".to_string(),
             },
-            confidence: 0.93,
-            description: "AWS CloudFront HTTP/2 settings profile".to_string(),
-        },
             // Akamai HTTP/2 profile
             H2Profile {
-            provider: "Akamai".to_string(),
-            settings: H2Settings {
-                header_table_size: Some(4096),
-                enable_push: Some(false),
-                max_concurrent_streams: Some(100),
-                initial_window_size: Some(65535),
-                max_frame_size: Some(16384),
-                max_header_list_size: None,
+                provider: "Akamai".to_string(),
+                settings: H2Settings {
+                    header_table_size: Some(4096),
+                    enable_push: Some(false),
+                    max_concurrent_streams: Some(100),
+                    initial_window_size: Some(65535),
+                    max_frame_size: Some(16384),
+                    max_header_list_size: None,
+                },
+                confidence: 0.90,
+                description: "Akamai HTTP/2 settings profile".to_string(),
             },
-            confidence: 0.90,
-            description: "Akamai HTTP/2 settings profile".to_string(),
-        },
             // Fastly HTTP/2 profile
             H2Profile {
-            provider: "Fastly".to_string(),
-            settings: H2Settings {
-                header_table_size: Some(4096),
-                enable_push: Some(false),
-                max_concurrent_streams: Some(100),
-                initial_window_size: Some(65536),
-                max_frame_size: Some(16384),
-                max_header_list_size: None,
+                provider: "Fastly".to_string(),
+                settings: H2Settings {
+                    header_table_size: Some(4096),
+                    enable_push: Some(false),
+                    max_concurrent_streams: Some(100),
+                    initial_window_size: Some(65536),
+                    max_frame_size: Some(16384),
+                    max_header_list_size: None,
+                },
+                confidence: 0.92,
+                description: "Fastly HTTP/2 settings profile".to_string(),
             },
-            confidence: 0.92,
-            description: "Fastly HTTP/2 settings profile".to_string(),
-        },
             // Azure Front Door HTTP/2 profile
             H2Profile {
-            provider: "Azure".to_string(),
-            settings: H2Settings {
-                header_table_size: Some(4096),
-                enable_push: Some(false),
-                max_concurrent_streams: Some(128),
-                initial_window_size: Some(65535),
-                max_frame_size: Some(16384),
-                max_header_list_size: Some(8192),
+                provider: "Azure".to_string(),
+                settings: H2Settings {
+                    header_table_size: Some(4096),
+                    enable_push: Some(false),
+                    max_concurrent_streams: Some(128),
+                    initial_window_size: Some(65535),
+                    max_frame_size: Some(16384),
+                    max_header_list_size: Some(8192),
+                },
+                confidence: 0.91,
+                description: "Azure Front Door HTTP/2 settings profile".to_string(),
             },
-            confidence: 0.91,
-            description: "Azure Front Door HTTP/2 settings profile".to_string(),
-        },
         ];
 
         Self {
@@ -299,7 +301,10 @@ impl H2FingerprintAnalyzer {
                         similarity * 100.0
                     ),
                     raw_data: settings.format(),
-                    signature_matched: format!("h2-fingerprint-{}", profile.provider.to_lowercase()),
+                    signature_matched: format!(
+                        "h2-fingerprint-{}",
+                        profile.provider.to_lowercase()
+                    ),
                 });
             }
         }
@@ -472,10 +477,7 @@ mod tests {
             .known_profiles
             .iter()
             .any(|p| p.provider == "CloudFlare"));
-        assert!(analyzer
-            .known_profiles
-            .iter()
-            .any(|p| p.provider == "AWS"));
+        assert!(analyzer.known_profiles.iter().any(|p| p.provider == "AWS"));
         assert!(analyzer
             .known_profiles
             .iter()

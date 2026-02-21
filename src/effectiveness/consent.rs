@@ -235,13 +235,134 @@ impl ConsentManager {
         if trimmed.is_empty() {
             return Err(anyhow!("Authorized target cannot be empty"));
         }
-        let url = Url::parse(trimmed).or_else(|_| Url::parse(&format!("https://{trimmed}")));
-        if let Ok(parsed) = url {
-            if let Some(host) = parsed.host_str() {
-                return Ok(host.to_lowercase());
+
+        // Try parsing as URL to extract host, falling through if host
+        // cannot be extracted (e.g. bare IPv6 like "fe80::1" where "fe80"
+        // looks like a URL scheme).
+        let host = Url::parse(trimmed)
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.to_string()))
+            .or_else(|| {
+                Url::parse(&format!("https://{trimmed}"))
+                    .ok()
+                    .and_then(|u| u.host_str().map(|h| h.to_string()))
+            })
+            .unwrap_or_else(|| trimmed.to_string());
+
+        let host = host.to_lowercase();
+
+        // Check if host is an IP address
+        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+            return Self::validate_ip_address(&ip);
+        }
+
+        // Domain validation: check labels and public suffix
+        Self::validate_domain(&host)?;
+
+        Ok(host)
+    }
+
+    /// Validate IP address is not in private/loopback ranges
+    fn validate_ip_address(ip: &std::net::IpAddr) -> Result<String> {
+        use std::net::IpAddr;
+
+        match ip {
+            IpAddr::V4(ipv4) => {
+                let octets = ipv4.octets();
+                // 127.0.0.0/8 - Loopback
+                if octets[0] == 127 {
+                    return Err(anyhow!(
+                        "IP address {} is in loopback range (127.0.0.0/8) and not allowed",
+                        ip
+                    ));
+                }
+                // 10.0.0.0/8 - Private
+                if octets[0] == 10 {
+                    return Err(anyhow!(
+                        "IP address {} is in private range (10.0.0.0/8) and not allowed",
+                        ip
+                    ));
+                }
+                // 172.16.0.0/12 - Private
+                if octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31 {
+                    return Err(anyhow!(
+                        "IP address {} is in private range (172.16.0.0/12) and not allowed",
+                        ip
+                    ));
+                }
+                // 192.168.0.0/16 - Private
+                if octets[0] == 192 && octets[1] == 168 {
+                    return Err(anyhow!(
+                        "IP address {} is in private range (192.168.0.0/16) and not allowed",
+                        ip
+                    ));
+                }
+                Ok(ip.to_string())
+            }
+            IpAddr::V6(ipv6) => {
+                let segments = ipv6.segments();
+                // ::1 - Loopback
+                if ipv6.is_loopback() {
+                    return Err(anyhow!(
+                        "IPv6 address {} is loopback (::1) and not allowed",
+                        ip
+                    ));
+                }
+                // fe80::/10 - Link-local
+                if segments[0] >= 0xfe80 && segments[0] <= 0xfebf {
+                    return Err(anyhow!(
+                        "IPv6 address {} is in link-local range (fe80::/10) and not allowed",
+                        ip
+                    ));
+                }
+                Ok(ip.to_string())
             }
         }
-        Ok(trimmed.to_lowercase())
+    }
+
+    /// Validate domain is not a public suffix and has sufficient labels
+    fn validate_domain(domain: &str) -> Result<()> {
+        // Common public suffixes that should be rejected
+        const PUBLIC_SUFFIXES: &[&str] = &[
+            // Single-part TLDs
+            "com", "net", "org", "io", "dev", "app", "edu", "gov", "mil", "int", "info", "biz",
+            "name", "pro", "museum", "coop", "aero", "xxx", "idv", "tel", "asia", "cat", "jobs",
+            "mobi", "post", "travel", "xxx", // Two-part country TLDs
+            "co.uk", "com.au", "co.jp", "com.br", "co.in", "com.cn", "co.nz", "co.za", "com.mx",
+            "com.sg", "co.kr", "com.ar", "com.co", "co.id", "com.my", "com.ph", "com.tw", "com.vn",
+            "co.th", "com.tr", "com.ua", "co.il", "com.sa", "com.eg", "co.ke",
+        ];
+
+        let labels: Vec<&str> = domain.split('.').collect();
+
+        // Require at least 2 labels (e.g., example.com)
+        if labels.len() < 2 {
+            return Err(anyhow!(
+                "Domain '{}' must have at least 2 labels (e.g., example.com)",
+                domain
+            ));
+        }
+
+        // Check against hardcoded public suffix list
+        if PUBLIC_SUFFIXES.contains(&domain) {
+            return Err(anyhow!(
+                "Domain '{}' is a public suffix and cannot be authorized as a target",
+                domain
+            ));
+        }
+
+        // Check if domain is just a two-part public suffix (e.g., co.uk)
+        if labels.len() == 2 {
+            let two_part = format!("{}.{}", labels[0], labels[1]);
+            if PUBLIC_SUFFIXES.contains(&two_part.as_str()) {
+                return Err(anyhow!(
+                    "Domain '{}' is a public suffix and cannot be authorized as a target",
+                    domain
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     /// Consent text displayed to users
@@ -328,7 +449,10 @@ pub fn manage_consent_cli(args: Vec<String>) -> Result<()> {
                 if status.authorized_targets.is_empty() {
                     println!("Authorized targets: (none)");
                 } else {
-                    println!("Authorized targets: {}", status.authorized_targets.join(", "));
+                    println!(
+                        "Authorized targets: {}",
+                        status.authorized_targets.join(", ")
+                    );
                     println!(
                         "Authorized targets: {}",
                         status.authorized_targets.join(", ")
@@ -347,4 +471,181 @@ pub fn manage_consent_cli(args: Vec<String>) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_target_rejects_single_part_tld() {
+        let result = ConsentManager::normalize_target("com");
+        assert!(result.is_err());
+        // Single-label domains hit the "must have at least 2 labels" check
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must have at least 2 labels"));
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_two_part_country_tld() {
+        let result = ConsentManager::normalize_target("co.uk");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("public suffix"));
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_org_tld() {
+        let result = ConsentManager::normalize_target("org");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must have at least 2 labels"));
+    }
+
+    #[test]
+    fn test_normalize_target_accepts_valid_domain() {
+        let result = ConsentManager::normalize_target("example.com");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "example.com");
+    }
+
+    #[test]
+    fn test_normalize_target_accepts_subdomain() {
+        let result = ConsentManager::normalize_target("sub.example.com");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "sub.example.com");
+    }
+
+    #[test]
+    fn test_normalize_target_extracts_domain_from_url() {
+        let result = ConsentManager::normalize_target("https://example.com/path");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "example.com");
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_localhost_ip() {
+        let result = ConsentManager::normalize_target("127.0.0.1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("loopback range"));
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_private_ip_192() {
+        let result = ConsentManager::normalize_target("192.168.1.1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("private range"));
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_private_ip_10() {
+        let result = ConsentManager::normalize_target("10.0.0.1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("private range"));
+    }
+
+    #[test]
+    fn test_normalize_target_accepts_public_ip() {
+        let result = ConsentManager::normalize_target("8.8.8.8");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "8.8.8.8");
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_empty_string() {
+        let result = ConsentManager::normalize_target("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_private_ip_172() {
+        let result = ConsentManager::normalize_target("172.16.0.1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("private range"));
+
+        // Test upper bound of 172.16.0.0/12
+        let result = ConsentManager::normalize_target("172.31.255.255");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_normalize_target_accepts_172_outside_private_range() {
+        // 172.15.x.x should be allowed (below 172.16.0.0/12)
+        let result = ConsentManager::normalize_target("172.15.1.1");
+        assert!(result.is_ok());
+
+        // 172.32.x.x should be allowed (above 172.16.0.0/12)
+        let result = ConsentManager::normalize_target("172.32.1.1");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_normalize_target_case_insensitive() {
+        let result = ConsentManager::normalize_target("EXAMPLE.COM");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "example.com");
+
+        let result = ConsentManager::normalize_target("Sub.Example.COM");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "sub.example.com");
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_ipv6_loopback() {
+        let result = ConsentManager::normalize_target("::1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("loopback"));
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_ipv6_link_local() {
+        let result = ConsentManager::normalize_target("fe80::1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("link-local"));
+    }
+
+    #[test]
+    fn test_normalize_target_accepts_public_ipv6() {
+        let result = ConsentManager::normalize_target("2001:4860:4860::8888");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "2001:4860:4860::8888");
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_additional_tlds() {
+        // Test a few more single-part TLDs from our list
+        let tlds = vec!["io", "dev", "app", "edu", "info", "biz"];
+        for tld in tlds {
+            let result = ConsentManager::normalize_target(tld);
+            assert!(result.is_err(), "TLD '{}' should be rejected", tld);
+        }
+    }
+
+    #[test]
+    fn test_normalize_target_rejects_additional_country_tlds() {
+        // Test a few more two-part country TLDs from our list
+        let tlds = vec!["com.au", "co.jp", "com.br", "co.in", "com.cn"];
+        for tld in tlds {
+            let result = ConsentManager::normalize_target(tld);
+            assert!(result.is_err(), "TLD '{}' should be rejected", tld);
+        }
+    }
+
+    #[test]
+    fn test_normalize_target_trims_whitespace() {
+        let result = ConsentManager::normalize_target("  example.com  ");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "example.com");
+    }
+
+    #[test]
+    fn test_normalize_target_handles_url_with_port() {
+        let result = ConsentManager::normalize_target("https://example.com:8080/path");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "example.com");
+    }
 }

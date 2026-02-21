@@ -2,11 +2,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod ai;
 pub mod cli;
 pub mod confidence;
 pub mod engine;
 pub mod http;
-pub mod ai;
 pub mod providers;
 pub mod registry;
 pub mod script_executor;
@@ -124,6 +124,12 @@ pub struct DetectionResult {
     pub evidence: Vec<Evidence>,
     pub detection_time_ms: u64,
     pub metadata: DetectionMetadata,
+    /// Operator-facing caveats about detection reliability
+    #[serde(default)]
+    pub caveats: Vec<String>,
+    /// Security configuration active during this scan
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_posture: Option<SecurityPosture>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +143,48 @@ pub struct DetectionMetadata {
     pub timestamp: DateTime<Utc>,
     pub version: String,
     pub user_agent: String,
+}
+
+/// Records the security configuration active during a scan.
+/// Included in every detection result for trust/audit purposes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityPosture {
+    /// Whether TLS certificate validation was disabled
+    pub insecure_tls: bool,
+    /// CORS policy mode: "restricted" or "permissive"
+    pub cors_mode: String,
+    /// Whether API token authentication is enabled
+    pub api_auth_enabled: bool,
+    /// List of authorized consent targets active during run
+    #[serde(default)]
+    pub consent_scope: Vec<String>,
+}
+
+impl SecurityPosture {
+    /// Build from current environment configuration.
+    pub fn from_env() -> Self {
+        let insecure_tls = std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok();
+        let api_auth_enabled = std::env::var("WAF_DETECTOR_API_TOKEN")
+            .map(|t| !t.is_empty())
+            .unwrap_or(false);
+        let cors_mode = if std::env::var("WAF_DETECTOR_ALLOWED_ORIGINS").is_ok() || api_auth_enabled
+        {
+            "restricted".to_string()
+        } else {
+            "permissive".to_string()
+        };
+        let consent_scope = crate::effectiveness::consent::ConsentManager::new()
+            .status()
+            .map(|s| s.authorized_targets)
+            .unwrap_or_default();
+
+        Self {
+            insecure_tls,
+            cors_mode,
+            api_auth_enabled,
+            consent_scope,
+        }
+    }
 }
 
 impl DetectionResult {
@@ -179,6 +227,49 @@ impl DetectionResult {
         } else {
             self.evidence_map.values().flatten().cloned().collect()
         }
+    }
+
+    /// Generate caveats based on detection conditions.
+    pub fn generate_caveats(&mut self) {
+        let mut caveats = Vec::new();
+
+        // Caveat: insecure TLS
+        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+            caveats.push("TLS certificates were not validated during this scan".to_string());
+        }
+
+        // Caveat: low-confidence body-only detection
+        for (provider, evidence_list) in &self.evidence_map {
+            let has_header_evidence = evidence_list
+                .iter()
+                .any(|e| matches!(e.method_type, DetectionMethod::Header(_)));
+            let has_body_evidence = evidence_list
+                .iter()
+                .any(|e| matches!(e.method_type, DetectionMethod::Body(_)));
+            if has_body_evidence && !has_header_evidence {
+                caveats.push(format!(
+                    "Detection of {} relies on body patterns only — consider additional verification",
+                    provider
+                ));
+            }
+        }
+
+        // Caveat: timing-dominant evidence
+        for (provider, evidence_list) in &self.evidence_map {
+            let timing_count = evidence_list
+                .iter()
+                .filter(|e| matches!(e.method_type, DetectionMethod::Timing))
+                .count();
+            let total = evidence_list.len();
+            if total > 0 && timing_count as f64 / total as f64 > 0.5 {
+                caveats.push(format!(
+                    "Detection of {} relies heavily on timing analysis — results may vary with network conditions",
+                    provider
+                ));
+            }
+        }
+
+        self.caveats = caveats;
     }
 
     pub fn format_as_table(&self) -> String {
@@ -272,9 +363,27 @@ impl DetectionResult {
                     }
                 }
                 if evidence_list.len() > 3 {
-                    table.push_str(&format!("│   ... and {} more evidence items                                     │\n", 
+                    table.push_str(&format!("│   ... and {} more evidence items                                     │\n",
                         evidence_list.len() - 3));
                 }
+            }
+        }
+
+        // Add caveats section if any
+        if !self.caveats.is_empty() {
+            table.push_str(
+                "├─────────────────────────────────────────────────────────────────────────┤\n",
+            );
+            table.push_str(
+                "│ ⚠ Caveats                                                              │\n",
+            );
+            for caveat in &self.caveats {
+                let display = if caveat.len() > 67 {
+                    &caveat[..67]
+                } else {
+                    caveat
+                };
+                table.push_str(&format!("│  • {:<67} │\n", display));
             }
         }
 
@@ -349,5 +458,259 @@ impl std::str::FromStr for OutputFormat {
             "table" => Ok(OutputFormat::Table),
             _ => Err(format!("Unknown output format: {s}")),
         }
+    }
+}
+
+/// Deployment mode for the WAF detector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeploymentMode {
+    /// Development mode (default) — permissive settings
+    Dev,
+    /// Production mode — enforces security controls
+    Prod,
+}
+
+impl DeploymentMode {
+    /// Read deployment mode from WAF_DETECTOR_MODE env var.
+    /// Defaults to Dev if unset or unrecognized.
+    pub fn from_env() -> Self {
+        match std::env::var("WAF_DETECTOR_MODE").as_deref() {
+            Ok("prod") | Ok("production") => Self::Prod,
+            _ => Self::Dev,
+        }
+    }
+
+    pub fn is_prod(&self) -> bool {
+        *self == Self::Prod
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deployment_mode_defaults_to_dev() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_MODE");
+        assert_eq!(DeploymentMode::from_env(), DeploymentMode::Dev);
+    }
+
+    #[test]
+    fn deployment_mode_reads_prod() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var("WAF_DETECTOR_MODE", "prod");
+        assert_eq!(DeploymentMode::from_env(), DeploymentMode::Prod);
+        std::env::remove_var("WAF_DETECTOR_MODE");
+    }
+
+    #[test]
+    fn deployment_mode_reads_production() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var("WAF_DETECTOR_MODE", "production");
+        assert_eq!(DeploymentMode::from_env(), DeploymentMode::Prod);
+        std::env::remove_var("WAF_DETECTOR_MODE");
+    }
+
+    #[test]
+    fn deployment_mode_is_prod_check() {
+        assert!(DeploymentMode::Prod.is_prod());
+        assert!(!DeploymentMode::Dev.is_prod());
+    }
+
+    #[test]
+    fn generate_caveats_empty_when_clean() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_INSECURE_TLS");
+
+        let mut evidence_map = HashMap::new();
+        evidence_map.insert(
+            "CloudFlare".to_string(),
+            vec![Evidence {
+                method_type: DetectionMethod::Header("cf-ray".to_string()),
+                confidence: 0.95,
+                description: "CF-Ray header detected".to_string(),
+                raw_data: "abcd1234-SEA".to_string(),
+                signature_matched: "cf-ray-header".to_string(),
+            }],
+        );
+
+        let mut result = DetectionResult {
+            url: "https://example.com".to_string(),
+            detected_waf: Some(ProviderDetection {
+                name: "CloudFlare".to_string(),
+                confidence: 0.95,
+            }),
+            detected_cdn: None,
+            provider_scores: HashMap::new(),
+            evidence_map,
+            evidence: Vec::new(),
+            detection_time_ms: 100,
+            metadata: DetectionMetadata {
+                timestamp: chrono::Utc::now(),
+                version: "0.1.0".to_string(),
+                user_agent: "WAF-Detector/1.0".to_string(),
+            },
+            caveats: Vec::new(),
+            security_posture: None,
+        };
+
+        result.generate_caveats();
+        assert!(result.caveats.is_empty());
+    }
+
+    #[test]
+    fn generate_caveats_flags_insecure_tls() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var("WAF_DETECTOR_INSECURE_TLS", "1");
+
+        let mut result = DetectionResult {
+            url: "https://example.com".to_string(),
+            detected_waf: None,
+            detected_cdn: None,
+            provider_scores: HashMap::new(),
+            evidence_map: HashMap::new(),
+            evidence: Vec::new(),
+            detection_time_ms: 100,
+            metadata: DetectionMetadata {
+                timestamp: chrono::Utc::now(),
+                version: "0.1.0".to_string(),
+                user_agent: "WAF-Detector/1.0".to_string(),
+            },
+            caveats: Vec::new(),
+            security_posture: None,
+        };
+
+        result.generate_caveats();
+        assert_eq!(result.caveats.len(), 1);
+        assert!(result.caveats[0].contains("TLS certificates were not validated"));
+
+        std::env::remove_var("WAF_DETECTOR_INSECURE_TLS");
+    }
+
+    #[test]
+    fn generate_caveats_flags_body_only_detection() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_INSECURE_TLS");
+
+        let mut evidence_map = HashMap::new();
+        evidence_map.insert(
+            "ModSecurity".to_string(),
+            vec![Evidence {
+                method_type: DetectionMethod::Body("ModSecurity".to_string()),
+                confidence: 0.70,
+                description: "ModSecurity pattern in body".to_string(),
+                raw_data: "ModSecurity error page".to_string(),
+                signature_matched: "modsecurity-error-body".to_string(),
+            }],
+        );
+
+        let mut result = DetectionResult {
+            url: "https://example.com".to_string(),
+            detected_waf: Some(ProviderDetection {
+                name: "ModSecurity".to_string(),
+                confidence: 0.70,
+            }),
+            detected_cdn: None,
+            provider_scores: HashMap::new(),
+            evidence_map,
+            evidence: Vec::new(),
+            detection_time_ms: 100,
+            metadata: DetectionMetadata {
+                timestamp: chrono::Utc::now(),
+                version: "0.1.0".to_string(),
+                user_agent: "WAF-Detector/1.0".to_string(),
+            },
+            caveats: Vec::new(),
+            security_posture: None,
+        };
+
+        result.generate_caveats();
+        assert_eq!(result.caveats.len(), 1);
+        assert!(result.caveats[0].contains("body patterns only"));
+        assert!(result.caveats[0].contains("ModSecurity"));
+    }
+
+    #[test]
+    fn generate_caveats_flags_timing_dominant() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_INSECURE_TLS");
+
+        let mut evidence_map = HashMap::new();
+        evidence_map.insert(
+            "GenericWAF".to_string(),
+            vec![
+                Evidence {
+                    method_type: DetectionMethod::Timing,
+                    confidence: 0.65,
+                    description: "Timing anomaly detected".to_string(),
+                    raw_data: "500ms delay".to_string(),
+                    signature_matched: "timing-waf-delay".to_string(),
+                },
+                Evidence {
+                    method_type: DetectionMethod::Timing,
+                    confidence: 0.70,
+                    description: "Another timing anomaly".to_string(),
+                    raw_data: "600ms delay".to_string(),
+                    signature_matched: "timing-waf-delay-2".to_string(),
+                },
+            ],
+        );
+
+        let mut result = DetectionResult {
+            url: "https://example.com".to_string(),
+            detected_waf: Some(ProviderDetection {
+                name: "GenericWAF".to_string(),
+                confidence: 0.70,
+            }),
+            detected_cdn: None,
+            provider_scores: HashMap::new(),
+            evidence_map,
+            evidence: Vec::new(),
+            detection_time_ms: 100,
+            metadata: DetectionMetadata {
+                timestamp: chrono::Utc::now(),
+                version: "0.1.0".to_string(),
+                user_agent: "WAF-Detector/1.0".to_string(),
+            },
+            caveats: Vec::new(),
+            security_posture: None,
+        };
+
+        result.generate_caveats();
+        assert_eq!(result.caveats.len(), 1);
+        assert!(result.caveats[0].contains("timing analysis"));
+        assert!(result.caveats[0].contains("network conditions"));
+    }
+
+    #[test]
+    fn security_posture_from_env_defaults() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::remove_var("WAF_DETECTOR_INSECURE_TLS");
+        std::env::remove_var("WAF_DETECTOR_API_TOKEN");
+        std::env::remove_var("WAF_DETECTOR_ALLOWED_ORIGINS");
+
+        let posture = SecurityPosture::from_env();
+        assert!(!posture.insecure_tls);
+        assert!(!posture.api_auth_enabled);
+        assert_eq!(posture.cors_mode, "permissive");
+
+        std::env::remove_var("WAF_DETECTOR_INSECURE_TLS");
     }
 }

@@ -606,6 +606,7 @@ impl EffectivenessTest {
             }
             if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
                 client_builder = client_builder.danger_accept_invalid_certs(true);
+                crate::http::warn_insecure_tls();
             }
             client_builder
         };

@@ -1,0 +1,92 @@
+name: Detection Benchmark
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run weekly on Sundays at 00:00 UTC
+    - cron: '0 0 * * 0'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: Run Detection Benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build release binary
+      run: cargo build --release
+
+    - name: Run benchmark
+      run: |
+        ./target/release/waf-detect \
+          --benchmark benchmark_corpus.json \
+          --benchmark-output benchmark_results.json \
+          --benchmark-workers 2
+
+    - name: Check F1 thresholds
+      run: |
+        python3 -c "
+        import json, sys
+
+        with open('benchmark_results.json') as f:
+            report = json.load(f)
+
+        # Minimum thresholds (ratchet mechanism)
+        MIN_WAF_ACCURACY = 0.50
+        MIN_CDN_ACCURACY = 0.50
+        MIN_OVERALL_ACCURACY = 0.40
+
+        waf_acc = report['waf_accuracy']
+        cdn_acc = report['cdn_accuracy']
+        overall_acc = report['overall_accuracy']
+
+        print(f'WAF Accuracy:     {waf_acc:.1%} (min: {MIN_WAF_ACCURACY:.0%})')
+        print(f'CDN Accuracy:     {cdn_acc:.1%} (min: {MIN_CDN_ACCURACY:.0%})')
+        print(f'Overall Accuracy: {overall_acc:.1%} (min: {MIN_OVERALL_ACCURACY:.0%})')
+
+        # Per-provider F1 summary
+        print()
+        print('WAF Provider F1 Scores:')
+        for m in report.get('waf_provider_metrics', []):
+            print(f\"  {m['provider']:<15} F1={m['f1']:.2f}  P={m['precision']:.2f}  R={m['recall']:.2f}\")
+
+        print()
+        print('CDN Provider F1 Scores:')
+        for m in report.get('cdn_provider_metrics', []):
+            print(f\"  {m['provider']:<15} F1={m['f1']:.2f}  P={m['precision']:.2f}  R={m['recall']:.2f}\")
+
+        failed = False
+        if waf_acc < MIN_WAF_ACCURACY:
+            print(f'FAIL: WAF accuracy {waf_acc:.1%} below threshold {MIN_WAF_ACCURACY:.0%}')
+            failed = True
+        if cdn_acc < MIN_CDN_ACCURACY:
+            print(f'FAIL: CDN accuracy {cdn_acc:.1%} below threshold {MIN_CDN_ACCURACY:.0%}')
+            failed = True
+        if overall_acc < MIN_OVERALL_ACCURACY:
+            print(f'FAIL: Overall accuracy {overall_acc:.1%} below threshold {MIN_OVERALL_ACCURACY:.0%}')
+            failed = True
+
+        if failed:
+            sys.exit(1)
+        else:
+            print()
+            print('All accuracy thresholds met.')
+        "
+
+    - name: Upload benchmark results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: benchmark-results
+        path: benchmark_results.json
+        retention-days: 90

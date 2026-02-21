@@ -92,6 +92,7 @@ pub async fn analyze_static_page(url: &str) -> Result<StaticPageAnalysis> {
         }
         if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
             builder = builder.danger_accept_invalid_certs(true);
+            crate::http::warn_insecure_tls();
         }
         builder
     };
@@ -99,7 +100,9 @@ pub async fn analyze_static_page(url: &str) -> Result<StaticPageAnalysis> {
         Ok(Ok(client)) => client,
         Ok(Err(err)) => return Err(err.into()),
         Err(_) => {
-            eprintln!("⚠️  Static detection HTTP client init panicked; retrying without system proxy.");
+            eprintln!(
+                "⚠️  Static detection HTTP client init panicked; retrying without system proxy."
+            );
             eprintln!(
                 "⚠️  Static detection HTTP client init panicked; retrying without system proxy."
             );

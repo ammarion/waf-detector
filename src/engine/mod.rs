@@ -110,6 +110,8 @@ impl DetectionEngine {
                                 version: "1.0.0".to_string(),
                                 user_agent: "WAF-Detector/1.0".to_string(),
                             },
+                            caveats: Vec::new(),
+                            security_posture: Some(crate::SecurityPosture::from_env()),
                         };
                         Some((url.to_string(), failed_result))
                     }

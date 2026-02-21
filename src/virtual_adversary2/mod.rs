@@ -151,6 +151,30 @@ pub enum Va2ChallengeKind {
     CookieGate,
 }
 
+/// Typed challenge taxonomy for VA2 probe outcomes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChallengeType {
+    /// JavaScript challenge page (Cloudflare JS challenge, Akamai bot manager)
+    JavaScriptChallenge,
+    /// CAPTCHA or interactive challenge (reCAPTCHA, hCaptcha, Turnstile)
+    CaptchaChallenge,
+    /// Cookie-based bot verification gate
+    CookieGate,
+    /// Rate limit soft block (429 with retry-after)
+    RateLimitSoftBlock,
+}
+
+/// A detected challenge with confidence score.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectedChallenge {
+    pub challenge_type: ChallengeType,
+    /// Confidence that this challenge type is correct (0.0 - 1.0)
+    pub confidence: f64,
+    /// Evidence description
+    pub evidence: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Va2ChallengeProfile {
     pub total: usize,
@@ -158,8 +182,9 @@ pub struct Va2ChallengeProfile {
     pub captcha: usize,
     pub js_challenge: usize,
     pub cookie_gate: usize,
+    #[serde(default)]
+    pub detected_challenges: Vec<DetectedChallenge>,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Va2ThrottleCurve {
@@ -381,7 +406,7 @@ fn compute_normalization_variance(
             max_delta = delta;
         }
         let baseline_len = samples.first().map(|(_, l)| *l).unwrap_or(0);
-        total_len_delta += (len.saturating_sub(baseline_len)) as f64;
+        total_len_delta += (*len as f64 - baseline_len as f64).abs();
     }
     let avg_len_delta = if samples.is_empty() {
         0.0
@@ -416,6 +441,82 @@ fn update_statefulness(
     }
 }
 
+/// Classify response into challenge types with confidence scores.
+fn classify_challenge(response: &Va2HttpResponse) -> Vec<DetectedChallenge> {
+    let mut challenges = Vec::new();
+    let body_lower = response.body.to_lowercase();
+
+    // Rate limit soft block
+    if response.status == 429 {
+        let confidence = if response.headers.contains_key("retry-after") {
+            0.95
+        } else {
+            0.80
+        };
+        challenges.push(DetectedChallenge {
+            challenge_type: ChallengeType::RateLimitSoftBlock,
+            confidence,
+            evidence: format!(
+                "HTTP 429 status{}",
+                if response.headers.contains_key("retry-after") {
+                    " with Retry-After header"
+                } else {
+                    ""
+                }
+            ),
+        });
+    }
+
+    // Hard blocks (401, 403) - could be a block, not a challenge - don't add to challenge list
+    // Just note: these are handled in the existing hard_blocks counter
+
+    // CAPTCHA detection
+    if body_lower.contains("captcha")
+        || body_lower.contains("recaptcha")
+        || body_lower.contains("hcaptcha")
+        || body_lower.contains("turnstile")
+    {
+        let confidence = if body_lower.contains("recaptcha") || body_lower.contains("hcaptcha") {
+            0.90
+        } else {
+            0.75
+        };
+        challenges.push(DetectedChallenge {
+            challenge_type: ChallengeType::CaptchaChallenge,
+            confidence,
+            evidence: "CAPTCHA keywords detected in response body".to_string(),
+        });
+    }
+
+    // JavaScript challenge detection
+    if body_lower.contains("javascript") && body_lower.contains("challenge") {
+        challenges.push(DetectedChallenge {
+            challenge_type: ChallengeType::JavaScriptChallenge,
+            confidence: 0.80,
+            evidence: "JavaScript challenge keywords in response body".to_string(),
+        });
+    } else if response.status == 503
+        && (body_lower.contains("checking your browser") || body_lower.contains("just a moment"))
+    {
+        challenges.push(DetectedChallenge {
+            challenge_type: ChallengeType::JavaScriptChallenge,
+            confidence: 0.90,
+            evidence: "503 with browser-check page pattern".to_string(),
+        });
+    }
+
+    // Cookie gate detection
+    if response.headers.contains_key("set-cookie") && body_lower.contains("challenge") {
+        challenges.push(DetectedChallenge {
+            challenge_type: ChallengeType::CookieGate,
+            confidence: 0.70,
+            evidence: "Set-Cookie header with challenge keyword in body".to_string(),
+        });
+    }
+
+    challenges
+}
+
 fn update_challenge_profile(profile: &mut Va2ChallengeProfile, response: &Va2HttpResponse) {
     let mut matched = false;
     let body_lower = response.body.to_lowercase();
@@ -438,6 +539,10 @@ fn update_challenge_profile(profile: &mut Va2ChallengeProfile, response: &Va2Htt
     if matched {
         profile.total += 1;
     }
+
+    // Add typed challenge classification
+    let detected = classify_challenge(response);
+    profile.detected_challenges.extend(detected);
 }
 
 fn compute_throttle_curve(samples: &[u128]) -> Va2ThrottleCurve {
@@ -452,7 +557,6 @@ fn compute_throttle_curve(samples: &[u128]) -> Va2ThrottleCurve {
         last = Some(*value);
     }
     let steps = samples.len().saturating_sub(1) as f64;
-    curve.slope_ms_per_step = if steps > 0.0 { total_slope / steps } else { 0.0 };
     curve.slope_ms_per_step = if steps > 0.0 {
         total_slope / steps
     } else {
@@ -686,6 +790,7 @@ mod tests {
     use chrono::Utc;
     use tempfile::TempDir;
 
+    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the entire test body
     async fn with_temp_home<F, Fut>(f: F)
     where
         F: FnOnce(TempDir) -> Fut,
@@ -784,12 +889,6 @@ mod tests {
     #[test]
     fn test_va2_plan_serializes() {
         let phases = vec![Va2Phase::Baseline];
-        let plan = build_va2_campaign_plan(
-            "https://example.com",
-            &phases,
-            Va2CampaignConfig::default(),
-        )
-        .unwrap();
         let plan =
             build_va2_campaign_plan("https://example.com", &phases, Va2CampaignConfig::default())
                 .unwrap();
@@ -807,7 +906,7 @@ mod tests {
                 Va2CampaignConfig::default(),
             )
             .unwrap();
-            let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
+            let runner = Va2Runner::with_adapter(Box::new(StubAdapter)).unwrap();
             let err = runner.run_plan(plan).await.unwrap_err().to_string();
             assert!(err.contains("Consent is required"));
         })
@@ -846,7 +945,7 @@ mod tests {
                     step.path = "/pressure".to_string();
                 }
             }
-            let runner = Va2Runner::with_adapter(Box::new(StubAdapter::default())).unwrap();
+            let runner = Va2Runner::with_adapter(Box::new(StubAdapter)).unwrap();
             let report = runner.run_plan(plan).await.unwrap();
             assert!(!report.results.is_empty());
             assert_eq!(report.results.len(), report.plan.steps.len());
@@ -913,5 +1012,95 @@ mod tests {
         };
         let pmi = compute_pmi(&wbf);
         assert_eq!(pmi.label, "strong");
+    }
+
+    #[test]
+    fn test_classify_challenge_rate_limit() {
+        let mut headers = HashMap::new();
+        headers.insert("retry-after".to_string(), "60".to_string());
+        let response = Va2HttpResponse {
+            status: 429,
+            headers,
+            body: "Too many requests".to_string(),
+        };
+        let challenges = classify_challenge(&response);
+        assert_eq!(challenges.len(), 1);
+        assert_eq!(
+            challenges[0].challenge_type,
+            ChallengeType::RateLimitSoftBlock
+        );
+        assert_eq!(challenges[0].confidence, 0.95);
+        assert!(challenges[0].evidence.contains("Retry-After"));
+    }
+
+    #[test]
+    fn test_classify_challenge_captcha() {
+        let response = Va2HttpResponse {
+            status: 200,
+            headers: HashMap::new(),
+            body: "Please solve this recaptcha to continue".to_string(),
+        };
+        let challenges = classify_challenge(&response);
+        assert_eq!(challenges.len(), 1);
+        assert_eq!(
+            challenges[0].challenge_type,
+            ChallengeType::CaptchaChallenge
+        );
+        assert_eq!(challenges[0].confidence, 0.90);
+        assert!(challenges[0].evidence.contains("CAPTCHA"));
+    }
+
+    #[test]
+    fn test_classify_challenge_javascript() {
+        let response = Va2HttpResponse {
+            status: 503,
+            headers: HashMap::new(),
+            body: "Checking your browser before accessing...".to_string(),
+        };
+        let challenges = classify_challenge(&response);
+        assert_eq!(challenges.len(), 1);
+        assert_eq!(
+            challenges[0].challenge_type,
+            ChallengeType::JavaScriptChallenge
+        );
+        assert_eq!(challenges[0].confidence, 0.90);
+        assert!(challenges[0].evidence.contains("browser-check"));
+    }
+
+    #[test]
+    fn test_classify_challenge_cookie_gate() {
+        let mut headers = HashMap::new();
+        headers.insert("set-cookie".to_string(), "session=abc123".to_string());
+        let response = Va2HttpResponse {
+            status: 200,
+            headers,
+            body: "Please complete this challenge".to_string(),
+        };
+        let challenges = classify_challenge(&response);
+        assert_eq!(challenges.len(), 1);
+        assert_eq!(challenges[0].challenge_type, ChallengeType::CookieGate);
+        assert_eq!(challenges[0].confidence, 0.70);
+        assert!(challenges[0].evidence.contains("Set-Cookie"));
+    }
+
+    #[test]
+    fn test_update_challenge_profile_with_detected_challenges() {
+        let mut profile = Va2ChallengeProfile::default();
+        let mut headers = HashMap::new();
+        headers.insert("retry-after".to_string(), "60".to_string());
+        let response = Va2HttpResponse {
+            status: 429,
+            headers,
+            body: "Rate limited".to_string(),
+        };
+        update_challenge_profile(&mut profile, &response);
+        assert_eq!(profile.hard_blocks, 1);
+        assert_eq!(profile.total, 1);
+        assert_eq!(profile.detected_challenges.len(), 1);
+        assert_eq!(
+            profile.detected_challenges[0].challenge_type,
+            ChallengeType::RateLimitSoftBlock
+        );
+        assert_eq!(profile.detected_challenges[0].confidence, 0.95);
     }
 }

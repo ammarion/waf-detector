@@ -273,7 +273,16 @@ impl ProviderRegistry {
         };
 
         // Run all detection techniques in parallel
-        let (provider_results, timing_result, dns_result, payload_result, tls_result, h2_result, error_profile_result, connection_behavior_result) = tokio::join!(
+        let (
+            provider_results,
+            timing_result,
+            dns_result,
+            payload_result,
+            tls_result,
+            h2_result,
+            error_profile_result,
+            connection_behavior_result,
+        ) = tokio::join!(
             futures::future::join_all(provider_futures),
             timing_future,
             dns_future,
@@ -450,7 +459,7 @@ impl ProviderRegistry {
             user_agent: "WAF-Detector/1.0".to_string(),
         };
 
-        Ok(DetectionResult {
+        let mut result = DetectionResult {
             url: context.url.clone(),
             detected_waf: best_waf,
             detected_cdn: best_cdn,
@@ -459,7 +468,14 @@ impl ProviderRegistry {
             evidence: flat_evidence,
             detection_time_ms: detection_time,
             metadata,
-        })
+            caveats: Vec::new(),
+            security_posture: Some(crate::SecurityPosture::from_env()),
+        };
+
+        // Generate caveats based on detection conditions
+        result.generate_caveats();
+
+        Ok(result)
     }
 
     pub fn list_providers(&self) -> Vec<ProviderMetadata> {

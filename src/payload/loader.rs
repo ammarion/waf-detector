@@ -2,9 +2,9 @@
 //!
 //! Loads payload definitions from TOML files, with fallback to built-in defaults.
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use anyhow::Result;
 
 /// Payload definition structure matching TOML format
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,25 +52,19 @@ impl PayloadLoader {
                 tracing::debug!("Loading payload file: {}", path.display());
 
                 match std::fs::read_to_string(&path) {
-                    Ok(content) => {
-                        match toml::from_str::<PayloadFile>(&content) {
-                            Ok(file) => {
-                                tracing::info!(
-                                    "Loaded {} payloads from {}",
-                                    file.payloads.len(),
-                                    path.file_name().unwrap_or_default().to_string_lossy()
-                                );
-                                all_payloads.extend(file.payloads);
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to parse TOML file {}: {}",
-                                    path.display(),
-                                    e
-                                );
-                            }
+                    Ok(content) => match toml::from_str::<PayloadFile>(&content) {
+                        Ok(file) => {
+                            tracing::info!(
+                                "Loaded {} payloads from {}",
+                                file.payloads.len(),
+                                path.file_name().unwrap_or_default().to_string_lossy()
+                            );
+                            all_payloads.extend(file.payloads);
                         }
-                    }
+                        Err(e) => {
+                            tracing::warn!("Failed to parse TOML file {}: {}", path.display(), e);
+                        }
+                    },
                     Err(e) => {
                         tracing::warn!("Failed to read file {}: {}", path.display(), e);
                     }
@@ -131,10 +125,7 @@ impl PayloadLoader {
         min_risk: &str,
     ) -> Vec<PayloadDefinition> {
         let risk_order = ["NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
-        let min_index = risk_order
-            .iter()
-            .position(|&r| r == min_risk)
-            .unwrap_or(0);
+        let min_index = risk_order.iter().position(|&r| r == min_risk).unwrap_or(0);
 
         payloads
             .iter()

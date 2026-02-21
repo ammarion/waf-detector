@@ -76,6 +76,7 @@ impl TimingAnalyzer {
             }
             if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
                 builder = builder.danger_accept_invalid_certs(true);
+                crate::http::warn_insecure_tls();
             }
             builder
         };
