@@ -220,6 +220,24 @@ pub const API_DOCS_HTML: &str = r#"
         </div>
 
         <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/posture-summary</h3>
+            <p>Generate posture summary from detection + VA2 paired-control signals.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target_url": "https://example.com",
+  "phases": "baseline,protocol-variance",
+  "seed": 1337,
+  "budget": 12
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/perf/last-run</h3>
+            <p>Fetch in-memory p95/p99 snapshot for scan, VA, and VA2 timings.</p>
+        </div>
+
+        <div class="endpoint">
             <h3><span class="method post">POST</span> /api/virtual-adversary</h3>
             <p>Run Virtual Adversary effectiveness testing (consent required).</p>
 
@@ -663,7 +681,6 @@ mod tests {
         assert!(html.contains("downloadVaReportCsv"));
         assert!(html.contains("vaRetentionInput"));
         assert!(html.contains("vaActivityFilter"));
-        assert!(html.contains("downloadVaReportCsv"));
         assert!(html.contains("vaHistorySearch"));
         assert!(html.contains("vaAutoScroll"));
         assert!(html.contains("vaHistoryDate"));
@@ -689,5 +706,68 @@ mod tests {
         assert!(html.contains("smokeTestText"));
         assert!(html.contains("singleScanForm"));
         assert!(html.contains("batchScanForm"));
+    }
+
+    #[test]
+    fn dashboard_html_has_accessible_landmarks_and_skip_link() {
+        let html = dashboard_html();
+        assert!(html.contains("class=\"skip-link\""));
+        assert!(html.contains("href=\"#mainContent\""));
+        assert!(html.contains("<main id=\"mainContent\""));
+        assert!(html.contains("role=\"main\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_experience_mode_controls() {
+        let html = dashboard_html();
+        assert!(html.contains("id=\"experienceMode\""));
+        assert!(html.contains("value=\"beginner\""));
+        assert!(html.contains("value=\"analyst\""));
+        assert!(html.contains("id=\"experienceHint\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_explicit_aria_labels_for_critical_controls() {
+        let html = dashboard_html();
+        assert!(html.contains("aria-label=\"Close report modal\""));
+        assert!(html.contains("aria-label=\"Close evidence modal\""));
+        assert!(html.contains("aria-label=\"Replay class filter\""));
+        assert!(html.contains("aria-label=\"Replay channel filter\""));
+        assert!(html.contains("aria-label=\"Replay method filter\""));
+        assert!(html.contains("aria-label=\"Replay outcome filter\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_mode_specific_assistant_panels() {
+        let html = dashboard_html();
+        assert!(html.contains("id=\"beginnerAssistantPanel\""));
+        assert!(html.contains("data-experience=\"beginner\""));
+        assert!(html.contains("id=\"analystAssistantPanel\""));
+        assert!(html.contains("data-experience=\"analyst\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_virtual_adversary_quick_presets() {
+        let html = dashboard_html();
+        assert!(html.contains("id=\"vaPresetSafe\""));
+        assert!(html.contains("id=\"vaPresetBalanced\""));
+        assert!(html.contains("id=\"vaPresetDeep\""));
+        assert!(html.contains("id=\"vaPresetStatus\""));
+    }
+
+    #[test]
+    fn dashboard_html_has_results_insight_strip() {
+        let html = dashboard_html();
+        assert!(html.contains("id=\"resultsInsightBar\""));
+        assert!(html.contains("id=\"resultsInsightTitle\""));
+        assert!(html.contains("id=\"resultsInsightMetric\""));
+        assert!(html.contains("id=\"resultsInsightAction\""));
+    }
+
+    #[test]
+    fn dashboard_html_updates_results_insight_strip_from_render_flow() {
+        let html = dashboard_html();
+        assert!(html.contains("function renderResultsInsightStrip("));
+        assert!(html.contains("renderResultsInsightStrip(allResults);"));
     }
 }

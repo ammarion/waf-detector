@@ -2,6 +2,7 @@ name: Detection Benchmark
 
 on:
   workflow_dispatch:
+  pull_request:
   schedule:
     # Run weekly on Sundays at 00:00 UTC
     - cron: '0 0 * * 0'
@@ -30,8 +31,15 @@ jobs:
       run: |
         ./target/release/waf-detect \
           --benchmark benchmark_corpus.json \
+          --benchmark-mode fixture \
+          --benchmark-fixtures tests/fixtures/benchmark \
           --benchmark-output benchmark_results.json \
+          --perf-report perf_report.json \
           --benchmark-workers 2
+
+    - name: Determinism + perf gates (hermetic)
+      run: |
+        ./scripts/check_perf_and_determinism.sh benchmark_corpus.json tests/fixtures/benchmark
 
     - name: Check F1 thresholds
       run: |
@@ -88,5 +96,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: benchmark-results
-        path: benchmark_results.json
+        path: |
+          benchmark_results.json
+          perf_report.json
         retention-days: 90

@@ -4,6 +4,7 @@ use crate::{http::HttpClient, registry::ProviderRegistry, DetectionContext, Dete
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 pub mod waf_mode_detector;
 use waf_mode_detector::WafModeDetector;
@@ -38,6 +39,7 @@ impl DetectionEngine {
     }
 
     pub async fn detect(&self, url: &str) -> Result<DetectionResult> {
+        let started = Instant::now();
         // Run HTTP and DNS concurrently
         let http_future = self.http_client.get(url);
         let dns_future = self.dns_resolver.resolve(url);
@@ -62,6 +64,11 @@ impl DetectionEngine {
         };
 
         if response.is_none() && dns_info.is_none() {
+            crate::perf::record(
+                crate::perf::PerfKind::Scan,
+                started.elapsed().as_millis() as u64,
+                crate::perf::PerfMode::Live,
+            );
             return Err(anyhow::anyhow!("Both HTTP and DNS failed for {url}"));
         }
 
@@ -75,7 +82,13 @@ impl DetectionEngine {
         };
 
         // Run detection through registry
-        self.registry.detect_all(&context).await
+        let result = self.registry.detect_all(&context).await;
+        crate::perf::record(
+            crate::perf::PerfKind::Scan,
+            started.elapsed().as_millis() as u64,
+            crate::perf::PerfMode::Live,
+        );
+        result
     }
 
     pub async fn detect_batch(

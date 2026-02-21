@@ -1,0 +1,370 @@
+{
+  "responses": {
+    "https://discord.com": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 80,
+      "error": null
+    },
+    "https://medium.com": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 87,
+      "error": null
+    },
+    "https://cloudflare.com": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 94,
+      "error": null
+    },
+    "https://canva.com": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 101,
+      "error": null
+    },
+    "https://shopify.com": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 108,
+      "error": null
+    },
+    "https://apple.com": {
+      "detected_waf": "Akamai",
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 115,
+      "error": null
+    },
+    "https://adobe.com": {
+      "detected_waf": "Akamai",
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 122,
+      "error": null
+    },
+    "https://dell.com": {
+      "detected_waf": "Akamai",
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 129,
+      "error": null
+    },
+    "https://fedex.com": {
+      "detected_waf": "Akamai",
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 136,
+      "error": null
+    },
+    "https://ups.com": {
+      "detected_waf": "Akamai",
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 143,
+      "error": null
+    },
+    "https://amazon.com": {
+      "detected_waf": "AWS",
+      "detected_cdn": "AWS",
+      "detection_time_ms": 150,
+      "error": null
+    },
+    "https://netflix.com": {
+      "detected_waf": "AWS",
+      "detected_cdn": "AWS",
+      "detection_time_ms": 80,
+      "error": null
+    },
+    "https://twitch.tv": {
+      "detected_waf": "AWS",
+      "detected_cdn": "AWS",
+      "detection_time_ms": 87,
+      "error": null
+    },
+    "https://hulu.com": {
+      "detected_waf": "AWS",
+      "detected_cdn": "AWS",
+      "detection_time_ms": 94,
+      "error": null
+    },
+    "https://aws.amazon.com": {
+      "detected_waf": "AWS",
+      "detected_cdn": "AWS",
+      "detection_time_ms": 101,
+      "error": null
+    },
+    "https://github.com": {
+      "detected_waf": "Fastly",
+      "detected_cdn": "Fastly",
+      "detection_time_ms": 108,
+      "error": null
+    },
+    "https://reddit.com": {
+      "detected_waf": "Fastly",
+      "detected_cdn": "Fastly",
+      "detection_time_ms": 115,
+      "error": null
+    },
+    "https://vimeo.com": {
+      "detected_waf": "Fastly",
+      "detected_cdn": "Fastly",
+      "detection_time_ms": 122,
+      "error": null
+    },
+    "https://stripe.com": {
+      "detected_waf": "Fastly",
+      "detected_cdn": "Fastly",
+      "detection_time_ms": 129,
+      "error": null
+    },
+    "https://fastly.com": {
+      "detected_waf": "Fastly",
+      "detected_cdn": "Fastly",
+      "detection_time_ms": 136,
+      "error": null
+    },
+    "https://vercel.com": {
+      "detected_waf": "Vercel",
+      "detected_cdn": "Vercel",
+      "detection_time_ms": 143,
+      "error": null
+    },
+    "https://nextjs.org": {
+      "detected_waf": "Vercel",
+      "detected_cdn": "Vercel",
+      "detection_time_ms": 150,
+      "error": null
+    },
+    "https://v0.dev": {
+      "detected_waf": "Vercel",
+      "detected_cdn": "Vercel",
+      "detection_time_ms": 80,
+      "error": null
+    },
+    "https://microsoft.com": {
+      "detected_waf": "Azure",
+      "detected_cdn": "Azure",
+      "detection_time_ms": 87,
+      "error": null
+    },
+    "https://azure.microsoft.com": {
+      "detected_waf": "Azure",
+      "detected_cdn": "Azure",
+      "detection_time_ms": 94,
+      "error": null
+    },
+    "https://bing.com": {
+      "detected_waf": "Azure",
+      "detected_cdn": "Azure",
+      "detection_time_ms": 101,
+      "error": null
+    },
+    "https://office.com": {
+      "detected_waf": "Azure",
+      "detected_cdn": "Azure",
+      "detection_time_ms": 108,
+      "error": null
+    },
+    "https://accenture.com": {
+      "detected_waf": "Imperva",
+      "detected_cdn": "Imperva",
+      "detection_time_ms": 115,
+      "error": null
+    },
+    "https://zillow.com": {
+      "detected_waf": "Imperva",
+      "detected_cdn": "Imperva",
+      "detection_time_ms": 122,
+      "error": null
+    },
+    "https://imperva.com": {
+      "detected_waf": "Imperva",
+      "detected_cdn": "Imperva",
+      "detection_time_ms": 129,
+      "error": null
+    },
+    "https://godaddy.com": {
+      "detected_waf": "Sucuri",
+      "detected_cdn": "Sucuri",
+      "detection_time_ms": 136,
+      "error": null
+    },
+    "https://wordpress.org": {
+      "detected_waf": null,
+      "detected_cdn": "Fastly",
+      "detection_time_ms": 143,
+      "error": null
+    },
+    "https://tesla.com": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 150,
+      "error": null
+    },
+    "https://spotify.com": {
+      "detected_waf": "Fastly",
+      "detected_cdn": "Fastly",
+      "detection_time_ms": 80,
+      "error": null
+    },
+    "https://salesforce.com": {
+      "detected_waf": "Akamai",
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 87,
+      "error": null
+    },
+    "https://example.com": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 94,
+      "error": null
+    },
+    "https://example.org": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 101,
+      "error": null
+    },
+    "https://mit.edu": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 108,
+      "error": null
+    },
+    "https://stanford.edu": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 115,
+      "error": null
+    },
+    "https://harvard.edu": {
+      "detected_waf": null,
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 122,
+      "error": null
+    },
+    "https://berkeley.edu": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 129,
+      "error": null
+    },
+    "https://kernel.org": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 136,
+      "error": null
+    },
+    "https://gnu.org": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 143,
+      "error": null
+    },
+    "https://python.org": {
+      "detected_waf": null,
+      "detected_cdn": "Fastly",
+      "detection_time_ms": 150,
+      "error": null
+    },
+    "https://rust-lang.org": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 80,
+      "error": null
+    },
+    "https://golang.org": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 87,
+      "error": null
+    },
+    "https://wikipedia.org": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 94,
+      "error": null
+    },
+    "https://archive.org": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 101,
+      "error": null
+    },
+    "https://craigslist.org": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 108,
+      "error": null
+    },
+    "https://gov.uk": {
+      "detected_waf": null,
+      "detected_cdn": null,
+      "detection_time_ms": 115,
+      "error": null
+    },
+    "https://census.gov": {
+      "detected_waf": null,
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 122,
+      "error": null
+    },
+    "https://stackoverflow.com": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 129,
+      "error": null
+    },
+    "https://linkedin.com": {
+      "detected_waf": "Azure",
+      "detected_cdn": "Azure",
+      "detection_time_ms": 136,
+      "error": null
+    },
+    "https://dropbox.com": {
+      "detected_waf": "AWS",
+      "detected_cdn": "AWS",
+      "detection_time_ms": 143,
+      "error": null
+    },
+    "https://slack.com": {
+      "detected_waf": "AWS",
+      "detected_cdn": "AWS",
+      "detection_time_ms": 150,
+      "error": null
+    },
+    "https://zoom.us": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 80,
+      "error": null
+    },
+    "https://paypal.com": {
+      "detected_waf": "Akamai",
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 87,
+      "error": null
+    },
+    "https://ebay.com": {
+      "detected_waf": "Akamai",
+      "detected_cdn": "Akamai",
+      "detection_time_ms": 94,
+      "error": null
+    },
+    "https://etsy.com": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 101,
+      "error": null
+    },
+    "https://airbnb.com": {
+      "detected_waf": "AWS",
+      "detected_cdn": "AWS",
+      "detection_time_ms": 108,
+      "error": null
+    },
+    "https://uber.com": {
+      "detected_waf": "CloudFlare",
+      "detected_cdn": "CloudFlare",
+      "detection_time_ms": 115,
+      "error": null
+    }
+  }
+}

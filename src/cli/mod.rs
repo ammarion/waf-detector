@@ -22,6 +22,7 @@ use url::Url;
 
 mod benchmark;
 pub use benchmark::BenchmarkReport;
+use benchmark::{BenchmarkMode, BenchmarkOptions};
 
 fn csv_escape(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') {
@@ -48,6 +49,25 @@ fn parse_va2_phases(raw: &str) -> Result<Vec<Va2Phase>> {
         return Err(anyhow!("va2 phases cannot be empty"));
     }
     Ok(phases)
+}
+
+fn parse_benchmark_mode(raw: &str) -> Result<BenchmarkMode> {
+    match raw.trim().to_lowercase().as_str() {
+        "live" => Ok(BenchmarkMode::Live),
+        "fixture" => Ok(BenchmarkMode::Fixture),
+        other => Err(anyhow!(
+            "invalid benchmark mode '{other}' (expected live|fixture)"
+        )),
+    }
+}
+
+fn feature_enabled(env_key: &str) -> bool {
+    std::env::var(env_key)
+        .map(|value| {
+            let trimmed = value.trim().to_lowercase();
+            trimmed == "1" || trimmed == "true" || trimmed == "yes" || trimmed == "on"
+        })
+        .unwrap_or(false)
 }
 
 fn load_effectiveness_overrides(
@@ -116,7 +136,9 @@ impl SimpleCliApp {
 
         // Handle benchmark evaluation
         if let Some(corpus_path) = matches.get_one::<String>("benchmark") {
-            return self.run_benchmark(&engine, corpus_path, &matches).await;
+            let result = self.run_benchmark(&engine, corpus_path, &matches).await;
+            self.write_perf_report_if_requested(&matches)?;
+            return result;
         }
 
         // Handle effectiveness testing
@@ -133,6 +155,40 @@ impl SimpleCliApp {
         if matches.get_flag("va-schema") {
             let schema = crate::virtual_adversary::va_report_schema();
             println!("{}", serde_json::to_string_pretty(&schema)?);
+            return Ok(());
+        }
+
+        // Handle explicit posture summary (feature-gated)
+        if let Some(url) = matches.get_one::<String>("posture-summary") {
+            if !feature_enabled("WAF_DETECTOR_POSTURE_SUMMARY") {
+                return Err(anyhow!(
+                    "posture summary is disabled. Set WAF_DETECTOR_POSTURE_SUMMARY=1 to enable."
+                ));
+            }
+
+            let normalized = self.normalize_url(url)?;
+            let detection_result = engine.detect(&normalized).await?;
+            let phases = parse_va2_phases("baseline,protocol-variance")?;
+            let mut plan = build_va2_campaign_plan(
+                &normalized,
+                &phases,
+                Va2CampaignConfig {
+                    seed: 1337,
+                    budget: 12,
+                },
+            )?;
+            for step in &mut plan.steps {
+                step.delay_ms = 0;
+            }
+            let runner = Va2Runner::new()?;
+            let va2_report = runner.run_plan(plan).await?;
+            let summary = crate::posture::compose_posture_summary(
+                Some(&detection_result),
+                Some(&va2_report),
+                None,
+            );
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+            self.write_perf_report_if_requested(&matches)?;
             return Ok(());
         }
 
@@ -186,6 +242,7 @@ impl SimpleCliApp {
                 }
                 println!("  Summary:    {}", posture.summary);
             }
+            self.write_perf_report_if_requested(&matches)?;
             return Ok(());
         }
 
@@ -246,12 +303,14 @@ impl SimpleCliApp {
                     }
                     println!("  Overall: {:.0}%", cc.coverage_score * 100.0);
                 }
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
 
             if matches.get_flag("va2-json") {
                 let json = serde_json::to_string_pretty(&plan)?;
                 println!("{json}");
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
 
@@ -259,6 +318,7 @@ impl SimpleCliApp {
                 let json = serde_json::to_string_pretty(&plan)?;
                 fs::write(output, json)?;
                 println!("📄 VA2 plan saved to: {output}");
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
 
@@ -269,6 +329,7 @@ impl SimpleCliApp {
                 plan.seed,
                 plan.budget
             );
+            self.write_perf_report_if_requested(&matches)?;
             return Ok(());
         }
 
@@ -291,11 +352,13 @@ impl SimpleCliApp {
             if matches.get_flag("va-json") {
                 let json = serde_json::to_string_pretty(&report)?;
                 println!("{json}");
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             if matches.get_flag("va-replay") {
                 let json = serde_json::to_string_pretty(&report.replay_plan)?;
                 println!("{json}");
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             if matches.get_flag("va-replay-csv") {
@@ -319,6 +382,7 @@ impl SimpleCliApp {
                     lines.push(row);
                 }
                 println!("{}", lines.join("\n"));
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             if let Some(output) = matches.get_one::<String>("va-output") {
@@ -338,6 +402,7 @@ impl SimpleCliApp {
                 std::fs::write(&summary_path, summary)?;
                 println!("📄 VA replay report saved to: {output}");
                 println!("📄 VA replay summary saved to: {summary_path}");
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             println!(
@@ -377,6 +442,7 @@ impl SimpleCliApp {
                     }
                 }
             }
+            self.write_perf_report_if_requested(&matches)?;
             return Ok(());
         }
 
@@ -403,17 +469,20 @@ impl SimpleCliApp {
                         probe.probe.class, probe.probe.channel, probe.display
                     );
                 }
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             let report = runner.run(url)?;
             if matches.get_flag("va-json") {
                 let json = serde_json::to_string_pretty(&report)?;
                 println!("{json}");
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             if matches.get_flag("va-replay") {
                 let json = serde_json::to_string_pretty(&report.replay_plan)?;
                 println!("{json}");
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             if matches.get_flag("va-replay-csv") {
@@ -437,6 +506,7 @@ impl SimpleCliApp {
                     lines.push(row);
                 }
                 println!("{}", lines.join("\n"));
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             if let Some(output) = matches.get_one::<String>("va-output") {
@@ -456,6 +526,7 @@ impl SimpleCliApp {
                 std::fs::write(&summary_path, summary)?;
                 println!("📄 VA report saved to: {output}");
                 println!("📄 VA summary saved to: {summary_path}");
+                self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             println!(
@@ -503,6 +574,7 @@ impl SimpleCliApp {
                     }
                 }
             }
+            self.write_perf_report_if_requested(&matches)?;
             return Ok(());
         }
 
@@ -520,13 +592,15 @@ impl SimpleCliApp {
         let verbose = matches.get_flag("verbose");
 
         // Scan targets
-        if targets.len() == 1 {
+        let result = if targets.len() == 1 {
             self.scan_single(&engine, &targets[0], &format, debug, verbose)
                 .await
         } else {
             self.scan_batch(&engine, &targets, &format, debug, verbose)
                 .await
-        }
+        };
+        self.write_perf_report_if_requested(&matches)?;
+        result
     }
 
     fn parse_targets(&self, matches: &ArgMatches) -> Result<Vec<String>> {
@@ -581,6 +655,16 @@ impl SimpleCliApp {
         } else {
             "table".to_string()
         }
+    }
+
+    fn write_perf_report_if_requested(&self, matches: &ArgMatches) -> Result<()> {
+        if let Some(path) = matches.get_one::<String>("perf-report") {
+            let snapshot = crate::perf::snapshot();
+            let json = serde_json::to_string_pretty(&snapshot)?;
+            fs::write(path, json)?;
+            println!("📈 Performance report saved to: {path}");
+        }
+        Ok(())
     }
 
     async fn scan_single(
@@ -1016,8 +1100,21 @@ impl SimpleCliApp {
         println!();
 
         let workers: usize = *matches.get_one::<usize>("benchmark-workers").unwrap_or(&3);
+        let mode_raw = if let Some(mode) = matches.get_one::<String>("benchmark-mode") {
+            mode.clone()
+        } else if feature_enabled("WAF_DETECTOR_FIXTURE_MODE") {
+            "fixture".to_string()
+        } else {
+            "live".to_string()
+        };
+        let mode = parse_benchmark_mode(&mode_raw)?;
+        let fixtures_dir = matches
+            .get_one::<String>("benchmark-fixtures")
+            .map(std::path::PathBuf::from);
+        let options = BenchmarkOptions { mode, fixtures_dir };
 
-        let report = benchmark::run_benchmark(engine, &corpus, workers).await?;
+        let report =
+            benchmark::run_benchmark_with_options(engine, &corpus, workers, &options).await?;
 
         // Print human-readable summary
         report.print_summary();
@@ -1253,6 +1350,22 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .requires("benchmark"),
         )
         .arg(
+            Arg::new("benchmark-mode")
+                .long("benchmark-mode")
+                .help("Benchmark execution mode: live network or fixture replay")
+                .value_name("MODE")
+                .value_parser(["live", "fixture"])
+                .default_value("live")
+                .requires("benchmark"),
+        )
+        .arg(
+            Arg::new("benchmark-fixtures")
+                .long("benchmark-fixtures")
+                .help("Directory containing benchmark fixture corpus (fixtures.json)")
+                .value_name("DIR")
+                .requires("benchmark"),
+        )
+        .arg(
             Arg::new("consent")
                 .long("consent")
                 .help("Manage consent for effectiveness testing")
@@ -1366,6 +1479,13 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .num_args(1),
         )
         .arg(
+            Arg::new("posture-summary")
+                .long("posture-summary")
+                .help("Generate posture summary JSON (detection + VA2 paired-control)")
+                .value_name("URL")
+                .num_args(1),
+        )
+        .arg(
             Arg::new("posture-va2")
                 .long("posture-va2")
                 .help("Include VA2 behavioral profiling in posture report (requires consent)")
@@ -1385,6 +1505,12 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Run Virtual Adversary effectiveness validation (requires consent)")
                 .value_name("URL")
                 .num_args(1),
+        )
+        .arg(
+            Arg::new("perf-report")
+                .long("perf-report")
+                .help("Write current performance snapshot (p95/p99) to JSON file")
+                .value_name("FILE"),
         )
         .arg(
             Arg::new("va-replay-run")

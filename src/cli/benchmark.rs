@@ -2,7 +2,30 @@ use crate::engine::DetectionEngine;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BenchmarkMode {
+    Live,
+    Fixture,
+}
+
+#[derive(Debug, Clone)]
+pub struct BenchmarkOptions {
+    pub mode: BenchmarkMode,
+    pub fixtures_dir: Option<PathBuf>,
+}
+
+impl Default for BenchmarkOptions {
+    fn default() -> Self {
+        Self {
+            mode: BenchmarkMode::Live,
+            fixtures_dir: None,
+        }
+    }
+}
 
 /// Corpus file format: JSON with labeled entries for benchmark evaluation.
 #[derive(Debug, Deserialize)]
@@ -21,8 +44,23 @@ pub struct CorpusEntry {
     pub notes: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct FixtureCorpus {
+    responses: HashMap<String, FixtureDetection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FixtureDetection {
+    detected_waf: Option<String>,
+    detected_cdn: Option<String>,
+    #[serde(default)]
+    detection_time_ms: u64,
+    #[serde(default)]
+    error: Option<String>,
+}
+
 /// Per-entry result from running detection against a corpus entry.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct EntryResult {
     pub url: String,
     pub expected_waf: Option<String>,
@@ -53,6 +91,9 @@ pub struct BenchmarkReport {
     pub corpus_size: usize,
     pub entries_scanned: usize,
     pub entries_errored: usize,
+    pub network_error_count: usize,
+    pub fixture_mode: bool,
+    pub determinism_hash: String,
     pub total_time_ms: u64,
     pub waf_accuracy: f64,
     pub cdn_accuracy: f64,
@@ -92,68 +133,104 @@ impl ConfusionMatrix {
 }
 
 /// Run detection benchmark against a labeled corpus.
+#[allow(dead_code)]
 pub async fn run_benchmark(
     engine: &DetectionEngine,
     corpus: &BenchmarkCorpus,
     workers: usize,
 ) -> Result<BenchmarkReport> {
-    let total_start = Instant::now();
+    run_benchmark_with_options(engine, corpus, workers, &BenchmarkOptions::default()).await
+}
 
-    // Run detection on all entries via batch
-    let urls: Vec<&str> = corpus.entries.iter().map(|e| e.url.as_str()).collect();
-    let batch_results = engine.detect_batch(&urls, workers).await?;
+fn load_fixture_corpus(fixtures_dir: &Path) -> Result<FixtureCorpus> {
+    let path = fixtures_dir.join("fixtures.json");
+    let raw = std::fs::read_to_string(&path).map_err(|err| {
+        anyhow::anyhow!(
+            "failed to read fixture corpus at {}: {}",
+            path.display(),
+            err
+        )
+    })?;
+    let corpus = serde_json::from_str::<FixtureCorpus>(&raw).map_err(|err| {
+        anyhow::anyhow!(
+            "failed to parse fixture corpus at {}: {}",
+            path.display(),
+            err
+        )
+    })?;
+    Ok(corpus)
+}
+
+fn deterministic_hash(entry_results: &[EntryResult], fixture_mode: bool) -> String {
+    let mut rows: Vec<String> = entry_results
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}",
+                entry.url,
+                entry.expected_waf,
+                entry.detected_waf,
+                entry.expected_cdn,
+                entry.detected_cdn,
+                entry.waf_correct,
+                entry.cdn_correct,
+                entry.error.clone().unwrap_or_default()
+            )
+        })
+        .collect();
+    rows.sort();
+    let marker = if fixture_mode { "fixture" } else { "live" };
+    let payload = format!("{marker}\n{}", rows.join("\n"));
+    format!("{:x}", md5::compute(payload.as_bytes()))
+}
+
+pub async fn run_benchmark_with_options(
+    engine: &DetectionEngine,
+    corpus: &BenchmarkCorpus,
+    workers: usize,
+    options: &BenchmarkOptions,
+) -> Result<BenchmarkReport> {
+    let total_start = Instant::now();
 
     // Build entry results
     let mut entry_results = Vec::with_capacity(corpus.entries.len());
     let mut entries_errored = 0usize;
+    let fixture_mode = options.mode == BenchmarkMode::Fixture;
 
-    for entry in &corpus.entries {
-        let result = batch_results.get(&entry.url);
-        match result {
-            Some(detection) => {
-                // detect_batch synthesizes empty results for failures
-                // (detection_time_ms == 0, no evidence, no detections)
-                let is_failed = detection.detection_time_ms == 0
-                    && detection.evidence.is_empty()
-                    && detection.detected_waf.is_none()
-                    && detection.detected_cdn.is_none();
-
-                if is_failed {
+    if fixture_mode {
+        let fixture_dir = options.fixtures_dir.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("benchmark fixture mode requires --benchmark-fixtures <DIR>")
+        })?;
+        let fixture = load_fixture_corpus(fixture_dir)?;
+        for entry in &corpus.entries {
+            let fixture_result = fixture.responses.get(&entry.url);
+            if let Some(found) = fixture_result {
+                let expected_waf = entry.expected_waf.as_deref().map(normalize_provider_name);
+                let expected_cdn = entry.expected_cdn.as_deref().map(normalize_provider_name);
+                let detected_waf = found.detected_waf.as_deref().map(normalize_provider_name);
+                let detected_cdn = found.detected_cdn.as_deref().map(normalize_provider_name);
+                let waf_correct = expected_waf == detected_waf;
+                let cdn_correct = expected_cdn == detected_cdn;
+                if found.error.is_some() {
                     entries_errored += 1;
-                    entry_results.push(EntryResult {
-                        url: entry.url.clone(),
-                        expected_waf: entry.expected_waf.clone(),
-                        detected_waf: None,
-                        waf_correct: false,
-                        expected_cdn: entry.expected_cdn.clone(),
-                        detected_cdn: None,
-                        cdn_correct: false,
-                        detection_time_ms: 0,
-                        error: Some("Detection failed (no HTTP response)".to_string()),
-                    });
-                } else {
-                    let detected_waf = detection.waf_name().map(normalize_provider_name);
-                    let detected_cdn = detection.cdn_name().map(normalize_provider_name);
-                    let expected_waf = entry.expected_waf.as_deref().map(normalize_provider_name);
-                    let expected_cdn = entry.expected_cdn.as_deref().map(normalize_provider_name);
-
-                    let waf_correct = expected_waf == detected_waf;
-                    let cdn_correct = expected_cdn == detected_cdn;
-
-                    entry_results.push(EntryResult {
-                        url: entry.url.clone(),
-                        expected_waf: entry.expected_waf.clone(),
-                        detected_waf: detection.waf_name().map(String::from),
-                        waf_correct,
-                        expected_cdn: entry.expected_cdn.clone(),
-                        detected_cdn: detection.cdn_name().map(String::from),
-                        cdn_correct,
-                        detection_time_ms: detection.detection_time_ms,
-                        error: None,
-                    });
                 }
-            }
-            None => {
+                entry_results.push(EntryResult {
+                    url: entry.url.clone(),
+                    expected_waf: entry.expected_waf.clone(),
+                    detected_waf: found.detected_waf.clone(),
+                    waf_correct,
+                    expected_cdn: entry.expected_cdn.clone(),
+                    detected_cdn: found.detected_cdn.clone(),
+                    cdn_correct,
+                    detection_time_ms: found.detection_time_ms,
+                    error: found.error.clone(),
+                });
+                crate::perf::record(
+                    crate::perf::PerfKind::Scan,
+                    found.detection_time_ms,
+                    crate::perf::PerfMode::Fixture,
+                );
+            } else {
                 entries_errored += 1;
                 entry_results.push(EntryResult {
                     url: entry.url.clone(),
@@ -164,8 +241,76 @@ pub async fn run_benchmark(
                     detected_cdn: None,
                     cdn_correct: false,
                     detection_time_ms: 0,
-                    error: Some("Detection returned no result".to_string()),
+                    error: Some("Missing fixture response for URL".to_string()),
                 });
+            }
+        }
+    } else {
+        // Run detection on all entries via batch
+        let urls: Vec<&str> = corpus.entries.iter().map(|e| e.url.as_str()).collect();
+        let batch_results = engine.detect_batch(&urls, workers).await?;
+        for entry in &corpus.entries {
+            let result = batch_results.get(&entry.url);
+            match result {
+                Some(detection) => {
+                    // detect_batch synthesizes empty results for failures
+                    // (detection_time_ms == 0, no evidence, no detections)
+                    let is_failed = detection.detection_time_ms == 0
+                        && detection.evidence.is_empty()
+                        && detection.detected_waf.is_none()
+                        && detection.detected_cdn.is_none();
+
+                    if is_failed {
+                        entries_errored += 1;
+                        entry_results.push(EntryResult {
+                            url: entry.url.clone(),
+                            expected_waf: entry.expected_waf.clone(),
+                            detected_waf: None,
+                            waf_correct: false,
+                            expected_cdn: entry.expected_cdn.clone(),
+                            detected_cdn: None,
+                            cdn_correct: false,
+                            detection_time_ms: 0,
+                            error: Some("Detection failed (no HTTP response)".to_string()),
+                        });
+                    } else {
+                        let detected_waf = detection.waf_name().map(normalize_provider_name);
+                        let detected_cdn = detection.cdn_name().map(normalize_provider_name);
+                        let expected_waf =
+                            entry.expected_waf.as_deref().map(normalize_provider_name);
+                        let expected_cdn =
+                            entry.expected_cdn.as_deref().map(normalize_provider_name);
+
+                        let waf_correct = expected_waf == detected_waf;
+                        let cdn_correct = expected_cdn == detected_cdn;
+
+                        entry_results.push(EntryResult {
+                            url: entry.url.clone(),
+                            expected_waf: entry.expected_waf.clone(),
+                            detected_waf: detection.waf_name().map(String::from),
+                            waf_correct,
+                            expected_cdn: entry.expected_cdn.clone(),
+                            detected_cdn: detection.cdn_name().map(String::from),
+                            cdn_correct,
+                            detection_time_ms: detection.detection_time_ms,
+                            error: None,
+                        });
+                    }
+                }
+                None => {
+                    entries_errored += 1;
+                    entry_results.push(EntryResult {
+                        url: entry.url.clone(),
+                        expected_waf: entry.expected_waf.clone(),
+                        detected_waf: None,
+                        waf_correct: false,
+                        expected_cdn: entry.expected_cdn.clone(),
+                        detected_cdn: None,
+                        cdn_correct: false,
+                        detection_time_ms: 0,
+                        error: Some("Detection returned no result".to_string()),
+                    });
+                }
             }
         }
     }
@@ -202,11 +347,16 @@ pub async fn run_benchmark(
     let confusion_matrix_cdn = build_confusion_matrix(&entry_results, DetectionType::Cdn);
 
     let total_time_ms = total_start.elapsed().as_millis() as u64;
+    let network_error_count = entry_results.iter().filter(|r| r.error.is_some()).count();
+    let determinism_hash = deterministic_hash(&entry_results, fixture_mode);
 
     Ok(BenchmarkReport {
         corpus_size: corpus.entries.len(),
         entries_scanned,
         entries_errored,
+        network_error_count,
+        fixture_mode,
+        determinism_hash,
         total_time_ms,
         waf_accuracy,
         cdn_accuracy,
@@ -349,6 +499,12 @@ impl BenchmarkReport {
             "  Corpus:    {} entries ({} scanned, {} errors)",
             self.corpus_size, self.entries_scanned, self.entries_errored
         );
+        println!(
+            "  Mode:      {}",
+            if self.fixture_mode { "fixture" } else { "live" }
+        );
+        println!("  Net Errors: {}", self.network_error_count);
+        println!("  Hash:      {}", self.determinism_hash);
         println!("  Time:      {} ms", self.total_time_ms);
         println!();
         println!("  WAF Accuracy:     {:.1}%", self.waf_accuracy * 100.0);
@@ -565,5 +721,48 @@ mod tests {
         // Total entries in matrix should sum to 2
         let total: usize = cm.matrix.iter().flat_map(|row| row.iter()).sum();
         assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn test_determinism_hash_is_order_independent() {
+        let a = EntryResult {
+            url: "https://a.com".into(),
+            expected_waf: Some("CloudFlare".into()),
+            detected_waf: Some("CloudFlare".into()),
+            waf_correct: true,
+            expected_cdn: None,
+            detected_cdn: None,
+            cdn_correct: true,
+            detection_time_ms: 10,
+            error: None,
+        };
+        let b = EntryResult {
+            url: "https://b.com".into(),
+            expected_waf: None,
+            detected_waf: None,
+            waf_correct: true,
+            expected_cdn: None,
+            detected_cdn: None,
+            cdn_correct: true,
+            detection_time_ms: 15,
+            error: None,
+        };
+        let hash_one = deterministic_hash(&[a.clone(), b.clone()], true);
+        let hash_two = deterministic_hash(&[b, a], true);
+        assert_eq!(hash_one, hash_two);
+        assert!(!hash_one.is_empty());
+    }
+
+    #[test]
+    fn test_load_fixture_corpus_roundtrip() {
+        let temp = tempfile::tempdir().unwrap();
+        let fixture_path = temp.path().join("fixtures.json");
+        std::fs::write(
+            &fixture_path,
+            r#"{"responses":{"https://example.com":{"detected_waf":"CloudFlare","detected_cdn":"CloudFlare","detection_time_ms":42}}}"#,
+        )
+        .unwrap();
+        let loaded = load_fixture_corpus(temp.path()).unwrap();
+        assert!(loaded.responses.contains_key("https://example.com"));
     }
 }
