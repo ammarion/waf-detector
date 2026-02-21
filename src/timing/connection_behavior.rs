@@ -106,10 +106,7 @@ impl ConnectionBehaviorAnalyzer {
     /// Analyze connection behavior from existing HTTP response headers
     /// This does NOT make additional requests - it analyzes headers from the response
     /// already captured in the DetectionContext
-    pub fn analyze_response_headers(
-        &self,
-        headers: &HashMap<String, String>,
-    ) -> Vec<Evidence> {
+    pub fn analyze_response_headers(&self, headers: &HashMap<String, String>) -> Vec<Evidence> {
         let mut evidence = Vec::new();
 
         // Extract connection behavior from existing headers
@@ -122,7 +119,10 @@ impl ConnectionBehaviorAnalyzer {
             // Check server-timing header pattern
             if let Some(ref pattern) = profile.server_timing_pattern {
                 if let Some(ref server_timing) = behavior.server_timing {
-                    if server_timing.to_lowercase().contains(&pattern.to_lowercase()) {
+                    if server_timing
+                        .to_lowercase()
+                        .contains(&pattern.to_lowercase())
+                    {
                         matches.push(format!("server-timing pattern '{}'", pattern));
                     }
                 }
@@ -292,9 +292,7 @@ mod tests {
 
         let ev = aws_evidence.unwrap();
         assert!(ev.confidence >= 0.70);
-        assert!(ev
-            .description
-            .contains("AWS connection behavior detected"));
+        assert!(ev.description.contains("AWS connection behavior detected"));
     }
 
     #[test]

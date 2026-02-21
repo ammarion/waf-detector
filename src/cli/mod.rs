@@ -10,9 +10,7 @@ use crate::providers::{
 };
 use crate::registry::ProviderRegistry;
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
-use crate::virtual_adversary2::{
-    build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner,
-};
+use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use clap::{Arg, ArgMatches, Command};
@@ -20,6 +18,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::time::Instant;
 use url::Url;
+
+mod benchmark;
+pub use benchmark::BenchmarkReport;
 
 fn csv_escape(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') {
@@ -88,6 +89,9 @@ impl SimpleCliApp {
     }
 
     pub async fn run_with_matches(&self, matches: ArgMatches) -> Result<()> {
+        let mode = crate::DeploymentMode::from_env();
+        tracing::info!("WAF Detector running in {:?} mode", mode);
+
         let payload_analysis_enabled = matches.get_flag("payload-analysis");
         self.registry
             .set_payload_analysis_enabled(payload_analysis_enabled);
@@ -107,6 +111,11 @@ impl SimpleCliApp {
         if let Some(consent_args) = matches.get_many::<String>("consent") {
             let args: Vec<String> = consent_args.cloned().collect();
             return crate::effectiveness::consent::manage_consent_cli(args);
+        }
+
+        // Handle benchmark evaluation
+        if let Some(corpus_path) = matches.get_one::<String>("benchmark") {
+            return self.run_benchmark(&engine, corpus_path, &matches).await;
         }
 
         // Handle effectiveness testing
@@ -206,7 +215,10 @@ impl SimpleCliApp {
             }
             if matches.get_flag("va-replay-csv") {
                 let mut lines = Vec::new();
-                lines.push("index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string());
+                lines.push(
+                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
+                        .to_string(),
+                );
                 for item in &report.replay_plan {
                     let row = [
                         item.index.to_string(),
@@ -320,7 +332,10 @@ impl SimpleCliApp {
             }
             if matches.get_flag("va-replay-csv") {
                 let mut lines = Vec::new();
-                lines.push("index,probe_class,probe_channel,probe_description,method,url,headers,body".to_string());
+                lines.push(
+                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
+                        .to_string(),
+                );
                 for item in &report.replay_plan {
                     let row = [
                         item.index.to_string(),
@@ -895,6 +910,42 @@ impl SimpleCliApp {
         Ok(())
     }
 
+    async fn run_benchmark(
+        &self,
+        engine: &DetectionEngine,
+        corpus_path: &str,
+        matches: &ArgMatches,
+    ) -> Result<()> {
+        let corpus_json = fs::read_to_string(corpus_path)
+            .map_err(|e| anyhow!("Failed to read corpus file '{}': {}", corpus_path, e))?;
+        let corpus: benchmark::BenchmarkCorpus = serde_json::from_str(&corpus_json)
+            .map_err(|e| anyhow!("Failed to parse corpus JSON: {}", e))?;
+
+        println!("📊 WAF/CDN Detection Benchmark");
+        println!(
+            "   Corpus: {} ({} entries)",
+            corpus_path,
+            corpus.entries.len()
+        );
+        println!();
+
+        let workers: usize = *matches.get_one::<usize>("benchmark-workers").unwrap_or(&3);
+
+        let report = benchmark::run_benchmark(engine, &corpus, workers).await?;
+
+        // Print human-readable summary
+        report.print_summary();
+
+        // Save JSON report if output path specified
+        if let Some(output) = matches.get_one::<String>("benchmark-output") {
+            let json = serde_json::to_string_pretty(&report)?;
+            fs::write(output, &json)?;
+            println!("\n📁 Benchmark report saved to: {output}");
+        }
+
+        Ok(())
+    }
+
     async fn run_smoke_test(&self, matches: &ArgMatches) -> Result<()> {
         // Parse URL argument
         let url = matches.get_one::<String>("targets").ok_or_else(|| {
@@ -1091,6 +1142,29 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .help("Enable aggressive testing mode (more payloads, faster)")
                 .action(clap::ArgAction::SetTrue)
                 .requires("smoke-test"),
+        )
+        .arg(
+            Arg::new("benchmark")
+                .long("benchmark")
+                .help("Run offline detection benchmark against a labeled corpus JSON file")
+                .value_name("FILE")
+                .num_args(1),
+        )
+        .arg(
+            Arg::new("benchmark-output")
+                .long("benchmark-output")
+                .help("Save benchmark results as JSON to file")
+                .value_name("FILE")
+                .requires("benchmark"),
+        )
+        .arg(
+            Arg::new("benchmark-workers")
+                .long("benchmark-workers")
+                .help("Number of concurrent detection workers for benchmark (default: 3)")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(usize))
+                .default_value("3")
+                .requires("benchmark"),
         )
         .arg(
             Arg::new("consent")

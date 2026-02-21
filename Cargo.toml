@@ -71,7 +71,7 @@ async-trait = "0.1.88"
 
 # Web server dependencies
 axum = "0.7"
-tower = "0.4"
+tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 mime = "0.3"
 percent-encoding = "2.3"

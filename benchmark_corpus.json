@@ -1,0 +1,373 @@
+{
+  "version": "1.0",
+  "description": "Frozen benchmark corpus for WAF/CDN detection evaluation",
+  "created": "2026-02-20",
+  "entries": [
+    {
+      "url": "https://discord.com",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "Known CloudFlare customer - gaming/communication platform"
+    },
+    {
+      "url": "https://medium.com",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "Known CloudFlare customer - blogging platform"
+    },
+    {
+      "url": "https://cloudflare.com",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "CloudFlare's own website"
+    },
+    {
+      "url": "https://canva.com",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "Known CloudFlare customer - design platform"
+    },
+    {
+      "url": "https://shopify.com",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "Known CloudFlare customer - ecommerce platform"
+    },
+    {
+      "url": "https://apple.com",
+      "expected_waf": "Akamai",
+      "expected_cdn": "Akamai",
+      "notes": "Known Akamai customer - major tech company"
+    },
+    {
+      "url": "https://adobe.com",
+      "expected_waf": "Akamai",
+      "expected_cdn": "Akamai",
+      "notes": "Known Akamai customer - software company"
+    },
+    {
+      "url": "https://dell.com",
+      "expected_waf": "Akamai",
+      "expected_cdn": "Akamai",
+      "notes": "Known Akamai customer - hardware manufacturer"
+    },
+    {
+      "url": "https://fedex.com",
+      "expected_waf": "Akamai",
+      "expected_cdn": "Akamai",
+      "notes": "Known Akamai customer - logistics company"
+    },
+    {
+      "url": "https://ups.com",
+      "expected_waf": "Akamai",
+      "expected_cdn": "Akamai",
+      "notes": "Known Akamai customer - shipping company"
+    },
+    {
+      "url": "https://amazon.com",
+      "expected_waf": "AWS",
+      "expected_cdn": "AWS",
+      "notes": "AWS CloudFront origin - ecommerce giant"
+    },
+    {
+      "url": "https://netflix.com",
+      "expected_waf": "AWS",
+      "expected_cdn": "AWS",
+      "notes": "Known AWS CloudFront customer - streaming service"
+    },
+    {
+      "url": "https://twitch.tv",
+      "expected_waf": "AWS",
+      "expected_cdn": "AWS",
+      "notes": "AWS CloudFront - live streaming platform"
+    },
+    {
+      "url": "https://hulu.com",
+      "expected_waf": "AWS",
+      "expected_cdn": "AWS",
+      "notes": "Known AWS CloudFront customer - streaming service"
+    },
+    {
+      "url": "https://aws.amazon.com",
+      "expected_waf": "AWS",
+      "expected_cdn": "AWS",
+      "notes": "AWS's own website"
+    },
+    {
+      "url": "https://github.com",
+      "expected_waf": "Fastly",
+      "expected_cdn": "Fastly",
+      "notes": "Known Fastly customer - code hosting platform"
+    },
+    {
+      "url": "https://reddit.com",
+      "expected_waf": "Fastly",
+      "expected_cdn": "Fastly",
+      "notes": "Known Fastly customer - social platform"
+    },
+    {
+      "url": "https://vimeo.com",
+      "expected_waf": "Fastly",
+      "expected_cdn": "Fastly",
+      "notes": "Known Fastly customer - video platform"
+    },
+    {
+      "url": "https://stripe.com",
+      "expected_waf": "Fastly",
+      "expected_cdn": "Fastly",
+      "notes": "Known Fastly customer - payment platform"
+    },
+    {
+      "url": "https://fastly.com",
+      "expected_waf": "Fastly",
+      "expected_cdn": "Fastly",
+      "notes": "Fastly's own website"
+    },
+    {
+      "url": "https://vercel.com",
+      "expected_waf": "Vercel",
+      "expected_cdn": "Vercel",
+      "notes": "Vercel's own platform"
+    },
+    {
+      "url": "https://nextjs.org",
+      "expected_waf": "Vercel",
+      "expected_cdn": "Vercel",
+      "notes": "Next.js documentation hosted on Vercel"
+    },
+    {
+      "url": "https://v0.dev",
+      "expected_waf": "Vercel",
+      "expected_cdn": "Vercel",
+      "notes": "Vercel AI product"
+    },
+    {
+      "url": "https://microsoft.com",
+      "expected_waf": "Azure",
+      "expected_cdn": "Azure",
+      "notes": "Microsoft using Azure CDN"
+    },
+    {
+      "url": "https://azure.microsoft.com",
+      "expected_waf": "Azure",
+      "expected_cdn": "Azure",
+      "notes": "Azure's own website"
+    },
+    {
+      "url": "https://bing.com",
+      "expected_waf": "Azure",
+      "expected_cdn": "Azure",
+      "notes": "Microsoft search engine on Azure CDN"
+    },
+    {
+      "url": "https://office.com",
+      "expected_waf": "Azure",
+      "expected_cdn": "Azure",
+      "notes": "Microsoft Office on Azure infrastructure"
+    },
+    {
+      "url": "https://accenture.com",
+      "expected_waf": "Imperva",
+      "expected_cdn": "Imperva",
+      "notes": "Known Imperva/Incapsula customer - consulting firm"
+    },
+    {
+      "url": "https://zillow.com",
+      "expected_waf": "Imperva",
+      "expected_cdn": "Imperva",
+      "notes": "Known Imperva customer - real estate platform"
+    },
+    {
+      "url": "https://imperva.com",
+      "expected_waf": "Imperva",
+      "expected_cdn": "Imperva",
+      "notes": "Imperva's own website"
+    },
+    {
+      "url": "https://godaddy.com",
+      "expected_waf": "Sucuri",
+      "expected_cdn": "Sucuri",
+      "notes": "GoDaddy uses Sucuri for security"
+    },
+    {
+      "url": "https://wordpress.org",
+      "expected_waf": null,
+      "expected_cdn": "Fastly",
+      "notes": "WordPress.org uses Fastly CDN without WAF"
+    },
+    {
+      "url": "https://tesla.com",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "Tesla uses CloudFlare"
+    },
+    {
+      "url": "https://spotify.com",
+      "expected_waf": "Fastly",
+      "expected_cdn": "Fastly",
+      "notes": "Spotify uses Fastly CDN"
+    },
+    {
+      "url": "https://salesforce.com",
+      "expected_waf": "Akamai",
+      "expected_cdn": "Akamai",
+      "notes": "Salesforce uses Akamai"
+    },
+    {
+      "url": "https://example.com",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "IANA example domain - no WAF/CDN"
+    },
+    {
+      "url": "https://example.org",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "IANA example domain - no WAF/CDN"
+    },
+    {
+      "url": "https://mit.edu",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "Educational site - likely no commercial WAF/CDN"
+    },
+    {
+      "url": "https://stanford.edu",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "Educational site - likely no commercial WAF/CDN"
+    },
+    {
+      "url": "https://harvard.edu",
+      "expected_waf": null,
+      "expected_cdn": "Akamai",
+      "notes": "Educational site with Akamai CDN but likely no WAF"
+    },
+    {
+      "url": "https://berkeley.edu",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "Educational site - likely no commercial WAF/CDN"
+    },
+    {
+      "url": "https://kernel.org",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "Linux kernel site - simple hosting"
+    },
+    {
+      "url": "https://gnu.org",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "GNU project - simple hosting"
+    },
+    {
+      "url": "https://python.org",
+      "expected_waf": null,
+      "expected_cdn": "Fastly",
+      "notes": "Python.org uses Fastly CDN, likely no WAF"
+    },
+    {
+      "url": "https://rust-lang.org",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "Rust language site - simple hosting"
+    },
+    {
+      "url": "https://golang.org",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "Go language site - simple hosting"
+    },
+    {
+      "url": "https://wikipedia.org",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "Wikipedia - custom infrastructure, no commercial WAF/CDN"
+    },
+    {
+      "url": "https://archive.org",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "Internet Archive - custom infrastructure"
+    },
+    {
+      "url": "https://craigslist.org",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "Craigslist - minimal infrastructure, no CDN/WAF"
+    },
+    {
+      "url": "https://gov.uk",
+      "expected_waf": null,
+      "expected_cdn": null,
+      "notes": "UK government site - custom infrastructure"
+    },
+    {
+      "url": "https://census.gov",
+      "expected_waf": null,
+      "expected_cdn": "Akamai",
+      "notes": "US Census - government site with Akamai CDN"
+    },
+    {
+      "url": "https://stackoverflow.com",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "Stack Overflow uses CloudFlare"
+    },
+    {
+      "url": "https://linkedin.com",
+      "expected_waf": "Azure",
+      "expected_cdn": "Azure",
+      "notes": "LinkedIn (Microsoft) uses Azure CDN"
+    },
+    {
+      "url": "https://dropbox.com",
+      "expected_waf": "AWS",
+      "expected_cdn": "AWS",
+      "notes": "Dropbox uses AWS CloudFront"
+    },
+    {
+      "url": "https://slack.com",
+      "expected_waf": "AWS",
+      "expected_cdn": "AWS",
+      "notes": "Slack uses AWS infrastructure"
+    },
+    {
+      "url": "https://zoom.us",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "Zoom uses CloudFlare"
+    },
+    {
+      "url": "https://paypal.com",
+      "expected_waf": "Akamai",
+      "expected_cdn": "Akamai",
+      "notes": "PayPal uses Akamai for security and CDN"
+    },
+    {
+      "url": "https://ebay.com",
+      "expected_waf": "Akamai",
+      "expected_cdn": "Akamai",
+      "notes": "eBay uses Akamai"
+    },
+    {
+      "url": "https://etsy.com",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "Etsy uses CloudFlare"
+    },
+    {
+      "url": "https://airbnb.com",
+      "expected_waf": "AWS",
+      "expected_cdn": "AWS",
+      "notes": "Airbnb uses AWS CloudFront"
+    },
+    {
+      "url": "https://uber.com",
+      "expected_waf": "CloudFlare",
+      "expected_cdn": "CloudFlare",
+      "notes": "Uber uses CloudFlare"
+    }
+  ]
+}

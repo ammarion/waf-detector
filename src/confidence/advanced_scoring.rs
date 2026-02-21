@@ -529,6 +529,370 @@ impl AdvancedScoring {
             ]);
         }
 
+        // If we see Fastly headers, it's NOT CloudFlare
+        if let Some(patterns) = negative_evidence_patterns.get_mut("CloudFlare") {
+            patterns.extend(vec![
+                "x-fastly-request-id".to_string(),
+                "fastly-restarts".to_string(),
+                "x-served-by".to_string(), // when contains fastly
+            ]);
+        }
+
+        // If we see Azure headers, it's NOT CloudFlare
+        if let Some(patterns) = negative_evidence_patterns.get_mut("CloudFlare") {
+            patterns.extend(vec![
+                "x-azure-ref".to_string(),
+                "x-msedge-ref".to_string(),
+                "x-ms-request-id".to_string(),
+            ]);
+        }
+
+        // If we see Vercel headers, it's NOT CloudFlare
+        if let Some(patterns) = negative_evidence_patterns.get_mut("CloudFlare") {
+            patterns.extend(vec![
+                "x-vercel-id".to_string(),
+                "x-vercel-cache".to_string(),
+            ]);
+        }
+
+        // If we see Imperva headers, it's NOT CloudFlare
+        if let Some(patterns) = negative_evidence_patterns.get_mut("CloudFlare") {
+            patterns.extend(vec![
+                "x-iinfo".to_string(),
+                "x-cdn".to_string(), // when "incapsula"
+                "incap_ses".to_string(),
+            ]);
+        }
+
+        // If we see F5 headers, it's NOT CloudFlare
+        if let Some(patterns) = negative_evidence_patterns.get_mut("CloudFlare") {
+            patterns.extend(vec!["x-wa-info".to_string(), "bigipserver".to_string()]);
+        }
+
+        // If we see Sucuri headers, it's NOT CloudFlare
+        if let Some(patterns) = negative_evidence_patterns.get_mut("CloudFlare") {
+            patterns.extend(vec![
+                "x-sucuri-id".to_string(),
+                "x-sucuri-cache".to_string(),
+            ]);
+        }
+
+        // If we see Akamai headers, it's NOT AWS
+        if let Some(patterns) = negative_evidence_patterns.get_mut("AWS") {
+            patterns.extend(vec![
+                "akamai-grn".to_string(),
+                "x-akamai-transformed".to_string(),
+                "x-akamai-session-info".to_string(),
+            ]);
+        }
+
+        // If we see Fastly headers, it's NOT AWS
+        if let Some(patterns) = negative_evidence_patterns.get_mut("AWS") {
+            patterns.extend(vec![
+                "x-fastly-request-id".to_string(),
+                "fastly-restarts".to_string(),
+                "x-served-by".to_string(),
+            ]);
+        }
+
+        // If we see Azure headers, it's NOT AWS
+        if let Some(patterns) = negative_evidence_patterns.get_mut("AWS") {
+            patterns.extend(vec![
+                "x-azure-ref".to_string(),
+                "x-msedge-ref".to_string(),
+                "x-ms-request-id".to_string(),
+            ]);
+        }
+
+        // If we see Vercel headers, it's NOT AWS
+        if let Some(patterns) = negative_evidence_patterns.get_mut("AWS") {
+            patterns.extend(vec![
+                "x-vercel-id".to_string(),
+                "x-vercel-cache".to_string(),
+            ]);
+        }
+
+        // If we see CloudFlare headers, it's NOT Akamai
+        negative_evidence_patterns.insert(
+            "Akamai".to_string(),
+            vec![
+                "cf-ray".to_string(),
+                "cf-cache-status".to_string(),
+                "cf-connecting-ip".to_string(),
+            ],
+        );
+
+        // If we see AWS headers, it's NOT Akamai
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Akamai") {
+            patterns.extend(vec![
+                "x-amz-cf-id".to_string(),
+                "x-amz-cf-pop".to_string(),
+                "x-amzn-requestid".to_string(),
+                "x-amz-apigw-id".to_string(),
+            ]);
+        }
+
+        // If we see Fastly headers, it's NOT Akamai
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Akamai") {
+            patterns.extend(vec![
+                "x-fastly-request-id".to_string(),
+                "fastly-restarts".to_string(),
+                "x-served-by".to_string(),
+            ]);
+        }
+
+        // If we see Azure headers, it's NOT Akamai
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Akamai") {
+            patterns.extend(vec![
+                "x-azure-ref".to_string(),
+                "x-msedge-ref".to_string(),
+                "x-ms-request-id".to_string(),
+            ]);
+        }
+
+        // If we see Vercel headers, it's NOT Akamai
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Akamai") {
+            patterns.extend(vec![
+                "x-vercel-id".to_string(),
+                "x-vercel-cache".to_string(),
+            ]);
+        }
+
+        // If we see CloudFlare headers, it's NOT Fastly
+        negative_evidence_patterns.insert(
+            "Fastly".to_string(),
+            vec![
+                "cf-ray".to_string(),
+                "cf-cache-status".to_string(),
+                "cf-connecting-ip".to_string(),
+            ],
+        );
+
+        // If we see AWS headers, it's NOT Fastly
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Fastly") {
+            patterns.extend(vec![
+                "x-amz-cf-id".to_string(),
+                "x-amz-cf-pop".to_string(),
+                "x-amzn-requestid".to_string(),
+                "x-amz-apigw-id".to_string(),
+            ]);
+        }
+
+        // If we see Akamai headers, it's NOT Fastly
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Fastly") {
+            patterns.extend(vec![
+                "akamai-grn".to_string(),
+                "x-akamai-transformed".to_string(),
+                "x-akamai-session-info".to_string(),
+            ]);
+        }
+
+        // If we see Azure headers, it's NOT Fastly
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Fastly") {
+            patterns.extend(vec![
+                "x-azure-ref".to_string(),
+                "x-msedge-ref".to_string(),
+                "x-ms-request-id".to_string(),
+            ]);
+        }
+
+        // If we see Vercel headers, it's NOT Fastly
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Fastly") {
+            patterns.extend(vec![
+                "x-vercel-id".to_string(),
+                "x-vercel-cache".to_string(),
+            ]);
+        }
+
+        // If we see CloudFlare headers, it's NOT Azure
+        negative_evidence_patterns.insert(
+            "Azure".to_string(),
+            vec![
+                "cf-ray".to_string(),
+                "cf-cache-status".to_string(),
+                "cf-connecting-ip".to_string(),
+            ],
+        );
+
+        // If we see AWS headers, it's NOT Azure
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Azure") {
+            patterns.extend(vec![
+                "x-amz-cf-id".to_string(),
+                "x-amz-cf-pop".to_string(),
+                "x-amzn-requestid".to_string(),
+                "x-amz-apigw-id".to_string(),
+            ]);
+        }
+
+        // If we see Akamai headers, it's NOT Azure
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Azure") {
+            patterns.extend(vec![
+                "akamai-grn".to_string(),
+                "x-akamai-transformed".to_string(),
+                "x-akamai-session-info".to_string(),
+            ]);
+        }
+
+        // If we see Fastly headers, it's NOT Azure
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Azure") {
+            patterns.extend(vec![
+                "x-fastly-request-id".to_string(),
+                "fastly-restarts".to_string(),
+                "x-served-by".to_string(),
+            ]);
+        }
+
+        // If we see Vercel headers, it's NOT Azure
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Azure") {
+            patterns.extend(vec![
+                "x-vercel-id".to_string(),
+                "x-vercel-cache".to_string(),
+            ]);
+        }
+
+        // If we see CloudFlare headers, it's NOT Vercel
+        negative_evidence_patterns.insert(
+            "Vercel".to_string(),
+            vec![
+                "cf-ray".to_string(),
+                "cf-cache-status".to_string(),
+                "cf-connecting-ip".to_string(),
+            ],
+        );
+
+        // If we see AWS headers, it's NOT Vercel
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Vercel") {
+            patterns.extend(vec![
+                "x-amz-cf-id".to_string(),
+                "x-amz-cf-pop".to_string(),
+                "x-amzn-requestid".to_string(),
+                "x-amz-apigw-id".to_string(),
+            ]);
+        }
+
+        // If we see Akamai headers, it's NOT Vercel
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Vercel") {
+            patterns.extend(vec![
+                "akamai-grn".to_string(),
+                "x-akamai-transformed".to_string(),
+                "x-akamai-session-info".to_string(),
+            ]);
+        }
+
+        // If we see Fastly headers, it's NOT Vercel
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Vercel") {
+            patterns.extend(vec![
+                "x-fastly-request-id".to_string(),
+                "fastly-restarts".to_string(),
+                "x-served-by".to_string(),
+            ]);
+        }
+
+        // If we see Azure headers, it's NOT Vercel
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Vercel") {
+            patterns.extend(vec![
+                "x-azure-ref".to_string(),
+                "x-msedge-ref".to_string(),
+                "x-ms-request-id".to_string(),
+            ]);
+        }
+
+        // If we see CloudFlare headers, it's NOT Imperva
+        negative_evidence_patterns.insert(
+            "Imperva".to_string(),
+            vec![
+                "cf-ray".to_string(),
+                "cf-cache-status".to_string(),
+                "cf-connecting-ip".to_string(),
+            ],
+        );
+
+        // If we see AWS headers, it's NOT Imperva
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Imperva") {
+            patterns.extend(vec![
+                "x-amz-cf-id".to_string(),
+                "x-amz-cf-pop".to_string(),
+                "x-amzn-requestid".to_string(),
+                "x-amz-apigw-id".to_string(),
+            ]);
+        }
+
+        // If we see Akamai headers, it's NOT Imperva
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Imperva") {
+            patterns.extend(vec![
+                "akamai-grn".to_string(),
+                "x-akamai-transformed".to_string(),
+                "x-akamai-session-info".to_string(),
+            ]);
+        }
+
+        // If we see Fastly headers, it's NOT Imperva
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Imperva") {
+            patterns.extend(vec![
+                "x-fastly-request-id".to_string(),
+                "fastly-restarts".to_string(),
+                "x-served-by".to_string(),
+            ]);
+        }
+
+        // If we see CloudFlare headers, it's NOT F5
+        negative_evidence_patterns.insert(
+            "F5".to_string(),
+            vec![
+                "cf-ray".to_string(),
+                "cf-cache-status".to_string(),
+                "cf-connecting-ip".to_string(),
+            ],
+        );
+
+        // If we see AWS headers, it's NOT F5
+        if let Some(patterns) = negative_evidence_patterns.get_mut("F5") {
+            patterns.extend(vec![
+                "x-amz-cf-id".to_string(),
+                "x-amz-cf-pop".to_string(),
+                "x-amzn-requestid".to_string(),
+                "x-amz-apigw-id".to_string(),
+            ]);
+        }
+
+        // If we see Akamai headers, it's NOT F5
+        if let Some(patterns) = negative_evidence_patterns.get_mut("F5") {
+            patterns.extend(vec![
+                "akamai-grn".to_string(),
+                "x-akamai-transformed".to_string(),
+                "x-akamai-session-info".to_string(),
+            ]);
+        }
+
+        // If we see CloudFlare headers, it's NOT Sucuri
+        negative_evidence_patterns.insert(
+            "Sucuri".to_string(),
+            vec![
+                "cf-ray".to_string(),
+                "cf-cache-status".to_string(),
+                "cf-connecting-ip".to_string(),
+            ],
+        );
+
+        // If we see AWS headers, it's NOT Sucuri
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Sucuri") {
+            patterns.extend(vec![
+                "x-amz-cf-id".to_string(),
+                "x-amz-cf-pop".to_string(),
+                "x-amzn-requestid".to_string(),
+                "x-amz-apigw-id".to_string(),
+            ]);
+        }
+
+        // If we see Akamai headers, it's NOT Sucuri
+        if let Some(patterns) = negative_evidence_patterns.get_mut("Sucuri") {
+            patterns.extend(vec![
+                "akamai-grn".to_string(),
+                "x-akamai-transformed".to_string(),
+                "x-akamai-session-info".to_string(),
+            ]);
+        }
+
         Self {
             evidence_weights,
             confidence_thresholds: ConfidenceThresholds {

@@ -3,6 +3,7 @@
 //! Detection-grade adversarial testing configuration with strict safety bounds.
 
 use anyhow::{anyhow, Result};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -544,6 +545,8 @@ pub struct VaRunReport {
     pub started_at: std::time::Instant,
     #[serde(skip, default)]
     pub finished_at: Option<std::time::Instant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_bundle: Option<VaReplayBundle>,
 }
 
 fn default_instant() -> std::time::Instant {
@@ -564,6 +567,7 @@ impl VaRunReport {
             results: Vec::new(),
             started_at: std::time::Instant::now(),
             finished_at: None,
+            replay_bundle: None,
         }
     }
 
@@ -607,6 +611,63 @@ pub struct VaReplayPlanItem {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+}
+
+/// Deterministic replay bundle that captures everything needed to reproduce
+/// an exact VA run. Includes a SHA-256 integrity hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaReplayBundle {
+    /// The replay plan items
+    pub plan: Vec<VaReplayPlanItem>,
+    /// Target URL
+    pub target_url: String,
+    /// Configuration used for this run
+    pub config_fingerprint: String,
+    /// SHA-256 hash of the bundle content for integrity verification
+    pub integrity_hash: String,
+    /// Timestamp when bundle was created
+    pub created_at: DateTime<Utc>,
+}
+
+impl VaReplayBundle {
+    /// Create a replay bundle from a completed VA run report.
+    pub fn from_report(report: &VaRunReport) -> Self {
+        // Build config fingerprint from the report's config
+        let config_fingerprint = format!(
+            "tier={},budget={},timeout={}ms,delay={}ms",
+            report.config.tier,
+            report.config.request_budget,
+            report.config.request_timeout.as_millis(),
+            report.config.request_delay.as_millis(),
+        );
+
+        // Compute integrity hash over plan + config
+        // Use a simple hash of the serialized plan + config
+        let content_to_hash = serde_json::to_string(&report.replay_plan).unwrap_or_default()
+            + &config_fingerprint
+            + &report.target_url;
+        let digest = md5::compute(content_to_hash.as_bytes());
+        let integrity_hash = format!("{:x}", digest);
+
+        Self {
+            plan: report.replay_plan.clone(),
+            target_url: report.target_url.clone(),
+            config_fingerprint,
+            integrity_hash,
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Verify the integrity of the bundle.
+    pub fn verify_integrity(&self) -> bool {
+        let config_fingerprint = &self.config_fingerprint;
+        let content_to_hash = serde_json::to_string(&self.plan).unwrap_or_default()
+            + config_fingerprint
+            + &self.target_url;
+        let digest = md5::compute(content_to_hash.as_bytes());
+        let expected_hash = format!("{:x}", digest);
+        self.integrity_hash == expected_hash
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -920,6 +981,9 @@ impl VirtualAdversaryRunner {
         baseline: &BaselineRecord,
         item: &VaProbePlanItem,
     ) -> Result<VaProbeEvaluation> {
+        // DNS rebinding guard: re-validate that the target resolves to a public IP
+        validate_probe_target_public(&item.request.url)?;
+
         let response = self.http.send(&item.request)?;
         let diff =
             ResponseDiff::compare(baseline, response.status, &response.headers, &response.body);
@@ -968,6 +1032,8 @@ impl VirtualAdversaryRunner {
                 evidence: evaluation.evidence,
             });
         }
+
+        report.replay_bundle = Some(VaReplayBundle::from_report(&report));
         Ok(report)
     }
     pub fn run_with_events<F, G>(
@@ -1021,6 +1087,7 @@ impl VirtualAdversaryRunner {
         report.evidence_summary = summarize_evidence(&report.results);
         report.enforcement = classify_enforcement(&report.summary, report.evidence_score);
         report.finish();
+        report.replay_bundle = Some(VaReplayBundle::from_report(&report));
         Ok(report)
     }
 
@@ -1071,6 +1138,56 @@ fn is_private_ip(ip: &IpAddr) -> bool {
                 || v6.is_unspecified()
         }
     }
+}
+
+fn is_ip_public(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => {
+            !ipv4.is_loopback()
+                && !ipv4.is_private()
+                && !ipv4.is_link_local()
+                && !ipv4.is_unspecified()
+                && !ipv4.is_broadcast()
+        }
+        IpAddr::V6(ipv6) => {
+            !ipv6.is_loopback()
+                && !ipv6.is_unspecified()
+                && !ipv6.is_unique_local()
+                && !ipv6.is_unicast_link_local()
+                && !ipv6.is_multicast()
+                // fe80::/10 link-local check (additional guard)
+                && (ipv6.segments()[0] & 0xffc0 != 0xfe80)
+        }
+    }
+}
+
+fn validate_probe_target_public(url: &str) -> Result<()> {
+    let parsed = Url::parse(url).or_else(|_| Url::parse(&format!("https://{url}")))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("URL missing host"))?;
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addr = format!("{host}:{port}");
+
+    let addrs: Vec<std::net::SocketAddr> = addr
+        .to_socket_addrs()
+        .map_err(|e| anyhow!("DNS resolution failed for {host}: {e}"))?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err(anyhow!("DNS resolution returned no addresses for {host}"));
+    }
+
+    for addr in &addrs {
+        if !is_ip_public(&addr.ip()) {
+            return Err(anyhow!(
+                "DNS rebinding guard: {host} resolves to non-public IP {}",
+                addr.ip()
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn build_probe_request(probe: &Probe, target_url: &str) -> Result<VaHttpRequest> {
@@ -1177,17 +1294,24 @@ mod tests {
 
     #[test]
     fn test_invalid_tier_rejected() {
-        let mut config = VirtualAdversaryConfig::default();
-        config.tier = 0;
+        let config = VirtualAdversaryConfig {
+            tier: 0,
+            ..Default::default()
+        };
         assert!(config.validate().is_err());
-        config.tier = 4;
+        let config = VirtualAdversaryConfig {
+            tier: 4,
+            ..Default::default()
+        };
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn test_invalid_budget_rejected() {
-        let mut config = VirtualAdversaryConfig::default();
-        config.request_budget = 0;
+        let config = VirtualAdversaryConfig {
+            request_budget: 0,
+            ..Default::default()
+        };
         assert!(config.validate().is_err());
     }
 
@@ -1199,14 +1323,14 @@ mod tests {
         acknowledgment: String,
     }
 
-    fn write_test_consent(temp_dir: &TempDir, targets: Vec<String>) {
+    fn write_test_consent(temp_dir: impl AsRef<std::path::Path>, targets: Vec<String>) {
         let record = TestConsentRecord {
             timestamp: Utc::now(),
             terms_version: "1.0.0".to_string(),
             authorized_targets: targets,
             acknowledgment: "I AGREE".to_string(),
         };
-        let path = temp_dir.path().join(".waf-detector-consent.json");
+        let path = temp_dir.as_ref().join(".waf-detector-consent.json");
         let json = serde_json::to_string_pretty(&record).unwrap();
         fs::write(path, json).unwrap();
     }
@@ -1223,7 +1347,7 @@ mod tests {
     #[test]
     fn test_target_must_be_authorized() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
 
             let consent_manager = ConsentManager::new();
             let result = ensure_consent_and_target(&consent_manager, "https://notallowed.com");
@@ -1234,7 +1358,7 @@ mod tests {
     #[test]
     fn test_authorized_target_passes() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
 
             let consent_manager = ConsentManager::new();
             let result = ensure_consent_and_target(&consent_manager, "https://example.com/path");
@@ -1263,7 +1387,7 @@ mod tests {
     #[test]
     fn test_runner_enforces_consent_and_budget() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
 
             let config = VirtualAdversaryConfig {
                 request_budget: 1,
@@ -1272,7 +1396,7 @@ mod tests {
 
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
             let result = runner.run("https://example.com");
             assert!(result.is_err());
         });
@@ -1281,7 +1405,7 @@ mod tests {
     #[test]
     fn test_runner_reports_progress() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
 
             let config = VirtualAdversaryConfig {
                 request_budget: 6,
@@ -1290,7 +1414,7 @@ mod tests {
             };
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
 
             let mut updates = Vec::new();
             let report = runner
@@ -1312,7 +1436,7 @@ mod tests {
     #[test]
     fn test_runner_emits_events() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
 
             let config = VirtualAdversaryConfig {
                 request_budget: 6,
@@ -1321,7 +1445,7 @@ mod tests {
             };
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
 
             let mut events = Vec::new();
             let report = runner
@@ -1343,7 +1467,7 @@ mod tests {
     #[test]
     fn test_runner_allows_valid_run() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
 
             let config = VirtualAdversaryConfig {
                 request_budget: 2,
@@ -1352,7 +1476,7 @@ mod tests {
 
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
             let result = runner.run("https://example.com").unwrap();
             assert!(result.summary.total >= 1);
             assert_eq!(result.summary.blocked, result.summary.total);
@@ -1679,7 +1803,7 @@ mod tests {
         };
         let runner = VirtualAdversaryRunner::new(config)
             .unwrap()
-            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            .with_http_adapter(Box::new(StubHttpAdapter));
         let plan = runner.plan("https://example.com");
         assert!(!plan.is_empty());
         assert!(plan.len() >= 4);
@@ -1688,7 +1812,7 @@ mod tests {
     #[test]
     fn test_runner_uses_http_adapter() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
 
             let config = VirtualAdversaryConfig {
                 request_budget: 2,
@@ -1696,7 +1820,7 @@ mod tests {
             };
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
 
             let result = runner.run("https://example.com").unwrap();
             assert_eq!(result.target_url, "https://example.com");
@@ -1711,7 +1835,7 @@ mod tests {
         };
         let runner = VirtualAdversaryRunner::new(config)
             .unwrap()
-            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            .with_http_adapter(Box::new(StubHttpAdapter));
 
         let baseline = runner.collect_baseline("https://example.com").unwrap();
         assert_eq!(baseline.status_code, 200);
@@ -1726,7 +1850,7 @@ mod tests {
         };
         let runner = VirtualAdversaryRunner::new(config)
             .unwrap()
-            .with_http_adapter(Box::new(StubHttpAdapter::default()));
+            .with_http_adapter(Box::new(StubHttpAdapter));
 
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let probe = dae::Probe {
@@ -1752,7 +1876,7 @@ mod tests {
     #[test]
     fn test_runner_reports_plan_summary() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["example.com".to_string()]);
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
 
             let config = VirtualAdversaryConfig {
                 tier: 1,
@@ -1763,7 +1887,7 @@ mod tests {
 
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
 
             let report = runner.run("https://example.com").unwrap();
             assert_eq!(report.summary.total, report.plan_size);
@@ -1799,7 +1923,7 @@ mod tests {
     #[test]
     fn test_va_report_replay_plan_matches_plan_size() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["93.184.216.34".to_string()]);
+            write_test_consent(temp_dir, vec!["93.184.216.34".to_string()]);
 
             let config = VirtualAdversaryConfig {
                 tier: 1,
@@ -1809,7 +1933,7 @@ mod tests {
             };
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
             let report = runner.run("https://93.184.216.34").unwrap();
             assert_eq!(report.replay_plan.len(), report.plan_size);
             let first = report.replay_plan.first().unwrap();
@@ -1829,14 +1953,14 @@ mod tests {
     #[test]
     fn test_replay_plan_rejects_host_mismatch() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["93.184.216.34".to_string()]);
+            write_test_consent(temp_dir, vec!["93.184.216.34".to_string()]);
             let config = VirtualAdversaryConfig {
                 request_budget: 3,
                 ..Default::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
             let plan = vec![VaReplayPlanItem {
                 index: 1,
                 class: "SemanticDrift".to_string(),
@@ -1855,14 +1979,14 @@ mod tests {
     #[test]
     fn test_replay_plan_runs() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["93.184.216.34".to_string()]);
+            write_test_consent(temp_dir, vec!["93.184.216.34".to_string()]);
             let config = VirtualAdversaryConfig {
                 request_budget: 3,
                 ..Default::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
             let plan = vec![VaReplayPlanItem {
                 index: 1,
                 class: "SemanticDrift".to_string(),
@@ -1884,14 +2008,14 @@ mod tests {
     #[test]
     fn test_replay_plan_rejects_private_ip() {
         with_temp_home(|temp_dir| {
-            write_test_consent(&temp_dir, vec!["127.0.0.1".to_string()]);
+            write_test_consent(temp_dir, vec!["127.0.0.1".to_string()]);
             let config = VirtualAdversaryConfig {
                 request_budget: 1,
                 ..Default::default()
             };
             let mut runner = VirtualAdversaryRunner::new(config)
                 .unwrap()
-                .with_http_adapter(Box::new(StubHttpAdapter::default()));
+                .with_http_adapter(Box::new(StubHttpAdapter));
             let plan = vec![VaReplayPlanItem {
                 index: 1,
                 class: "SemanticDrift".to_string(),
@@ -1905,5 +2029,94 @@ mod tests {
             let result = runner.run_replay_plan("https://127.0.0.1", plan);
             assert!(result.is_err());
         });
+    }
+
+    #[test]
+    fn test_is_ip_public_rejects_loopback() {
+        let ip = "127.0.0.1".parse::<IpAddr>().unwrap();
+        assert!(!is_ip_public(&ip));
+    }
+
+    #[test]
+    fn test_is_ip_public_rejects_private_10() {
+        let ip = "10.0.0.1".parse::<IpAddr>().unwrap();
+        assert!(!is_ip_public(&ip));
+    }
+
+    #[test]
+    fn test_is_ip_public_rejects_private_192() {
+        let ip = "192.168.1.1".parse::<IpAddr>().unwrap();
+        assert!(!is_ip_public(&ip));
+    }
+
+    #[test]
+    fn test_is_ip_public_rejects_private_172() {
+        let ip = "172.16.0.1".parse::<IpAddr>().unwrap();
+        assert!(!is_ip_public(&ip));
+    }
+
+    #[test]
+    fn test_is_ip_public_accepts_public_google() {
+        let ip = "8.8.8.8".parse::<IpAddr>().unwrap();
+        assert!(is_ip_public(&ip));
+    }
+
+    #[test]
+    fn test_is_ip_public_accepts_public_cloudflare() {
+        let ip = "1.1.1.1".parse::<IpAddr>().unwrap();
+        assert!(is_ip_public(&ip));
+    }
+
+    #[test]
+    fn test_is_ip_public_rejects_ipv6_loopback() {
+        let ip = "::1".parse::<IpAddr>().unwrap();
+        assert!(!is_ip_public(&ip));
+    }
+
+    #[test]
+    fn test_is_ip_public_rejects_ipv6_link_local() {
+        let ip = "fe80::1".parse::<IpAddr>().unwrap();
+        assert!(!is_ip_public(&ip));
+    }
+
+    #[test]
+    fn test_validate_probe_target_public_rejects_localhost() {
+        let result = validate_probe_target_public("https://localhost/test");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("DNS rebinding guard") || err.contains("non-public IP"));
+    }
+
+    #[test]
+    fn test_validate_probe_target_public_rejects_127() {
+        let result = validate_probe_target_public("https://127.0.0.1/test");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("DNS rebinding guard") || err.contains("non-public IP"));
+    }
+
+    #[test]
+    fn test_validate_probe_target_public_rejects_private_10() {
+        let result = validate_probe_target_public("https://10.0.0.1/test");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("DNS rebinding guard") || err.contains("non-public IP"));
+    }
+
+    #[test]
+    fn replay_bundle_integrity_passes() {
+        let report = VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
+        let bundle = VaReplayBundle::from_report(&report);
+        assert!(bundle.verify_integrity());
+        assert!(!bundle.integrity_hash.is_empty());
+        assert_eq!(bundle.target_url, "https://example.com");
+    }
+
+    #[test]
+    fn replay_bundle_integrity_fails_on_tamper() {
+        let report = VaRunReport::new("https://example.com", 2, VirtualAdversaryConfig::default());
+        let mut bundle = VaReplayBundle::from_report(&report);
+        bundle.target_url = "https://tampered.com".to_string();
+        assert!(!bundle.verify_integrity());
     }
 }

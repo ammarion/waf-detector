@@ -101,119 +101,136 @@ fn get_dns_regex(pattern_name: &str) -> &'static Regex {
 impl DnsAnalyzer {
     pub fn new() -> Self {
         let mut provider_patterns = HashMap::new();
-        
+
         // CloudFlare CNAME patterns
-        provider_patterns.insert("CloudFlare".to_string(), vec![
-            DnsPattern {
-                pattern_name: "cloudflare_net",
-                confidence: 0.98,
-                description: "CloudFlare CDN CNAME record".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "cloudflaressl_com",
-                confidence: 0.95,
-                description: "CloudFlare SSL CNAME record".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "cf_dns_com",
-                confidence: 0.90,
-                description: "CloudFlare DNS CNAME record".to_string(),
-            },
-        ]);
-        
+        provider_patterns.insert(
+            "CloudFlare".to_string(),
+            vec![
+                DnsPattern {
+                    pattern_name: "cloudflare_net",
+                    confidence: 0.98,
+                    description: "CloudFlare CDN CNAME record".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "cloudflaressl_com",
+                    confidence: 0.95,
+                    description: "CloudFlare SSL CNAME record".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "cf_dns_com",
+                    confidence: 0.90,
+                    description: "CloudFlare DNS CNAME record".to_string(),
+                },
+            ],
+        );
+
         // AWS CloudFront patterns
-        provider_patterns.insert("AWS".to_string(), vec![
-            DnsPattern {
-                pattern_name: "cloudfront_net",
-                confidence: 0.98,
-                description: "AWS CloudFront CNAME record".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "cloudfront_dist",
-                confidence: 0.99,
-                description: "AWS CloudFront distribution CNAME".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "amazonaws_com",
-                confidence: 0.95,
-                description: "AWS service CNAME record".to_string(),
-            },
-        ]);
-        
+        provider_patterns.insert(
+            "AWS".to_string(),
+            vec![
+                DnsPattern {
+                    pattern_name: "cloudfront_net",
+                    confidence: 0.98,
+                    description: "AWS CloudFront CNAME record".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "cloudfront_dist",
+                    confidence: 0.99,
+                    description: "AWS CloudFront distribution CNAME".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "amazonaws_com",
+                    confidence: 0.95,
+                    description: "AWS service CNAME record".to_string(),
+                },
+            ],
+        );
+
         // Fastly patterns
-        provider_patterns.insert("Fastly".to_string(), vec![
-            DnsPattern {
-                pattern_name: "fastly_com",
-                confidence: 0.98,
-                description: "Fastly CDN CNAME record".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "fastlylb_net",
-                confidence: 0.95,
-                description: "Fastly load balancer CNAME".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "global_fastly_net",
-                confidence: 0.96,
-                description: "Fastly global network CNAME".to_string(),
-            },
-        ]);
-        
+        provider_patterns.insert(
+            "Fastly".to_string(),
+            vec![
+                DnsPattern {
+                    pattern_name: "fastly_com",
+                    confidence: 0.98,
+                    description: "Fastly CDN CNAME record".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "fastlylb_net",
+                    confidence: 0.95,
+                    description: "Fastly load balancer CNAME".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "global_fastly_net",
+                    confidence: 0.96,
+                    description: "Fastly global network CNAME".to_string(),
+                },
+            ],
+        );
+
         // Akamai patterns
-        provider_patterns.insert("Akamai".to_string(), vec![
-            DnsPattern {
-                pattern_name: "akamai_net",
-                confidence: 0.98,
-                description: "Akamai CDN CNAME record".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "akamaized_net",
-                confidence: 0.95,
-                description: "Akamai edge network CNAME".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "akamaihd_net",
-                confidence: 0.96,
-                description: "Akamai HD network CNAME".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "edgesuite_net",
-                confidence: 0.94,
-                description: "Akamai EdgeSuite CNAME".to_string(),
-            },
-        ]);
-        
+        provider_patterns.insert(
+            "Akamai".to_string(),
+            vec![
+                DnsPattern {
+                    pattern_name: "akamai_net",
+                    confidence: 0.98,
+                    description: "Akamai CDN CNAME record".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "akamaized_net",
+                    confidence: 0.95,
+                    description: "Akamai edge network CNAME".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "akamaihd_net",
+                    confidence: 0.96,
+                    description: "Akamai HD network CNAME".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "edgesuite_net",
+                    confidence: 0.94,
+                    description: "Akamai EdgeSuite CNAME".to_string(),
+                },
+            ],
+        );
+
         // Vercel patterns
-        provider_patterns.insert("Vercel".to_string(), vec![
-            DnsPattern {
-                pattern_name: "vercel_app",
-                confidence: 0.99,
-                description: "Vercel deployment CNAME".to_string(),
-            },
-            DnsPattern {
-                pattern_name: "vercel_dns_com",
-                confidence: 0.96,
-                description: "Vercel DNS CNAME record".to_string(),
-            },
-        ]);
-        
+        provider_patterns.insert(
+            "Vercel".to_string(),
+            vec![
+                DnsPattern {
+                    pattern_name: "vercel_app",
+                    confidence: 0.99,
+                    description: "Vercel deployment CNAME".to_string(),
+                },
+                DnsPattern {
+                    pattern_name: "vercel_dns_com",
+                    confidence: 0.96,
+                    description: "Vercel DNS CNAME record".to_string(),
+                },
+            ],
+        );
+
         // Additional common CDN patterns
-        provider_patterns.insert("KeyCDN".to_string(), vec![
-            DnsPattern {
+        provider_patterns.insert(
+            "KeyCDN".to_string(),
+            vec![DnsPattern {
                 pattern_name: "keycdn_com",
                 confidence: 0.98,
                 description: "KeyCDN CNAME record".to_string(),
-            },
-        ]);
-        
-        provider_patterns.insert("MaxCDN".to_string(), vec![
-            DnsPattern {
+            }],
+        );
+
+        provider_patterns.insert(
+            "MaxCDN".to_string(),
+            vec![DnsPattern {
                 pattern_name: "maxcdn_com",
                 confidence: 0.98,
                 description: "MaxCDN CNAME record".to_string(),
-            },
-        ]);
-        
+            }],
+        );
+
         Self { provider_patterns }
     }
 
@@ -316,76 +333,123 @@ impl Default for DnsAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_dns_analyzer_creation() {
         let analyzer = DnsAnalyzer::new();
-        assert!(analyzer.provider_patterns.len() > 0);
+        assert!(!analyzer.provider_patterns.is_empty());
         assert!(analyzer.provider_patterns.contains_key("CloudFlare"));
         assert!(analyzer.provider_patterns.contains_key("AWS"));
     }
-    
+
     #[test]
     fn test_extract_domain() {
         let analyzer = DnsAnalyzer::new();
-        
-        assert_eq!(analyzer.extract_domain("https://example.com"), "example.com");
-        assert_eq!(analyzer.extract_domain("http://example.com/path"), "example.com");
+
+        assert_eq!(
+            analyzer.extract_domain("https://example.com"),
+            "example.com"
+        );
+        assert_eq!(
+            analyzer.extract_domain("http://example.com/path"),
+            "example.com"
+        );
         assert_eq!(analyzer.extract_domain("example.com"), "example.com");
         assert_eq!(analyzer.extract_domain("example.com:8080"), "example.com");
-        assert_eq!(analyzer.extract_domain("https://example.com:443/path?query=1"), "example.com");
-        assert_eq!(analyzer.extract_domain("subdomain.example.com"), "subdomain.example.com");
+        assert_eq!(
+            analyzer.extract_domain("https://example.com:443/path?query=1"),
+            "example.com"
+        );
+        assert_eq!(
+            analyzer.extract_domain("subdomain.example.com"),
+            "subdomain.example.com"
+        );
     }
-    
+
     #[test]
     fn test_provider_patterns() {
         let analyzer = DnsAnalyzer::new();
-        
+
         // Test CloudFlare patterns
         let cf_patterns = analyzer.provider_patterns.get("CloudFlare").unwrap();
-        assert!(cf_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("target.cloudflare.net")));
-        assert!(cf_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("ssl.cloudflaressl.com")));
-        
+        assert!(cf_patterns
+            .iter()
+            .any(|p| get_dns_regex(p.pattern_name).is_match("target.cloudflare.net")));
+        assert!(cf_patterns
+            .iter()
+            .any(|p| get_dns_regex(p.pattern_name).is_match("ssl.cloudflaressl.com")));
+
         // Test AWS patterns
         let aws_patterns = analyzer.provider_patterns.get("AWS").unwrap();
-        assert!(aws_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("d123abc.cloudfront.net")));
-        assert!(aws_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("example.amazonaws.com")));
-        
+        assert!(aws_patterns
+            .iter()
+            .any(|p| get_dns_regex(p.pattern_name).is_match("d123abc.cloudfront.net")));
+        assert!(aws_patterns
+            .iter()
+            .any(|p| get_dns_regex(p.pattern_name).is_match("example.amazonaws.com")));
+
         // Test Fastly patterns
         let fastly_patterns = analyzer.provider_patterns.get("Fastly").unwrap();
-        assert!(fastly_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("target.fastly.com")));
-        
+        assert!(fastly_patterns
+            .iter()
+            .any(|p| get_dns_regex(p.pattern_name).is_match("target.fastly.com")));
+
         // Test Akamai patterns
         let akamai_patterns = analyzer.provider_patterns.get("Akamai").unwrap();
-        assert!(akamai_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("target.akamai.net")));
-        assert!(akamai_patterns.iter().any(|p| get_dns_regex(p.pattern_name).is_match("target.edgesuite.net")));
+        assert!(akamai_patterns
+            .iter()
+            .any(|p| get_dns_regex(p.pattern_name).is_match("target.akamai.net")));
+        assert!(akamai_patterns
+            .iter()
+            .any(|p| get_dns_regex(p.pattern_name).is_match("target.edgesuite.net")));
     }
-    
+
     #[test]
     fn test_confidence_levels() {
         let analyzer = DnsAnalyzer::new();
         // CloudFlare main pattern should have high confidence
         let cf_patterns = analyzer.provider_patterns.get("CloudFlare").unwrap();
-        let main_pattern = cf_patterns.iter().find(|p| get_dns_regex(p.pattern_name).to_string().contains("cloudflare")).unwrap();
-        assert!(main_pattern.confidence >= 0.95, "CloudFlare confidence was {}", main_pattern.confidence);
+        let main_pattern = cf_patterns
+            .iter()
+            .find(|p| {
+                get_dns_regex(p.pattern_name)
+                    .to_string()
+                    .contains("cloudflare")
+            })
+            .unwrap();
+        assert!(
+            main_pattern.confidence >= 0.95,
+            "CloudFlare confidence was {}",
+            main_pattern.confidence
+        );
         // AWS CloudFront distribution pattern should have very high confidence
         let aws_patterns = analyzer.provider_patterns.get("AWS").unwrap();
-        let dist_pattern = aws_patterns.iter().find(|p| get_dns_regex(p.pattern_name).to_string().contains("cloudfront")).unwrap();
-        assert!(dist_pattern.confidence >= 0.95, "AWS CloudFront confidence was {}", dist_pattern.confidence);
+        let dist_pattern = aws_patterns
+            .iter()
+            .find(|p| {
+                get_dns_regex(p.pattern_name)
+                    .to_string()
+                    .contains("cloudfront")
+            })
+            .unwrap();
+        assert!(
+            dist_pattern.confidence >= 0.95,
+            "AWS CloudFront confidence was {}",
+            dist_pattern.confidence
+        );
     }
-    
+
     #[test]
     fn test_get_supported_providers() {
         let analyzer = DnsAnalyzer::new();
         let providers = analyzer.get_supported_providers();
-        
+
         assert!(providers.contains(&"CloudFlare".to_string()));
         assert!(providers.contains(&"AWS".to_string()));
         assert!(providers.contains(&"Fastly".to_string()));
         assert!(providers.contains(&"Akamai".to_string()));
         assert!(providers.contains(&"Vercel".to_string()));
     }
-    
 
     #[test]
     fn test_dns_analysis() {

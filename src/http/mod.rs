@@ -2,7 +2,16 @@ use anyhow::Result;
 use reqwest::{Client, Response};
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::Once;
 use std::time::Duration;
+
+static INSECURE_TLS_WARNED: Once = Once::new();
+
+pub fn warn_insecure_tls() {
+    INSECURE_TLS_WARNED.call_once(|| {
+        tracing::warn!("Insecure TLS mode active — certificates not validated");
+    });
+}
 
 #[derive(Debug, Clone)]
 pub struct HttpClient {
@@ -41,6 +50,7 @@ impl HttpClient {
             }
             if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
                 builder = builder.danger_accept_invalid_certs(true);
+                warn_insecure_tls();
             }
             builder
         };
@@ -49,7 +59,9 @@ impl HttpClient {
             Ok(Ok(client)) => client,
             Ok(Err(err)) => return Err(err.into()),
             Err(_) => {
-                eprintln!("⚠️  HTTP client initialization panicked; retrying without system proxy.");
+                eprintln!(
+                    "⚠️  HTTP client initialization panicked; retrying without system proxy."
+                );
                 eprintln!(
                     "⚠️  HTTP client initialization panicked; retrying without system proxy."
                 );
