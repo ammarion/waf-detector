@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::virtual_adversary::{VaEnforcement, VaRunReport};
 use crate::virtual_adversary2::Va2RunReport;
@@ -78,6 +79,95 @@ pub struct PostureBuilder {
     channel_coverage_score: f64,
     enforcement: Option<EnforcementPosture>,
     enforcement_score: f64,
+}
+
+pub fn compose_posture_summary(
+    detection: Option<&DetectionResult>,
+    va2: Option<&Va2RunReport>,
+    va1: Option<&VaRunReport>,
+) -> crate::PostureSummary {
+    let mut coverage_by_vector = HashMap::new();
+    let mut caveats = Vec::new();
+
+    let detection_confidence = detection.and_then(|d| d.waf_confidence()).unwrap_or(0.0);
+
+    let (differential_score, challenge_score, pair_count, coverage_score) = va2
+        .map(|report| {
+            if let Some(coverage) = &report.channel_coverage {
+                for (channel, score) in &coverage.channels {
+                    coverage_by_vector.insert(channel.to_string(), *score);
+                }
+            }
+            let pairs = report
+                .paired_control
+                .as_ref()
+                .map(|p| p.executed_pairs)
+                .unwrap_or(report.differential.len());
+            (
+                report.wbf.differential_score,
+                report.wbf.challenge_score,
+                pairs,
+                report
+                    .channel_coverage
+                    .as_ref()
+                    .map(|c| c.coverage_score)
+                    .unwrap_or(0.0),
+            )
+        })
+        .unwrap_or((0.0, 0.0, 0, 0.0));
+
+    let blocked_ratio = va1
+        .map(|report| {
+            let total = report.summary.total as f64;
+            if total > 0.0 {
+                report.summary.blocked as f64 / total
+            } else {
+                0.0
+            }
+        })
+        .unwrap_or(0.0);
+
+    let active_enforcement_likelihood =
+        ((differential_score * 0.55) + (challenge_score * 0.25) + (blocked_ratio * 0.20))
+            .clamp(0.0, 1.0);
+
+    let monitor_mode_likelihood =
+        (detection_confidence * (1.0 - active_enforcement_likelihood)).clamp(0.0, 1.0);
+
+    let overall_posture_score = ((active_enforcement_likelihood * 65.0)
+        + (coverage_score * 25.0)
+        + (detection_confidence * 10.0))
+        .clamp(0.0, 100.0);
+
+    if pair_count == 0 {
+        caveats.push("No paired-control differential evidence collected".to_string());
+    } else if pair_count < 4 {
+        caveats
+            .push("Low paired-control sample size; enforcement estimate may be noisy".to_string());
+    }
+
+    if coverage_score < 0.35 {
+        caveats.push("Channel coverage is limited; blind spots likely remain".to_string());
+    }
+
+    if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+        caveats.push("TLS certificates were not validated during this run".to_string());
+    }
+
+    let confidence = (0.35
+        + (detection_confidence * 0.25)
+        + ((pair_count.min(12) as f64 / 12.0) * 0.25)
+        + (coverage_score * 0.15))
+        .clamp(0.0, 1.0);
+
+    crate::PostureSummary {
+        overall_posture_score,
+        monitor_mode_likelihood,
+        active_enforcement_likelihood,
+        coverage_by_vector,
+        confidence,
+        caveats,
+    }
 }
 
 impl PostureBuilder {
@@ -292,6 +382,7 @@ mod tests {
             },
             differential: vec![],
             channel_coverage: None,
+            paired_control: None,
         }
     }
 
@@ -427,5 +518,38 @@ mod tests {
         let beh = report.behavioral.unwrap();
         assert_eq!(beh.blind_spot_count, 2);
         assert!((beh.channel_coverage_score - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_compose_posture_summary_with_low_signal_caveats() {
+        let det = mock_detection_result(0.8);
+        let va2 = mock_va2_report(30.0, 0.1);
+        let summary = compose_posture_summary(Some(&det), Some(&va2), None);
+        assert!(summary.monitor_mode_likelihood > 0.5);
+        assert!(summary.active_enforcement_likelihood < 0.3);
+        assert!(!summary.caveats.is_empty());
+    }
+
+    #[test]
+    fn test_compose_posture_summary_coverage_projection() {
+        use crate::virtual_adversary2::{Va2ChannelCoverage, Va2ProbeChannel};
+        use std::collections::HashMap as StdHashMap;
+        let det = mock_detection_result(0.9);
+        let mut va2 = mock_va2_report(85.0, 0.9);
+        va2.channel_coverage = Some(Va2ChannelCoverage {
+            channels: {
+                let mut channels = StdHashMap::new();
+                channels.insert(Va2ProbeChannel::Query, 1.0);
+                channels.insert(Va2ProbeChannel::Header, 0.5);
+                channels
+            },
+            blind_spots: vec![],
+            coverage_score: 0.75,
+        });
+        let summary = compose_posture_summary(Some(&det), Some(&va2), None);
+        assert!(summary.coverage_by_vector.contains_key("query"));
+        assert!(summary.coverage_by_vector.contains_key("header"));
+        assert!(summary.confidence > 0.5);
+        assert!(summary.overall_posture_score > 40.0);
     }
 }

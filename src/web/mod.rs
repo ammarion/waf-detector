@@ -5,6 +5,7 @@ use crate::ai::{
 use crate::effectiveness::consent::{ConsentManager, ConsentStatus};
 use crate::engine::DetectionEngine;
 use crate::payload::waf_smoke_test::{SmokeTestConfig, SmokeTestResult, WafSmokeTest};
+use crate::posture::compose_posture_summary;
 use crate::script_executor::{CombinedResult, ScriptExecutor};
 use crate::virtual_adversary::{
     VaOutcome, VaPayloadCategory, VaRunReport, VirtualAdversaryConfig, VirtualAdversaryRunner,
@@ -12,7 +13,7 @@ use crate::virtual_adversary::{
 use crate::virtual_adversary2::{
     build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2RunReport, Va2Runner,
 };
-use crate::DetectionResult;
+use crate::{DetectionResult, PostureSummary};
 use anyhow::{anyhow, Result};
 use axum::{
     body::Body,
@@ -197,6 +198,15 @@ fn csrf_error_response() -> axum::response::Response {
         .into_response()
 }
 
+fn feature_flag_enabled(key: &str) -> bool {
+    std::env::var(key)
+        .map(|value| {
+            let normalized = value.trim().to_lowercase();
+            normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on"
+        })
+        .unwrap_or(false)
+}
+
 const VA_REPORTS_DIR: &str = ".waf-detector/va-reports";
 const VA_REPORT_RETENTION_DEFAULT: usize = 50;
 const VA2_PHASE_DEFAULT: &str = "baseline,protocol-variance";
@@ -221,6 +231,27 @@ pub struct ScanResponse {
     success: bool,
     result: Option<DetectionResult>,
     error: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct PostureSummaryRequest {
+    target_url: String,
+    phases: Option<String>,
+    seed: Option<u64>,
+    budget: Option<u32>,
+}
+
+#[derive(Serialize)]
+pub struct PostureSummaryResponse {
+    success: bool,
+    summary: Option<PostureSummary>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct PerfSnapshotResponse {
+    success: bool,
+    snapshot: crate::PerformanceSnapshot,
 }
 
 #[derive(Deserialize)]
@@ -596,6 +627,7 @@ impl WebServer {
         let readonly_routes = Router::new()
             .route("/api/providers", get(list_providers))
             .route("/api/status", get(server_status))
+            .route("/api/perf/last-run", get(perf_last_run))
             .route("/api/consent-status", get(consent_status))
             .route(
                 "/api/virtual-adversary/status/:id",
@@ -637,6 +669,7 @@ impl WebServer {
             .route("/api/scan", post(scan_url))
             .route("/api/combined-scan", post(combined_scan))
             .route("/api/smoke-test", post(smoke_test))
+            .route("/api/posture-summary", post(posture_summary))
             .route("/api/batch-scan", post(batch_scan))
             .route("/api/virtual-adversary", post(virtual_adversary))
             .route(
@@ -701,6 +734,102 @@ async fn dashboard() -> impl IntoResponse {
 // Handler for API documentation
 async fn api_docs() -> impl IntoResponse {
     Html(templates::API_DOCS_HTML)
+}
+
+async fn perf_last_run() -> impl IntoResponse {
+    let response = PerfSnapshotResponse {
+        success: true,
+        snapshot: crate::perf::snapshot(),
+    };
+    (StatusCode::OK, Json(response))
+}
+
+async fn posture_summary(
+    State(server): State<WebServer>,
+    Json(payload): Json<PostureSummaryRequest>,
+) -> impl IntoResponse {
+    if !feature_flag_enabled("WAF_DETECTOR_POSTURE_SUMMARY") {
+        let response = PostureSummaryResponse {
+            success: false,
+            summary: None,
+            error: Some(
+                "posture summary feature disabled (set WAF_DETECTOR_POSTURE_SUMMARY=1)".to_string(),
+            ),
+        };
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(response));
+    }
+
+    let phases_raw = payload.phases.as_deref().unwrap_or(VA2_PHASE_DEFAULT);
+    let phases = match parse_va2_phases(phases_raw) {
+        Ok(phases) => phases,
+        Err(err) => {
+            let response = PostureSummaryResponse {
+                success: false,
+                summary: None,
+                error: Some(err.to_string()),
+            };
+            return (StatusCode::BAD_REQUEST, Json(response));
+        }
+    };
+
+    let va2_config = Va2CampaignConfig {
+        seed: payload.seed.unwrap_or(1337),
+        budget: payload.budget.unwrap_or(12),
+    };
+    let plan = match build_va2_campaign_plan(&payload.target_url, &phases, va2_config) {
+        Ok(plan) => plan,
+        Err(err) => {
+            let response = PostureSummaryResponse {
+                success: false,
+                summary: None,
+                error: Some(err.to_string()),
+            };
+            return (StatusCode::BAD_REQUEST, Json(response));
+        }
+    };
+
+    let detection = match server.engine.detect(&payload.target_url).await {
+        Ok(result) => result,
+        Err(err) => {
+            let response = PostureSummaryResponse {
+                success: false,
+                summary: None,
+                error: Some(format!("detection failed: {err}")),
+            };
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(response));
+        }
+    };
+
+    let va2_runner = match Va2Runner::new() {
+        Ok(runner) => runner,
+        Err(err) => {
+            let response = PostureSummaryResponse {
+                success: false,
+                summary: None,
+                error: Some(format!("failed to initialize VA2 runner: {err}")),
+            };
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(response));
+        }
+    };
+    let va2_report = match va2_runner.run_plan(plan).await {
+        Ok(report) => report,
+        Err(err) => {
+            let response = PostureSummaryResponse {
+                success: false,
+                summary: None,
+                error: Some(format!("va2 run failed: {err}")),
+            };
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(response));
+        }
+    };
+
+    let summary = compose_posture_summary(Some(&detection), Some(&va2_report), None);
+    let response = PostureSummaryResponse {
+        success: true,
+        summary: Some(summary),
+        error: None,
+    };
+    (StatusCode::OK, Json(response))
 }
 
 // Handler for single URL scan
@@ -2204,6 +2333,37 @@ mod tests {
         let layer = super::build_active_cors(8080);
         let _ = layer;
         std::env::remove_var("WAF_DETECTOR_ALLOWED_ORIGINS");
+    }
+
+    #[tokio::test]
+    async fn perf_last_run_returns_snapshot() {
+        let app = axum::Router::new().route(
+            "/api/perf/last-run",
+            axum::routing::get(super::perf_last_run),
+        );
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/perf/last-run")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[test]
+    fn feature_flag_enabled_truthy_values() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        std::env::set_var("WAF_DETECTOR_POSTURE_SUMMARY", "true");
+        assert!(super::feature_flag_enabled("WAF_DETECTOR_POSTURE_SUMMARY"));
+        std::env::set_var("WAF_DETECTOR_POSTURE_SUMMARY", "1");
+        assert!(super::feature_flag_enabled("WAF_DETECTOR_POSTURE_SUMMARY"));
+        std::env::remove_var("WAF_DETECTOR_POSTURE_SUMMARY");
+        assert!(!super::feature_flag_enabled("WAF_DETECTOR_POSTURE_SUMMARY"));
     }
 
     #[tokio::test]

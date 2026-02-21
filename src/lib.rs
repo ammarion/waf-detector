@@ -20,6 +20,7 @@ mod test_utils;
 pub mod dns;
 pub mod http2;
 pub mod payload;
+pub mod perf;
 pub mod testing;
 pub mod timing;
 pub mod tls;
@@ -29,6 +30,35 @@ pub mod effectiveness;
 pub mod posture;
 pub mod virtual_adversary;
 pub mod virtual_adversary2;
+
+/// Unified posture summary used by CLI/API for operator-facing risk reports.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PostureSummary {
+    pub overall_posture_score: f64,
+    pub monitor_mode_likelihood: f64,
+    pub active_enforcement_likelihood: f64,
+    #[serde(default)]
+    pub coverage_by_vector: HashMap<String, f64>,
+    pub confidence: f64,
+    #[serde(default)]
+    pub caveats: Vec<String>,
+}
+
+/// Snapshot of observed runtime latencies used for performance gates.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PerformanceSnapshot {
+    pub scan_p95_ms: u64,
+    pub va_p95_ms: u64,
+    pub va2_p95_ms: u64,
+    pub sample_size: usize,
+    pub mode: String,
+    #[serde(default)]
+    pub scan_p99_ms: u64,
+    #[serde(default)]
+    pub va_p99_ms: u64,
+    #[serde(default)]
+    pub va2_p99_ms: u64,
+}
 
 #[derive(Debug, Clone)]
 pub struct DetectionContext {

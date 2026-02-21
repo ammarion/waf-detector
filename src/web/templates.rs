@@ -13,13 +13,26 @@ pub fn dashboard_html() -> &'static str {
 }
 
 fn load_dashboard_html() -> String {
+    let dual_mode_enabled = std::env::var("WAF_DETECTOR_DUAL_MODE_UI")
+        .map(|value| {
+            let normalized = value.trim().to_lowercase();
+            normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on"
+        })
+        .unwrap_or(true);
+
     if let Some(path) = resolve_dashboard_template_path() {
         if let Ok(contents) = fs::read_to_string(&path) {
-            return contents;
+            return contents.replace(
+                "__DUAL_MODE_ENABLED__",
+                if dual_mode_enabled { "1" } else { "0" },
+            );
         }
     }
 
-    DASHBOARD_HTML_EMBEDDED.to_string()
+    DASHBOARD_HTML_EMBEDDED.replace(
+        "__DUAL_MODE_ENABLED__",
+        if dual_mode_enabled { "1" } else { "0" },
+    )
 }
 
 fn resolve_dashboard_template_path() -> Option<PathBuf> {
@@ -217,6 +230,24 @@ pub const API_DOCS_HTML: &str = r#"
     ]
   }
 }</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method post">POST</span> /api/posture-summary</h3>
+            <p>Generate posture summary from detection + VA2 paired-control signals.</p>
+
+            <h4>Request Body</h4>
+            <pre><code>{
+  "target_url": "https://example.com",
+  "phases": "baseline,protocol-variance",
+  "seed": 1337,
+  "budget": 12
+}</code></pre>
+        </div>
+
+        <div class="endpoint">
+            <h3><span class="method get">GET</span> /api/perf/last-run</h3>
+            <p>Fetch in-memory p95/p99 snapshot for scan, VA, and VA2 timings.</p>
         </div>
 
         <div class="endpoint">

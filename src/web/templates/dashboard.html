@@ -25,6 +25,18 @@
             </p>
         </div>
 
+        <div class="mode-switch" id="dashboardModeSwitch">
+            <button type="button" class="mode-btn active" data-mode="analyst">Analyst Mode</button>
+            <button type="button" class="mode-btn" data-mode="executive">Executive Mode</button>
+        </div>
+
+        <div class="card executive-only" id="executiveSummaryCard">
+            <h2>📌 Executive Risk Snapshot</h2>
+            <div id="executiveSummaryContent" class="executive-summary-empty">
+                Run a scan to generate an executive posture narrative.
+            </div>
+        </div>
+
         <div class="dashboard-grid">
             <div class="card">
                 <h2>🚀 Single URL Detection (CDN & WAF)</h2>
@@ -60,7 +72,7 @@
             </div>
         </div>
 
-        <div class="dashboard-grid">
+        <div class="dashboard-grid analyst-only">
             <div class="card">
                 <h2>🛡️ WAF Smoke Test</h2>
                 <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
@@ -387,6 +399,60 @@
 
     <script>
         let allResults = [];
+        const dualModeEnabled = "__DUAL_MODE_ENABLED__" === "1";
+        let dashboardMode = 'analyst';
+
+        function renderExecutiveSummary() {
+            const container = document.getElementById('executiveSummaryContent');
+            if (!container) return;
+            const latest = Array.isArray(allResults) && allResults.length > 0 ? allResults[0] : null;
+            if (!latest) {
+                container.className = 'executive-summary-empty';
+                container.textContent = 'Run a scan to generate an executive posture narrative.';
+                return;
+            }
+
+            const wafConfidence = latest.detected_waf && latest.detected_waf.confidence
+                ? Math.round(Number(latest.detected_waf.confidence) * 100)
+                : 0;
+            const risk = wafConfidence >= 80 ? 'Lower residual risk' : (wafConfidence >= 50 ? 'Moderate residual risk' : 'Elevated residual risk');
+            const signal = latest.detected_waf
+                ? `${latest.detected_waf.name} detected (${wafConfidence}% confidence)`
+                : 'No explicit WAF signature detected';
+
+            container.className = 'executive-summary';
+            container.innerHTML = `
+                <div class="executive-pill">${escapeHtml(risk)}</div>
+                <div class="executive-line"><strong>Target:</strong> ${escapeHtml(latest.url || 'Unknown')}</div>
+                <div class="executive-line"><strong>Signal:</strong> ${escapeHtml(signal)}</div>
+                <div class="executive-line"><strong>Action:</strong> Validate monitor-mode blind spots using VA2 paired-control.</div>
+            `;
+        }
+
+        function setDashboardMode(mode) {
+            dashboardMode = mode === 'executive' ? 'executive' : 'analyst';
+            document.body.setAttribute('data-dashboard-mode', dashboardMode);
+            localStorage.setItem('waf-detector-dashboard-mode', dashboardMode);
+            document.querySelectorAll('#dashboardModeSwitch .mode-btn').forEach((btn) => {
+                btn.classList.toggle('active', btn.getAttribute('data-mode') === dashboardMode);
+            });
+            renderExecutiveSummary();
+        }
+
+        function initDashboardMode() {
+            const switcher = document.getElementById('dashboardModeSwitch');
+            if (!dualModeEnabled) {
+                if (switcher) switcher.style.display = 'none';
+                setDashboardMode('analyst');
+                return;
+            }
+            const saved = localStorage.getItem('waf-detector-dashboard-mode');
+            const initial = (saved === 'executive' || saved === 'analyst') ? saved : 'analyst';
+            setDashboardMode(initial);
+            document.querySelectorAll('#dashboardModeSwitch .mode-btn').forEach((btn) => {
+                btn.addEventListener('click', () => setDashboardMode(btn.getAttribute('data-mode')));
+            });
+        }
 
         // HTML escaping utility to prevent XSS
         function escapeHtml(str) {
@@ -1486,6 +1552,7 @@
 
         function renderVaReportTable(tableBody, rows) {
             if (!tableBody) return;
+            const renderStarted = performance.now();
             const decorated = rows.map((row, idx) => ({ row, idx }));
             const filtered = vaPinnedOnly
                 ? decorated.filter((item) => vaPinnedIndexSet.has(item.idx))
@@ -1498,7 +1565,32 @@
                     return a.idx - b.idx;
                 })
                 : filtered;
-            tableBody.innerHTML = sorted.map(({ row, idx }) => `
+
+            const wrapper = tableBody.closest('.payload-table-wrapper');
+            const rowHeight = 46;
+            const virtualThreshold = 300;
+            const windowSize = 140;
+
+            let visibleRows = sorted;
+            let topSpacer = 0;
+            let bottomSpacer = 0;
+            if (sorted.length > virtualThreshold && wrapper) {
+                const scrollTop = wrapper.scrollTop || 0;
+                const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 20);
+                const end = Math.min(sorted.length, start + windowSize);
+                visibleRows = sorted.slice(start, end);
+                topSpacer = start * rowHeight;
+                bottomSpacer = (sorted.length - end) * rowHeight;
+
+                if (!wrapper.dataset.virtualized) {
+                    wrapper.dataset.virtualized = '1';
+                    wrapper.addEventListener('scroll', () => {
+                        window.requestAnimationFrame(() => renderVaReportTable(tableBody, rows));
+                    });
+                }
+            }
+
+            const rowHtml = visibleRows.map(({ row, idx }) => `
                 <tr class="${vaPinnedIndexSet.has(idx) ? 'va-row-pinned' : ''}">
                     <td>${idx + 1}</td>
                     <td>${escapeHtml(row.category || '')}</td>
@@ -1515,14 +1607,23 @@
                 </tr>
             `).join('');
 
-            tableBody.querySelectorAll('.va-evidence-button').forEach(button => {
+            const topSpacerHtml = topSpacer > 0
+                ? `<tr class="va-virtual-spacer"><td colspan="6" style="height:${topSpacer}px;"></td></tr>`
+                : '';
+            const bottomSpacerHtml = bottomSpacer > 0
+                ? `<tr class="va-virtual-spacer"><td colspan="6" style="height:${bottomSpacer}px;"></td></tr>`
+                : '';
+
+            tableBody.innerHTML = `${topSpacerHtml}${rowHtml}${bottomSpacerHtml}`;
+
+            tableBody.querySelectorAll('.va-evidence-button').forEach((button) => {
                 button.addEventListener('click', (event) => {
                     const index = Number(event.currentTarget.getAttribute('data-va-index'));
                     if (!Number.isFinite(index)) return;
                     openVaEvidenceModal(rows[index]);
                 });
             });
-            tableBody.querySelectorAll('.va-pin-button').forEach(button => {
+            tableBody.querySelectorAll('.va-pin-button').forEach((button) => {
                 button.addEventListener('click', (event) => {
                     const index = Number(event.currentTarget.getAttribute('data-va-pin'));
                     if (!Number.isFinite(index)) return;
@@ -1530,6 +1631,11 @@
                     renderVaReportTable(tableBody, rows);
                 });
             });
+
+            const elapsed = performance.now() - renderStarted;
+            if (elapsed > 100) {
+                console.warn(`VA table render exceeded 100ms budget: ${elapsed.toFixed(1)}ms`);
+            }
         }
 
         function toggleVaPin(row, index) {
@@ -2122,6 +2228,7 @@
             count.textContent = `${allResults.length} result${allResults.length !== 1 ? 's' : ''}`;
 
             container.innerHTML = allResults.map((result, index) => createResultCard(result, index)).join('');
+            renderExecutiveSummary();
         }
 
         function createResultCard(result, index) {
@@ -2395,6 +2502,7 @@
         function clearResults() {
             allResults = [];
             document.getElementById('resultsSection').style.display = 'none';
+            renderExecutiveSummary();
             showSuccessMessage('Results cleared');
         }
 
@@ -2584,6 +2692,7 @@
         // Apply the fix when the page loads
         document.addEventListener('DOMContentLoaded', function () {
             fixSmokeTestDisplay();
+            initDashboardMode();
             loadConsentStatus();
             loadVaHistory();
             const historySearch = document.getElementById('vaHistorySearch');

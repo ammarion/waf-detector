@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::net::{IpAddr, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use url::Url;
 
 use crate::effectiveness::consent::ConsentManager;
@@ -1066,6 +1066,7 @@ impl VirtualAdversaryRunner {
         target_url: &str,
         replay_plan: Vec<VaReplayPlanItem>,
     ) -> Result<VaRunReport> {
+        let started = Instant::now();
         ensure_consent_and_target(&self.consent_manager, target_url)?;
         if replay_plan.is_empty() {
             return Err(anyhow!("replay plan is empty"));
@@ -1098,6 +1099,11 @@ impl VirtualAdversaryRunner {
         }
 
         report.replay_bundle = Some(VaReplayBundle::from_report(&report));
+        crate::perf::record(
+            crate::perf::PerfKind::Va,
+            started.elapsed().as_millis() as u64,
+            crate::perf::PerfMode::Live,
+        );
         Ok(report)
     }
     pub fn run_with_events<F, G>(
@@ -1110,6 +1116,7 @@ impl VirtualAdversaryRunner {
         F: FnMut(usize, usize),
         G: FnMut(VaPayloadEvent),
     {
+        let started = Instant::now();
         ensure_consent_and_target(&self.consent_manager, target_url)?;
 
         let _tier = self.config.tier;
@@ -1152,6 +1159,11 @@ impl VirtualAdversaryRunner {
         report.enforcement = classify_enforcement(&report.summary, report.evidence_score);
         report.finish();
         report.replay_bundle = Some(VaReplayBundle::from_report(&report));
+        crate::perf::record(
+            crate::perf::PerfKind::Va,
+            started.elapsed().as_millis() as u64,
+            crate::perf::PerfMode::Live,
+        );
         Ok(report)
     }
 

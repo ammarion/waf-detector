@@ -1,3 +1,4 @@
+pub mod fixtures;
 pub mod validation_framework;
 
 pub use validation_framework::{

@@ -226,8 +226,14 @@ pub struct Va2DifferentialResult {
     pub baseline_step_id: u32,
     pub status_delta: u16,
     pub body_length_pct_change: f64,
+    #[serde(default)]
+    pub header_mutation_count: usize,
+    #[serde(default)]
+    pub timing_delta_ms: i128,
     /// WAF discriminated between baseline and this variant
     pub discriminated: bool,
+    #[serde(default)]
+    pub outcome: Option<PairedControlOutcome>,
     /// Which channel this differential result corresponds to
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel: Option<Va2ProbeChannel>,
@@ -241,6 +247,41 @@ pub struct Va2ChannelCoverage {
     pub blind_spots: Vec<Va2ProbeChannel>,
     /// Overall multi-channel coverage score (0.0-1.0)
     pub coverage_score: f64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PairedControlOutcome {
+    Detected,
+    NotDetected,
+    Inconclusive,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairedControlSignal {
+    pub step_id: u32,
+    pub baseline_step_id: u32,
+    pub vector: String,
+    pub outcome: PairedControlOutcome,
+    pub status_delta: u16,
+    pub body_length_pct_change: f64,
+    pub header_mutation_count: usize,
+    pub timing_delta_ms: i128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PairedControlSummary {
+    #[serde(default)]
+    pub signals: Vec<PairedControlSignal>,
+    #[serde(default)]
+    pub coverage_by_vector: HashMap<String, f64>,
+    pub executed_pairs: usize,
+    pub detected_pairs: usize,
+    pub not_detected_pairs: usize,
+    pub inconclusive_pairs: usize,
+    pub pair_cap: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub early_stop_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -274,6 +315,8 @@ pub struct Va2RunReport {
     pub differential: Vec<Va2DifferentialResult>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_coverage: Option<Va2ChannelCoverage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paired_control: Option<PairedControlSummary>,
 }
 
 pub struct Va2Runner {
@@ -297,18 +340,52 @@ impl Va2Runner {
     }
 
     pub async fn run_plan(&self, plan: Va2CampaignPlan) -> Result<Va2RunReport> {
+        let run_started = Instant::now();
         ensure_va2_consent_and_target(&self.consent_manager, &plan.target_url)?;
 
         let mut results = Vec::with_capacity(plan.steps.len());
         let mut baseline_samples = Vec::new();
         let mut variance_samples: Vec<(u16, usize)> = Vec::new();
         let mut baseline_responses: HashMap<u32, Va2HttpResponse> = HashMap::new();
+        let mut baseline_durations: HashMap<u32, u128> = HashMap::new();
         let mut differential_results: Vec<Va2DifferentialResult> = Vec::new();
         let mut state_summary = Va2StateSummary::default();
         let mut challenge_profile = Va2ChallengeProfile::default();
         let mut throttle_samples: Vec<u128> = Vec::new();
         let mut throttle_step = 0u32;
+        let default_pair_cap = (plan.budget as usize).clamp(1usize, 12usize);
+        let pair_cap = std::env::var("WAF_DETECTOR_VA2_PAIR_CAP")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(default_pair_cap);
+        let mut early_stop_reason: Option<String> = None;
+        let mut rate_history: Vec<f64> = Vec::new();
         for step in &plan.steps {
+            if step.phase == Va2Phase::ProtocolVariance && step.expected_equivalence.is_some() {
+                if differential_results.len() >= pair_cap {
+                    results.push(Va2RunResult {
+                        step_id: step.id,
+                        phase: step.phase,
+                        kind: step.kind,
+                        status: None,
+                        duration_ms: 0,
+                        error: Some("skipped: pair cap reached".to_string()),
+                    });
+                    continue;
+                }
+                if let Some(reason) = &early_stop_reason {
+                    results.push(Va2RunResult {
+                        step_id: step.id,
+                        phase: step.phase,
+                        kind: step.kind,
+                        status: None,
+                        duration_ms: 0,
+                        error: Some(format!("skipped: {reason}")),
+                    });
+                    continue;
+                }
+            }
             if step.delay_ms > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms)).await;
             }
@@ -327,6 +404,7 @@ impl Va2Runner {
                         if step.expected_equivalence.is_none() {
                             // Control step — store for paired comparison
                             baseline_responses.insert(step.id, resp.clone());
+                            baseline_durations.insert(step.id, duration);
                         }
                         if let Some(ref_id) = step.expected_equivalence {
                             if let Some(ref_resp) = baseline_responses.get(&ref_id) {
@@ -336,7 +414,24 @@ impl Va2Runner {
                                     ref_resp,
                                     &resp,
                                     step.channel,
+                                    baseline_durations.get(&ref_id).copied().unwrap_or(0),
+                                    duration,
                                 ));
+                                let discriminated = differential_results
+                                    .iter()
+                                    .filter(|diff| diff.discriminated)
+                                    .count();
+                                let rate = discriminated as f64 / differential_results.len() as f64;
+                                rate_history.push(rate);
+                                if differential_results.len() >= 6
+                                    && early_stop_reason.is_none()
+                                    && has_confidence_converged(&rate_history)
+                                {
+                                    early_stop_reason = Some(format!(
+                                        "confidence converged after {} pairs",
+                                        differential_results.len()
+                                    ));
+                                }
                             }
                         }
                     }
@@ -393,6 +488,26 @@ impl Va2Runner {
         );
         let pmi = compute_pmi(&wbf);
         let channel_coverage = compute_channel_coverage(&differential_results);
+        let paired_control = build_paired_control_summary(
+            &differential_results,
+            channel_coverage.as_ref(),
+            pair_cap,
+            early_stop_reason,
+        );
+
+        let perf_mode = if std::env::var("WAF_DETECTOR_FIXTURE_MODE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
+            crate::perf::PerfMode::Fixture
+        } else {
+            crate::perf::PerfMode::Live
+        };
+        crate::perf::record(
+            crate::perf::PerfKind::Va2,
+            run_started.elapsed().as_millis() as u64,
+            perf_mode,
+        );
 
         Ok(Va2RunReport {
             target_url: plan.target_url.clone(),
@@ -415,6 +530,7 @@ impl Va2Runner {
             pmi,
             differential: differential_results,
             channel_coverage,
+            paired_control,
         })
     }
 }
@@ -503,10 +619,14 @@ fn compute_differential(
     baseline: &Va2HttpResponse,
     variant: &Va2HttpResponse,
     channel: Option<Va2ProbeChannel>,
+    baseline_duration_ms: u128,
+    variant_duration_ms: u128,
 ) -> Va2DifferentialResult {
     let status_delta = baseline.status.abs_diff(variant.status);
     let baseline_len = baseline.body.len() as f64;
     let variant_len = variant.body.len() as f64;
+    let header_mutation_count = count_header_mutations(&baseline.headers, &variant.headers);
+    let timing_delta_ms = variant_duration_ms as i128 - baseline_duration_ms as i128;
     let pct_change = if baseline_len > 0.0 {
         ((variant_len - baseline_len) / baseline_len).abs()
     } else if variant_len > 0.0 {
@@ -514,16 +634,125 @@ fn compute_differential(
     } else {
         0.0
     };
-    // Discrimination: status changed OR body length shifted >15%
-    let discriminated = status_delta > 0 || pct_change > 0.15;
+    // Discrimination: status changed OR body length shifted >15% OR header set changed OR timing shifted.
+    let discriminated = status_delta > 0
+        || pct_change > 0.15
+        || header_mutation_count > 0
+        || timing_delta_ms.abs() > 200;
+    let outcome = if baseline.status >= 400 && variant.status >= 400 && status_delta == 0 {
+        Some(PairedControlOutcome::Inconclusive)
+    } else if discriminated {
+        Some(PairedControlOutcome::Detected)
+    } else {
+        Some(PairedControlOutcome::NotDetected)
+    };
     Va2DifferentialResult {
         step_id,
         baseline_step_id: baseline_id,
         status_delta,
         body_length_pct_change: pct_change,
+        header_mutation_count,
+        timing_delta_ms,
         discriminated,
+        outcome,
         channel,
     }
+}
+
+fn count_header_mutations(
+    baseline: &HashMap<String, String>,
+    variant: &HashMap<String, String>,
+) -> usize {
+    let mut count = 0usize;
+    for (name, value) in baseline {
+        match variant.get(name) {
+            Some(other) if other == value => {}
+            _ => count += 1,
+        }
+    }
+    for name in variant.keys() {
+        if !baseline.contains_key(name) {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn has_confidence_converged(rate_history: &[f64]) -> bool {
+    if rate_history.len() < 6 {
+        return false;
+    }
+    let len = rate_history.len();
+    let prev = &rate_history[len - 6..len - 3];
+    let recent = &rate_history[len - 3..len];
+    let prev_avg = prev.iter().sum::<f64>() / prev.len() as f64;
+    let recent_avg = recent.iter().sum::<f64>() / recent.len() as f64;
+    (recent_avg - prev_avg).abs() <= 0.05
+}
+
+fn build_paired_control_summary(
+    differential: &[Va2DifferentialResult],
+    channel_coverage: Option<&Va2ChannelCoverage>,
+    pair_cap: usize,
+    early_stop_reason: Option<String>,
+) -> Option<PairedControlSummary> {
+    if differential.is_empty() {
+        return None;
+    }
+
+    let mut signals = Vec::with_capacity(differential.len());
+    let mut detected_pairs = 0usize;
+    let mut not_detected_pairs = 0usize;
+    let mut inconclusive_pairs = 0usize;
+
+    for diff in differential {
+        let outcome = diff.outcome.unwrap_or({
+            if diff.discriminated {
+                PairedControlOutcome::Detected
+            } else {
+                PairedControlOutcome::NotDetected
+            }
+        });
+        match outcome {
+            PairedControlOutcome::Detected => detected_pairs += 1,
+            PairedControlOutcome::NotDetected => not_detected_pairs += 1,
+            PairedControlOutcome::Inconclusive => inconclusive_pairs += 1,
+        }
+        signals.push(PairedControlSignal {
+            step_id: diff.step_id,
+            baseline_step_id: diff.baseline_step_id,
+            vector: diff
+                .channel
+                .map(|ch| ch.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            outcome,
+            status_delta: diff.status_delta,
+            body_length_pct_change: diff.body_length_pct_change,
+            header_mutation_count: diff.header_mutation_count,
+            timing_delta_ms: diff.timing_delta_ms,
+        });
+    }
+
+    let coverage_by_vector = channel_coverage
+        .map(|coverage| {
+            coverage
+                .channels
+                .iter()
+                .map(|(channel, score)| (channel.to_string(), *score))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Some(PairedControlSummary {
+        signals,
+        coverage_by_vector,
+        executed_pairs: differential.len(),
+        detected_pairs,
+        not_detected_pairs,
+        inconclusive_pairs,
+        pair_cap,
+        early_stop_reason,
+    })
 }
 
 fn compute_channel_coverage(results: &[Va2DifferentialResult]) -> Option<Va2ChannelCoverage> {
@@ -1524,7 +1753,7 @@ mod tests {
             headers: HashMap::new(),
             body: "baseline ok".to_string(),
         };
-        let result = compute_differential(2, 1, &baseline, &variant, None);
+        let result = compute_differential(2, 1, &baseline, &variant, None, 100, 105);
         assert_eq!(result.step_id, 2);
         assert_eq!(result.baseline_step_id, 1);
         assert_eq!(result.status_delta, 0);
@@ -1544,7 +1773,15 @@ mod tests {
             headers: HashMap::new(),
             body: "access denied".to_string(),
         };
-        let result = compute_differential(2, 1, &baseline, &variant, Some(Va2ProbeChannel::Query));
+        let result = compute_differential(
+            2,
+            1,
+            &baseline,
+            &variant,
+            Some(Va2ProbeChannel::Query),
+            80,
+            200,
+        );
         assert_eq!(result.status_delta, 203);
         assert!(result.discriminated);
         assert_eq!(result.channel, Some(Va2ProbeChannel::Query));
@@ -1558,7 +1795,10 @@ mod tests {
                 baseline_step_id: 1,
                 status_delta: 203,
                 body_length_pct_change: 0.5,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: true,
+                outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Query),
             },
             Va2DifferentialResult {
@@ -1566,7 +1806,10 @@ mod tests {
                 baseline_step_id: 3,
                 status_delta: 0,
                 body_length_pct_change: 0.0,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: false,
+                outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Header),
             },
         ];
@@ -1770,7 +2013,10 @@ mod tests {
                 baseline_step_id: 1,
                 status_delta: 203,
                 body_length_pct_change: 0.5,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: true,
+                outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Query),
             },
             Va2DifferentialResult {
@@ -1778,7 +2024,10 @@ mod tests {
                 baseline_step_id: 3,
                 status_delta: 0,
                 body_length_pct_change: 0.0,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: false,
+                outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Header),
             },
             Va2DifferentialResult {
@@ -1786,7 +2035,10 @@ mod tests {
                 baseline_step_id: 5,
                 status_delta: 200,
                 body_length_pct_change: 0.8,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: true,
+                outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Header),
             },
         ];
@@ -1807,7 +2059,10 @@ mod tests {
                 baseline_step_id: 1,
                 status_delta: 203,
                 body_length_pct_change: 0.5,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: true,
+                outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Query),
             },
             Va2DifferentialResult {
@@ -1815,7 +2070,10 @@ mod tests {
                 baseline_step_id: 3,
                 status_delta: 200,
                 body_length_pct_change: 0.8,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: true,
+                outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Header),
             },
             Va2DifferentialResult {
@@ -1823,7 +2081,10 @@ mod tests {
                 baseline_step_id: 5,
                 status_delta: 100,
                 body_length_pct_change: 0.9,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: true,
+                outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Body),
             },
         ];
@@ -1840,7 +2101,10 @@ mod tests {
                 baseline_step_id: 1,
                 status_delta: 0,
                 body_length_pct_change: 0.0,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: false,
+                outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Query),
             },
             Va2DifferentialResult {
@@ -1848,7 +2112,10 @@ mod tests {
                 baseline_step_id: 3,
                 status_delta: 0,
                 body_length_pct_change: 0.0,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: false,
+                outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Header),
             },
             Va2DifferentialResult {
@@ -1856,7 +2123,10 @@ mod tests {
                 baseline_step_id: 5,
                 status_delta: 0,
                 body_length_pct_change: 0.0,
+                header_mutation_count: 0,
+                timing_delta_ms: 0,
                 discriminated: false,
+                outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Body),
             },
         ];

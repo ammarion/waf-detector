@@ -1575,6 +1575,70 @@ body {
     color: var(--danger);
 }
 
+.mode-switch {
+    display: flex;
+    gap: 0.75rem;
+    margin: 1rem 0 1.25rem;
+}
+
+.mode-btn {
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    background: rgba(15, 23, 42, 0.35);
+    color: #e2e8f0;
+    padding: 0.5rem 0.9rem;
+    border-radius: 999px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.mode-btn.active {
+    background: linear-gradient(120deg, #0284c7 0%, #0ea5e9 100%);
+    border-color: transparent;
+    color: #f8fafc;
+}
+
+.executive-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    color: #e2e8f0;
+}
+
+.executive-summary-empty {
+    color: #cbd5e1;
+}
+
+.executive-pill {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    border-radius: 999px;
+    padding: 0.2rem 0.75rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #082f49;
+    background: #7dd3fc;
+}
+
+.executive-line {
+    font-size: 0.95rem;
+}
+
+body[data-dashboard-mode="executive"] .analyst-only {
+    display: none !important;
+}
+
+body[data-dashboard-mode="analyst"] .executive-only {
+    display: none !important;
+}
+
+.va-virtual-spacer td {
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .header h1 {
