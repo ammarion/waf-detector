@@ -215,6 +215,37 @@ impl SimpleCliApp {
                     report.results.len(),
                     errors
                 );
+                if let Some(cc) = &report.channel_coverage {
+                    println!("\nChannel Coverage:");
+                    let mut channels: Vec<_> = cc.channels.iter().collect();
+                    channels.sort_by_key(|(ch, _)| format!("{ch:?}"));
+                    for (ch, rate) in &channels {
+                        let disc_count = report
+                            .differential
+                            .iter()
+                            .filter(|d| d.channel == Some(**ch) && d.discriminated)
+                            .count();
+                        let total_count = report
+                            .differential
+                            .iter()
+                            .filter(|d| d.channel == Some(**ch))
+                            .count();
+                        let blind = if cc.blind_spots.contains(ch) {
+                            " [blind spot]"
+                        } else {
+                            ""
+                        };
+                        println!(
+                            "  {:<8} {:>3.0}% ({}/{}){}",
+                            ch.to_string() + ":",
+                            *rate * 100.0,
+                            disc_count,
+                            total_count,
+                            blind
+                        );
+                    }
+                    println!("  Overall: {:.0}%", cc.coverage_score * 100.0);
+                }
                 return Ok(());
             }
 

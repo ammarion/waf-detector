@@ -85,6 +85,54 @@
       "status": 200,
       "headers": { "server": "nginx/1.24" },
       "body": "root:x:0:0:root"
+    },
+    {
+      "key": "GET:/:va2=hdr1:H{Referer=https://example.com}",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=hdr1:H{Referer=<script>alert(1)</script>}",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=hdr2:H{X-Search=test}",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "GET:/:va2=hdr2:H{X-Search=1' OR '1'='1}",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Welcome</html>"
+    },
+    {
+      "key": "POST:/:va2=body1:H{Content-Type=application/x-www-form-urlencoded}:B{search=test}",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Search: test</html>"
+    },
+    {
+      "key": "POST:/:va2=body1:H{Content-Type=application/x-www-form-urlencoded}:B{search=1'+OR+'1'='1}",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "<html>Search: 1' OR '1'='1</html>"
+    },
+    {
+      "key": "OPTIONS:/api/v1/status:",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": ""
+    },
+    {
+      "key": "DELETE:/api/v1/status:",
+      "status": 200,
+      "headers": { "server": "nginx/1.24" },
+      "body": "{\"status\":\"ok\"}"
     }
   ]
 }

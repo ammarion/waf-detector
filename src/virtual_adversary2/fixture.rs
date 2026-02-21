@@ -51,7 +51,30 @@ impl FixtureAdapter {
         let path = percent_encoding::percent_decode_str(url.path()).decode_utf8_lossy();
         let raw_query = url.query().unwrap_or("");
         let query = percent_encoding::percent_decode_str(raw_query).decode_utf8_lossy();
-        format!("{}:{}:{}", req.method, path, query)
+        let mut key = format!("{}:{}:{}", req.method, path, query);
+
+        // Extended key format: append header and body components for multi-channel probes
+        let probe_headers: Vec<(&str, &str)> = req
+            .headers
+            .iter()
+            .filter(|(k, _)| {
+                let kl = k.to_lowercase();
+                kl.starts_with("x-") || kl == "referer" || kl == "content-type"
+            })
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        if !probe_headers.is_empty() {
+            let mut sorted: Vec<_> = probe_headers;
+            sorted.sort_by_key(|(k, _)| k.to_lowercase());
+            let parts: Vec<String> = sorted.iter().map(|(k, v)| format!("{k}={v}")).collect();
+            key.push_str(&format!(":H{{{}}}", parts.join(",")));
+        }
+        if let Some(body) = &req.body {
+            if !body.is_empty() {
+                key.push_str(&format!(":B{{{body}}}"));
+            }
+        }
+        key
     }
 }
 
@@ -175,6 +198,54 @@ mod tests {
                     status: 403,
                     headers: HashMap::new(),
                     body: "access denied".to_string(),
+                },
+                FixtureEntry {
+                    key: "GET:/:va2=hdr1:H{Referer=https://example.com}".to_string(),
+                    status: 200,
+                    headers: HashMap::new(),
+                    body: "<html>Welcome</html>".to_string(),
+                },
+                FixtureEntry {
+                    key: "GET:/:va2=hdr1:H{Referer=<script>alert(1)</script>}".to_string(),
+                    status: 403,
+                    headers: HashMap::new(),
+                    body: "access denied".to_string(),
+                },
+                FixtureEntry {
+                    key: "GET:/:va2=hdr2:H{X-Search=test}".to_string(),
+                    status: 200,
+                    headers: HashMap::new(),
+                    body: "<html>Welcome</html>".to_string(),
+                },
+                FixtureEntry {
+                    key: "GET:/:va2=hdr2:H{X-Search=1' OR '1'='1}".to_string(),
+                    status: 403,
+                    headers: HashMap::new(),
+                    body: "access denied".to_string(),
+                },
+                FixtureEntry {
+                    key: "POST:/:va2=body1:H{Content-Type=application/x-www-form-urlencoded}:B{search=test}".to_string(),
+                    status: 200,
+                    headers: HashMap::new(),
+                    body: "<html>Search results</html>".to_string(),
+                },
+                FixtureEntry {
+                    key: "POST:/:va2=body1:H{Content-Type=application/x-www-form-urlencoded}:B{search=1'+OR+'1'='1}".to_string(),
+                    status: 403,
+                    headers: HashMap::new(),
+                    body: "access denied".to_string(),
+                },
+                FixtureEntry {
+                    key: "OPTIONS:/api/v1/status:".to_string(),
+                    status: 200,
+                    headers: HashMap::new(),
+                    body: String::new(),
+                },
+                FixtureEntry {
+                    key: "DELETE:/api/v1/status:".to_string(),
+                    status: 405,
+                    headers: HashMap::new(),
+                    body: "method not allowed".to_string(),
                 },
             ],
         }
@@ -335,5 +406,138 @@ mod tests {
             .unwrap();
         let resp = rt.block_on(adapter.send(&req)).unwrap();
         assert_eq!(resp.status, 200);
+    }
+
+    #[test]
+    fn test_fixture_adapter_post_request() {
+        let fixture = cloudflare_fixture();
+        let adapter = FixtureAdapter::from_fixture_set(fixture);
+
+        // POST with body — benign
+        let req = Va2HttpRequest {
+            method: "POST".to_string(),
+            url: "https://example.com/?va2=body1".to_string(),
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )],
+            body: Some("search=test".to_string()),
+        };
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let resp = rt.block_on(adapter.send(&req)).unwrap();
+        assert_eq!(resp.status, 200);
+
+        // POST with body — attack
+        let req_attack = Va2HttpRequest {
+            method: "POST".to_string(),
+            url: "https://example.com/?va2=body1".to_string(),
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )],
+            body: Some("search=1'+OR+'1'='1".to_string()),
+        };
+        let resp_attack = rt.block_on(adapter.send(&req_attack)).unwrap();
+        assert_eq!(resp_attack.status, 403);
+    }
+
+    #[test]
+    fn test_fixture_adapter_header_request() {
+        let fixture = cloudflare_fixture();
+        let adapter = FixtureAdapter::from_fixture_set(fixture);
+
+        // Header benign
+        let req = Va2HttpRequest {
+            method: "GET".to_string(),
+            url: "https://example.com/?va2=hdr1".to_string(),
+            headers: vec![("Referer".to_string(), "https://example.com".to_string())],
+            body: None,
+        };
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let resp = rt.block_on(adapter.send(&req)).unwrap();
+        assert_eq!(resp.status, 200);
+
+        // Header attack
+        let req_attack = Va2HttpRequest {
+            method: "GET".to_string(),
+            url: "https://example.com/?va2=hdr1".to_string(),
+            headers: vec![(
+                "Referer".to_string(),
+                "<script>alert(1)</script>".to_string(),
+            )],
+            body: None,
+        };
+        let resp_attack = rt.block_on(adapter.send(&req_attack)).unwrap();
+        assert_eq!(resp_attack.status, 403);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn test_va2_with_fixture_multichannel() {
+        use crate::virtual_adversary2::{
+            build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner,
+        };
+
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+
+        let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+        let record = serde_json::json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "terms_version": "1.0.0",
+            "authorized_targets": ["example.com"],
+            "acknowledgment": "I AGREE"
+        });
+        std::fs::write(
+            &consent_path,
+            serde_json::to_string_pretty(&record).unwrap(),
+        )
+        .unwrap();
+
+        let fixture = cloudflare_fixture();
+        let adapter = FixtureAdapter::from_fixture_set(fixture);
+
+        let phases = vec![Va2Phase::Baseline, Va2Phase::ProtocolVariance];
+        let config = Va2CampaignConfig {
+            seed: 42,
+            budget: 60,
+        };
+        let mut plan = build_va2_campaign_plan("https://example.com", &phases, config).unwrap();
+        for step in &mut plan.steps {
+            step.delay_ms = 0;
+        }
+
+        let runner = Va2Runner::with_adapter(Box::new(adapter)).unwrap();
+        let report = runner.run_plan(plan).await.unwrap();
+
+        // Verify channel_coverage is populated
+        let cc = report
+            .channel_coverage
+            .as_ref()
+            .expect("channel_coverage should be present");
+        assert!(!cc.channels.is_empty());
+        // Cloudflare blocks all channels → should have high coverage
+        assert!(
+            cc.coverage_score > 0.5,
+            "expected good coverage against cloudflare fixture, got {}",
+            cc.coverage_score
+        );
+
+        // Cleanup
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
     }
 }

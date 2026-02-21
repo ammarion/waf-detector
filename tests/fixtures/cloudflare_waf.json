@@ -85,6 +85,54 @@
       "status": 403,
       "headers": {},
       "body": "access denied"
+    },
+    {
+      "key": "GET:/:va2=hdr1:H{Referer=https://example.com}",
+      "status": 200,
+      "headers": { "cf-ray": "abc131-SEA" },
+      "body": "<html>Welcome to example.com</html>"
+    },
+    {
+      "key": "GET:/:va2=hdr1:H{Referer=<script>alert(1)</script>}",
+      "status": 403,
+      "headers": { "cf-ray": "abc132-SEA" },
+      "body": "access denied"
+    },
+    {
+      "key": "GET:/:va2=hdr2:H{X-Search=test}",
+      "status": 200,
+      "headers": { "cf-ray": "abc133-SEA" },
+      "body": "<html>Welcome to example.com</html>"
+    },
+    {
+      "key": "GET:/:va2=hdr2:H{X-Search=1' OR '1'='1}",
+      "status": 403,
+      "headers": { "cf-ray": "abc134-SEA" },
+      "body": "access denied"
+    },
+    {
+      "key": "POST:/:va2=body1:H{Content-Type=application/x-www-form-urlencoded}:B{search=test}",
+      "status": 200,
+      "headers": { "cf-ray": "abc135-SEA" },
+      "body": "<html>Search results</html>"
+    },
+    {
+      "key": "POST:/:va2=body1:H{Content-Type=application/x-www-form-urlencoded}:B{search=1'+OR+'1'='1}",
+      "status": 403,
+      "headers": { "cf-ray": "abc136-SEA" },
+      "body": "access denied"
+    },
+    {
+      "key": "OPTIONS:/api/v1/status:",
+      "status": 200,
+      "headers": {},
+      "body": ""
+    },
+    {
+      "key": "DELETE:/api/v1/status:",
+      "status": 405,
+      "headers": {},
+      "body": "method not allowed"
     }
   ]
 }
