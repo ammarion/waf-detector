@@ -24,3 +24,5 @@ node_modules
 # Session memory (local only)
 MEMORY.md
 CLAUDE.md
+.worktrees/
+
