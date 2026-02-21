@@ -19,36 +19,6 @@
             <a href="/api-docs" target="_blank" class="header-link">API Docs</a>
         </div>
 
-        <div class="experience-toolbar" aria-label="Experience controls">
-            <label for="experienceMode">Experience Mode</label>
-            <select id="experienceMode" class="input-field experience-select">
-                <option value="beginner">Beginner</option>
-                <option value="analyst">Analyst</option>
-            </select>
-            <p id="experienceHint" class="experience-hint" aria-live="polite"></p>
-        </div>
-
-        <div class="experience-panels">
-            <details id="beginnerAssistantPanel" class="experience-panel" data-experience="beginner">
-                <summary><h2>Quick Start Guide</h2></summary>
-                <p class="card-desc">Use this path for a clean first run with minimal risk.</p>
-                <ol class="assistant-checklist">
-                    <li>Confirm consent once using <code>./waf-detect --consent request</code>.</li>
-                    <li>Start with <strong>Safe preset</strong> in Virtual Adversary.</li>
-                    <li>Review blocked vs challenge outcomes before increasing intensity.</li>
-                </ol>
-            </details>
-            <details id="analystAssistantPanel" class="experience-panel" data-experience="analyst" hidden>
-                <summary><h2>Analyst Workflow</h2></summary>
-                <p class="card-desc">Fast path for deeper testing and higher signal extraction.</p>
-                <ul class="assistant-checklist">
-                    <li>Run VA2 with fixed seed to preserve replayability.</li>
-                    <li>Compare channel coverage and blind spots in the report panel.</li>
-                    <li>Export JSON and CSV for triage and evidence tracking.</li>
-                </ul>
-            </details>
-        </div>
-
         <div class="tab-bar" role="tablist" aria-label="Dashboard sections">
             <button class="tab-btn active" data-tab="detect" id="tab-detect-btn" role="tab" aria-selected="true" aria-controls="tab-detect">Detect</button>
             <button class="tab-btn" data-tab="test" id="tab-test-btn" role="tab" aria-selected="false" aria-controls="tab-test" tabindex="-1">Test</button>
@@ -220,7 +190,8 @@
                 </div>
 
                 <div class="card full-width">
-                    <h2>Advanced Security Profiling</h2>
+                    <details class="va2-collapsible">
+                    <summary class="va2-summary"><h2>Advanced Security Profiling</h2></summary>
                     <p class="card-desc">Behavioral profiling with deterministic, replayable campaigns.</p>
                     <form id="va2TestForm">
                         <div class="dashboard-grid" style="margin-bottom:0">
@@ -262,6 +233,7 @@
                         </div>
                     </form>
                     <div class="va2-result" id="va2Result" style="display:none;"></div>
+                    </details>
                 </div>
             </div>
 
@@ -316,23 +288,10 @@
             <div class="results-header">
                 <h2>Detection Results</h2>
                 <span id="resultsCount">0 results</span>
+                <span id="resultsStatus" class="results-status" aria-live="polite"></span>
                 <div class="results-actions">
                     <button onclick="exportResults()" class="btn btn-secondary btn-compact">Export JSON</button>
                     <button onclick="clearResults()" class="btn btn-secondary btn-compact">Clear</button>
-                </div>
-            </div>
-            <div id="resultsInsightBar" class="results-insight-strip" aria-live="polite">
-                <div class="insight-pill">
-                    <span class="insight-label">Summary</span>
-                    <strong id="resultsInsightTitle">No scan results yet.</strong>
-                </div>
-                <div class="insight-pill">
-                    <span class="insight-label">Signal</span>
-                    <strong id="resultsInsightMetric">Run a scan to populate this panel.</strong>
-                </div>
-                <div class="insight-pill insight-pill-action">
-                    <span class="insight-label">Next Action</span>
-                    <strong id="resultsInsightAction">Run Single URL Scan for the fastest baseline.</strong>
                 </div>
             </div>
             <div id="resultsContainer"></div>
@@ -398,23 +357,12 @@
 
 <script>
 let allResults = [];
-const EXPERIENCE_HINTS = {
-    beginner: "Beginner mode keeps controls simple and safe defaults visible.",
-    analyst: "Analyst mode keeps advanced tuning and diagnostics within immediate reach."
-};
 const VA_PRESETS = {
     safe: { label: "Safe", tier: "1", budget: "40", timeout: "12000", delay: "900", variants: "3" },
     balanced: { label: "Balanced", tier: "2", budget: "120", timeout: "15000", delay: "750", variants: "4" },
     deep: { label: "Deep", tier: "3", budget: "180", timeout: "18000", delay: "600", variants: "6" }
 };
 let vaPresetManuallySelected = false;
-
-function updateExperiencePanels(mode) {
-    const sections = document.querySelectorAll('.experience-panel[data-experience]');
-    sections.forEach((section) => {
-        section.hidden = section.dataset.experience !== mode;
-    });
-}
 
 function applyVaPreset(presetKey, manualSelection = true) {
     const preset = VA_PRESETS[presetKey] || VA_PRESETS.balanced;
@@ -440,26 +388,6 @@ function applyVaPreset(presetKey, manualSelection = true) {
     if (manualSelection) {
         vaPresetManuallySelected = true;
     }
-}
-
-function applyExperienceMode(mode) {
-    const normalized = mode === 'analyst' ? 'analyst' : 'beginner';
-    document.body.dataset.experienceMode = normalized;
-    updateExperiencePanels(normalized);
-    const hint = document.getElementById('experienceHint');
-    if (hint) {
-        hint.textContent = EXPERIENCE_HINTS[normalized];
-    }
-    const advanced = document.querySelectorAll('.va-advanced-toggle');
-    advanced.forEach((section) => {
-        if (normalized === 'beginner') {
-            section.removeAttribute('open');
-        }
-    });
-    if (!vaPresetManuallySelected) {
-        applyVaPreset(normalized === 'beginner' ? 'safe' : 'balanced', false);
-    }
-    renderResultsInsightStrip(allResults);
 }
 
 function setActiveTab(tabName) {
@@ -2298,58 +2226,30 @@ function escapeHtml(str) {
             };
         }
 
-        function renderResultsInsightStrip(results) {
-            const titleEl = document.getElementById('resultsInsightTitle');
-            const metricEl = document.getElementById('resultsInsightMetric');
-            const actionEl = document.getElementById('resultsInsightAction');
-            if (!titleEl || !metricEl || !actionEl) return;
-
+        function updateResultsStatus(results) {
+            const el = document.getElementById('resultsStatus');
+            if (!el) return;
             if (!Array.isArray(results) || results.length === 0) {
-                titleEl.textContent = 'No scan results yet.';
-                metricEl.textContent = 'Run a scan to populate this panel.';
-                actionEl.textContent = 'Run Single URL Scan for the fastest baseline.';
+                el.textContent = '';
                 return;
             }
-
             const latest = results[0] || {};
-            const mode = document.body.dataset.experienceMode === 'analyst' ? 'analyst' : 'beginner';
-            const isVirtualAdversary = latest.is_virtual_adversary === true || (latest.summary && Array.isArray(latest.results));
-            const isSmokeTest = latest.is_smoke_test === true || (latest.summary && latest.summary.effectiveness_percentage !== undefined);
-
-            if (isVirtualAdversary) {
-                const summary = latest.summary || {};
-                const blocked = Number(summary.blocked || 0);
-                const challenge = Number(summary.challenge || 0);
-                const total = Number(summary.total || latest.plan_size || (Array.isArray(latest.results) ? latest.results.length : 0));
+            const isVa = latest.is_virtual_adversary === true || (latest.summary && Array.isArray(latest.results));
+            const isSmoke = latest.is_smoke_test === true || (latest.summary && latest.summary.effectiveness_percentage !== undefined);
+            if (isVa) {
+                const s = latest.summary || {};
+                const total = Number(s.total || latest.plan_size || (Array.isArray(latest.results) ? latest.results.length : 0));
+                const blocked = Number(s.blocked || 0);
+                const challenge = Number(s.challenge || 0);
                 const efficacy = total > 0 ? Math.round(((blocked + challenge) / total) * 100) : 0;
-                titleEl.textContent = `Virtual Adversary coverage is ${efficacy}%`;
-                metricEl.textContent = `${blocked} blocked, ${challenge} challenged, ${Math.max(0, total - blocked - challenge)} allowed`;
-                actionEl.textContent = mode === 'analyst'
-                    ? 'Inspect channel blind spots and replay weak outcomes.'
-                    : 'Open report details and focus on outcomes marked Allowed.';
-                return;
+                el.textContent = `VA coverage ${efficacy}% \u2014 ${blocked} blocked, ${challenge} challenged`;
+            } else if (isSmoke) {
+                const s = latest.summary || {};
+                el.textContent = `Smoke ${Number(s.effectiveness_percentage || 0).toFixed(0)}% \u2014 ${s.blocked_count || 0}/${s.total_tests || 0} blocked`;
+            } else {
+                const elapsed = latest.total_time_ms || latest.detection_time_ms || 0;
+                el.textContent = elapsed ? `${elapsed}ms` : '';
             }
-
-            if (isSmokeTest) {
-                const summary = latest.summary || {};
-                const effectiveness = Number(summary.effectiveness_percentage || 0);
-                const blocked = Number(summary.blocked_count || 0);
-                const total = Number(summary.total_tests || 0);
-                titleEl.textContent = `Smoke test effectiveness: ${effectiveness.toFixed(1)}%`;
-                metricEl.textContent = `${blocked} of ${total} payloads blocked`;
-                actionEl.textContent = mode === 'analyst'
-                    ? 'Correlate blocked payload classes with provider evidence.'
-                    : 'If effectiveness is low, run Virtual Adversary in Safe preset next.';
-                return;
-            }
-
-            const names = extractDetectionNames(latest);
-            titleEl.textContent = `WAF ${names.waf} | CDN ${names.cdn}`;
-            const elapsed = latest.total_time_ms || latest.detection_time_ms || 0;
-            metricEl.textContent = elapsed ? `Detection finished in ${elapsed}ms` : 'Detection complete';
-            actionEl.textContent = mode === 'analyst'
-                ? 'Escalate to VA2 for differential coverage and replay export.'
-                : 'Run WAF Smoke Test to validate active blocking behavior.';
         }
 
         function displayResults() {
@@ -2361,7 +2261,7 @@ function escapeHtml(str) {
             count.textContent = `${allResults.length} result${allResults.length !== 1 ? 's' : ''}`;
 
             container.innerHTML = allResults.map((result, index) => createResultCard(result, index)).join('');
-            renderResultsInsightStrip(allResults);
+            updateResultsStatus(allResults);
         }
 
         function createResultCard(result, index) {
@@ -2649,7 +2549,7 @@ function escapeHtml(str) {
         function clearResults() {
             allResults = [];
             document.getElementById('resultsSection').style.display = 'none';
-            renderResultsInsightStrip(allResults);
+            updateResultsStatus(allResults);
             showSuccessMessage('Results cleared');
         }
 
@@ -2757,19 +2657,7 @@ function escapeHtml(str) {
 document.addEventListener('DOMContentLoaded', function() {
     loadConsentStatus();
     loadVaHistory();
-    var experienceMode = document.getElementById('experienceMode');
-    var storedMode = localStorage.getItem('wafDetectorExperienceMode');
-    if (experienceMode) {
-        experienceMode.value = storedMode === 'analyst' ? 'analyst' : 'beginner';
-        applyExperienceMode(experienceMode.value);
-        experienceMode.addEventListener('change', function(event) {
-            var nextMode = event.target.value === 'analyst' ? 'analyst' : 'beginner';
-            localStorage.setItem('wafDetectorExperienceMode', nextMode);
-            applyExperienceMode(nextMode);
-        });
-    } else {
-        applyExperienceMode(storedMode === 'analyst' ? 'analyst' : 'beginner');
-    }
+    applyVaPreset('balanced', false);
     [
         ['vaPresetSafe', 'safe'],
         ['vaPresetBalanced', 'balanced'],

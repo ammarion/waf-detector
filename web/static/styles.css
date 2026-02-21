@@ -82,67 +82,6 @@ body {
     color: var(--text-muted);
 }
 
-.experience-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    align-items: center;
-    margin-bottom: 1rem;
-    padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg-surface);
-}
-
-.experience-toolbar label {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    font-weight: 600;
-}
-
-.experience-select {
-    width: auto;
-    min-width: 160px;
-}
-
-.experience-hint {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-}
-
-.experience-panels {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
-    margin-bottom: 1rem;
-}
-
-.experience-panel {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(59, 130, 246, 0.04));
-    padding: 1rem;
-}
-
-.experience-panel h2 {
-    font-family: var(--font-display);
-    font-size: 1rem;
-    margin-bottom: 0.35rem;
-}
-
-.assistant-checklist {
-    margin-left: 1.1rem;
-    display: grid;
-    gap: 0.2rem;
-    color: var(--text-secondary);
-    font-size: 0.85rem;
-}
-
-.assistant-checklist code {
-    font-family: var(--font-mono);
-    color: var(--text-primary);
-}
-
 /* ---- Tabs ---- */
 .tab-bar {
     display: flex;
@@ -528,40 +467,11 @@ select.input-field {
     font-weight: 600;
 }
 
-.results-insight-strip {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-    margin-bottom: 1rem;
-}
-
-.insight-pill {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: rgba(15, 23, 42, 0.6);
-    padding: 0.75rem 0.85rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    min-height: 70px;
-}
-
-.insight-label {
-    font-size: 0.68rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-}
-
-.insight-pill strong {
-    font-size: 0.88rem;
-    line-height: 1.3;
-    color: var(--text-primary);
-}
-
-.insight-pill-action {
-    border-color: rgba(6, 182, 212, 0.35);
-    background: rgba(8, 47, 73, 0.55);
+/* Results status line */
+.results-status {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 .result-card {
@@ -1498,12 +1408,7 @@ select.input-field {
 @media (max-width: 768px) {
     .container { padding: 1rem; }
     .header h1 { font-size: 1.4rem; }
-    .experience-toolbar { align-items: flex-start; }
-    .experience-select { width: 100%; min-width: 0; }
-    .experience-panel { padding: 0.85rem; }
     .va-preset-status { margin-left: 0; width: 100%; }
-    .results-insight-strip { grid-template-columns: 1fr; }
-    .insight-pill { min-height: 0; }
     .dashboard-grid { grid-template-columns: 1fr; gap: 1rem; }
     .card { padding: 1rem; }
     .detection-info { grid-template-columns: 1fr; }
@@ -1627,29 +1532,23 @@ select.input-field {
     color: var(--text-primary);
 }
 
-/* ---- Experience panel collapsible ---- */
-.experience-panel summary {
-    list-style: none;
+/* ---- VA2 collapsible card ---- */
+.va2-collapsible { width: 100%; }
+.va2-summary {
     cursor: pointer;
+    list-style: none;
     display: flex;
     align-items: center;
     gap: 0.5rem;
 }
-
-.experience-panel summary::-webkit-details-marker { display: none; }
-
-.experience-panel summary::before {
+.va2-summary::-webkit-details-marker { display: none; }
+.va2-summary::before {
     content: '\25B6';
-    font-size: 0.6rem;
+    font-size: 0.7rem;
+    transition: transform 0.2s ease;
     color: var(--text-muted);
-    transition: transform 0.15s;
 }
-
-.experience-panel[open] > summary::before {
+.va2-collapsible[open] > .va2-summary::before {
     transform: rotate(90deg);
 }
-
-.experience-panel summary h2 {
-    display: inline;
-    margin-bottom: 0;
-}
+.va2-summary h2 { display: inline; margin: 0; }
