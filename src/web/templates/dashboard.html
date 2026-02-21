@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WAF Detector Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -33,11 +34,14 @@
         <div class="card executive-only" id="executiveSummaryCard">
             <h2>📌 Executive Risk Snapshot</h2>
             <div id="executiveSummaryContent" class="executive-summary-empty">
-                Run a scan to generate an executive posture narrative.
+                <div style="text-align: center; padding: 1.5rem 0; color: var(--text-muted);">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">📊</div>
+                    <div>Run a scan to generate an executive posture narrative.</div>
+                </div>
             </div>
         </div>
 
-        <div class="dashboard-grid">
+        <div class="dashboard-grid" id="detectionInputGrid">
             <div class="card">
                 <h2>🚀 Single URL Detection (CDN & WAF)</h2>
                 <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">Detect which CDN and WAF are protecting
@@ -101,32 +105,35 @@
                         <label for="vaUrl">Enter URL to test:</label>
                         <input type="url" id="vaUrl" class="input-field" placeholder="https://example.com" required>
                     </div>
-                    <div class="va-grid">
-                        <div class="input-group">
-                            <label for="vaTier">Tier</label>
-                            <select id="vaTier" class="input-field">
-                                <option value="1">Tier 1 (Safe)</option>
-                                <option value="2">Tier 2</option>
-                                <option value="3">Tier 3 (Advanced)</option>
-                            </select>
+                    <details class="va-advanced-toggle">
+                        <summary>Advanced Options</summary>
+                        <div class="va-grid">
+                            <div class="input-group">
+                                <label for="vaTier">Tier</label>
+                                <select id="vaTier" class="input-field">
+                                    <option value="1">Tier 1 (Safe)</option>
+                                    <option value="2">Tier 2</option>
+                                    <option value="3">Tier 3 (Advanced)</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label for="vaBudget">Budget</label>
+                                <input type="number" id="vaBudget" class="input-field" min="10" value="120">
+                            </div>
+                            <div class="input-group">
+                                <label for="vaTimeout">Timeout (ms)</label>
+                                <input type="number" id="vaTimeout" class="input-field" min="1000" value="15000">
+                            </div>
+                            <div class="input-group">
+                                <label for="vaDelay">Delay (ms)</label>
+                                <input type="number" id="vaDelay" class="input-field" min="250" value="750">
+                            </div>
+                            <div class="input-group">
+                                <label for="vaVariants">Variants</label>
+                                <input type="number" id="vaVariants" class="input-field" min="1" max="6" value="4">
+                            </div>
                         </div>
-                        <div class="input-group">
-                            <label for="vaBudget">Budget</label>
-                            <input type="number" id="vaBudget" class="input-field" min="10" value="120">
-                        </div>
-                        <div class="input-group">
-                            <label for="vaTimeout">Timeout (ms)</label>
-                            <input type="number" id="vaTimeout" class="input-field" min="1000" value="15000">
-                        </div>
-                        <div class="input-group">
-                            <label for="vaDelay">Delay (ms)</label>
-                            <input type="number" id="vaDelay" class="input-field" min="250" value="750">
-                        </div>
-                        <div class="input-group">
-                            <label for="vaVariants">Variants</label>
-                            <input type="number" id="vaVariants" class="input-field" min="1" max="6" value="4">
-                        </div>
-                    </div>
+                    </details>
                     <p style="margin-bottom: 1rem; color: #94a3b8; font-size: 0.85rem;">
                         Consent is required. Use <code>./waf-detect --consent request</code> before running tests.
                     </p>
@@ -173,22 +180,22 @@
                             </label>
                         </div>
                     </div>
-                    <div id="vaActivityEmpty" class="va-activity-empty">No activity yet.</div>
+                    <div id="vaActivityEmpty" class="va-activity-empty" style="text-align: center; padding: 1rem 0;">Run a Virtual Adversary test to see live activity here.</div>
                     <ul id="vaActivityLog" class="va-activity-log"></ul>
                 </div>
             </div>
 
             <div class="card">
                 <h2>📊 Quick Actions</h2>
-                <div style="display: flex; flex-direction: column; gap: 1rem;">
-                    <button onclick="clearResults()" class="btn btn-secondary">
-                        🗑️ Clear Results
+                <div class="quick-actions-bar">
+                    <button onclick="clearResults()" class="btn btn-secondary btn-compact">
+                        🗑️ Clear
                     </button>
-                    <button onclick="window.open('/api-docs', '_blank')" class="btn btn-secondary">
-                        📖 API Documentation
+                    <button onclick="window.open('/api-docs', '_blank')" class="btn btn-secondary btn-compact">
+                        📖 API Docs
                     </button>
-                    <button onclick="exportResults()" class="btn btn-secondary">
-                        💾 Export Results
+                    <button onclick="exportResults()" class="btn btn-secondary btn-compact">
+                        💾 Export
                     </button>
                 </div>
             </div>
@@ -224,48 +231,50 @@
                         <button type="button" class="btn btn-secondary" onclick="loadVaHistory()">
                             🔄 Refresh
                         </button>
-                        <button type="button" class="btn btn-secondary" onclick="downloadVaHistoryCsv()">
+                        <button type="button" class="btn btn-secondary" id="vaHistoryCsvBtn" onclick="downloadVaHistoryCsv()" style="display:none">
                             📄 CSV
                         </button>
                     </div>
-                    <div class="va-history-filters">
-                        <label for="vaHistoryDate">Date</label>
-                        <select id="vaHistoryDate" class="input-field va-history-select">
-                            <option value="all">All</option>
-                            <option value="7">Last 7 days</option>
-                            <option value="30">Last 30 days</option>
-                            <option value="custom">Custom</option>
-                        </select>
-                        <label for="vaHistorySort">Sort</label>
-                        <select id="vaHistorySort" class="input-field va-history-select">
-                            <option value="newest">Newest</option>
-                            <option value="oldest">Oldest</option>
-                            <option value="risk">Risk (High → Low)</option>
-                            <option value="blocked">Blocked Rate</option>
-                        </select>
-                        <input id="vaHistoryStart" class="input-field va-history-date" type="date" disabled>
-                        <input id="vaHistoryEnd" class="input-field va-history-date" type="date" disabled>
-                        <button type="button" class="btn btn-secondary" onclick="applyVaHistoryFilter()">
-                            Apply
-                        </button>
-                        <button type="button" class="btn btn-secondary" onclick="deleteVaHistoryRange()">
-                            🗑️ Delete range
-                        </button>
+                    <div id="vaHistoryToolbar" style="display:none">
+                        <div class="va-history-filters">
+                            <label for="vaHistoryDate">Date</label>
+                            <select id="vaHistoryDate" class="input-field va-history-select">
+                                <option value="all">All</option>
+                                <option value="7">Last 7 days</option>
+                                <option value="30">Last 30 days</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                            <label for="vaHistorySort">Sort</label>
+                            <select id="vaHistorySort" class="input-field va-history-select">
+                                <option value="newest">Newest</option>
+                                <option value="oldest">Oldest</option>
+                                <option value="risk">Risk (High → Low)</option>
+                                <option value="blocked">Blocked Rate</option>
+                            </select>
+                            <input id="vaHistoryStart" class="input-field va-history-date" type="date" disabled>
+                            <input id="vaHistoryEnd" class="input-field va-history-date" type="date" disabled>
+                            <button type="button" class="btn btn-secondary" onclick="applyVaHistoryFilter()">
+                                Apply
+                            </button>
+                            <button type="button" class="btn btn-secondary" onclick="deleteVaHistoryRange()">
+                                🗑️ Delete range
+                            </button>
+                        </div>
+                        <div class="va-history-search">
+                            <label for="vaHistorySearch">Search</label>
+                            <input id="vaHistorySearch" class="input-field va-history-input" type="text"
+                                placeholder="Filter by target URL">
+                        </div>
+                        <div class="va-history-retention">
+                            <label for="vaRetentionInput">Keep last</label>
+                            <input id="vaRetentionInput" class="input-field va-retention-input" type="number" min="5"
+                                value="50">
+                            <button type="button" class="btn btn-secondary" onclick="cleanupVaHistory()">
+                                🧹 Cleanup
+                            </button>
+                        </div>
                     </div>
-                    <div class="va-history-search">
-                        <label for="vaHistorySearch">Search</label>
-                        <input id="vaHistorySearch" class="input-field va-history-input" type="text"
-                            placeholder="Filter by target URL">
-                    </div>
-                    <div class="va-history-retention">
-                        <label for="vaRetentionInput">Keep last</label>
-                        <input id="vaRetentionInput" class="input-field va-retention-input" type="number" min="5"
-                            value="50">
-                        <button type="button" class="btn btn-secondary" onclick="cleanupVaHistory()">
-                            🧹 Cleanup
-                        </button>
-                    </div>
-                    <div id="vaHistoryEmpty" class="va-history-empty">No saved reports yet.</div>
+                    <div id="vaHistoryEmpty" class="va-history-empty">No saved reports yet. Run a Virtual Adversary scan to see history here.</div>
                     <ul id="vaHistoryList" class="va-history-list"></ul>
                 </div>
             </div>
@@ -298,22 +307,19 @@
                     <p style="margin-bottom: 1rem; color: #94a3b8; font-size: 0.85rem;">
                         Consent required. Use <code>./waf-detect --consent request</code> before running.
                     </p>
-                    <div class="va-action-row">
-                        <button type="button" class="btn btn-secondary" id="va2PlanBtn">
-                            <span>🧭</span>
-                            <span>Generate Plan</span>
+                    <button type="submit" class="btn" id="va2RunBtn" style="margin-bottom: 0.75rem;">
+                        <span id="va2RunIcon">🧪</span>
+                        <span id="va2RunText">Run VA2</span>
+                    </button>
+                    <div class="va2-secondary-actions">
+                        <button type="button" class="btn btn-secondary btn-compact" id="va2PlanBtn">
+                            🧭 Plan
                         </button>
-                        <button type="button" class="btn btn-secondary" id="va2DownloadJsonBtn">
-                            <span>⬇️</span>
-                            <span>Download JSON</span>
+                        <button type="button" class="btn btn-secondary btn-compact" id="va2DownloadJsonBtn">
+                            ⬇️ JSON
                         </button>
-                        <button type="button" class="btn btn-secondary" id="va2DownloadCsvBtn">
-                            <span>⬇️</span>
-                            <span>Download CSV</span>
-                        </button>
-                        <button type="submit" class="btn" id="va2RunBtn">
-                            <span id="va2RunIcon">🧪</span>
-                            <span id="va2RunText">Run VA2</span>
+                        <button type="button" class="btn btn-secondary btn-compact" id="va2DownloadCsvBtn">
+                            ⬇️ CSV
                         </button>
                     </div>
                 </form>
@@ -1178,6 +1184,15 @@
                 if (data.success && Array.isArray(data.reports)) {
                     vaHistoryCache = data.reports;
                     renderVaHistoryList(vaHistoryCache);
+                    const toolbar = document.getElementById('vaHistoryToolbar');
+                    const csvBtn = document.getElementById('vaHistoryCsvBtn');
+                    if (vaHistoryCache.length > 0) {
+                        if (toolbar) toolbar.style.display = '';
+                        if (csvBtn) csvBtn.style.display = '';
+                    } else {
+                        if (toolbar) toolbar.style.display = 'none';
+                        if (csvBtn) csvBtn.style.display = 'none';
+                    }
                 }
             } catch (error) {
                 // VA history unavailable
@@ -2482,13 +2497,24 @@
                     </div>
                     ` : ''}
                     
-                    ${!isSmokeTest && !result.is_smoke_test && detectionData && detectionData.evidence && Array.isArray(detectionData.evidence) && detectionData.evidence.length > 0 ? `
+                    ${(() => {
+                        if (isSmokeTest || result.is_smoke_test || !detectionData || !detectionData.evidence || !Array.isArray(detectionData.evidence) || detectionData.evidence.length === 0) return '';
+                        const seen = new Set();
+                        const uniqueEvidence = detectionData.evidence.filter(ev => {
+                            if (!ev) return false;
+                            const key = (ev.description || '') + '|' + (ev.raw_data || '');
+                            if (seen.has(key)) return false;
+                            seen.add(key);
+                            return true;
+                        });
+                        if (uniqueEvidence.length === 0) return '';
+                        return `
                         <div class="evidence-section">
                             <button class="evidence-toggle" onclick="toggleEvidence(this)">
-                                View Evidence (${detectionData.evidence.length} items)
+                                View Evidence (${uniqueEvidence.length} items)
                             </button>
                             <div class="evidence-list">
-                                ${detectionData.evidence.map(ev => {
+                                ${uniqueEvidence.map(ev => {
                                 if (!ev) return '';
 
                                 const isTiming = ev.method_type === 'Timing';
@@ -2509,7 +2535,7 @@
                                         <div class="evidence-item ${cssClass}">
                                             <strong>${icon} ${escapeHtml(ev.description || 'Unknown evidence')}</strong> 
                                             <span class="confidence-badge confidence-${getConfidenceLevel(ev.confidence || 0)}">${((ev.confidence || 0) * 100).toFixed(1)}%</span>
-                                            <br><em>Method:</em> ${isDns ? 'DNS (CNAME)' : isPayload ? 'Payload (WAF Blocking)' : escapeHtml(ev.method_type || 'Unknown')}
+                                            <br><em>Method:</em> ${isDns ? 'DNS (CNAME)' : isPayload ? 'Payload (WAF Blocking)' : escapeHtml(formatMethodType(ev.method_type))}
                                             ${isTiming ? `<br><em>Timing Data:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
                                         isDns ? `<br><em>DNS Record:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
                                             isPayload ? `<br><em>Blocked Payloads:</em> ${escapeHtml(ev.raw_data || 'N/A')}` :
@@ -2522,7 +2548,8 @@
                             }).join('')}
                             </div>
                         </div>
-                    ` : ''}
+                    `;
+                    })()}
                     ${result && result.recommendations && Array.isArray(result.recommendations) && result.recommendations.length > 0 ? `
                         <div class="evidence-section">
                             <button class="evidence-toggle" onclick="toggleEvidence(this)">
@@ -2554,6 +2581,17 @@
             if (confidence >= 0.8) return 'high';
             if (confidence >= 0.6) return 'medium';
             return 'low';
+        }
+
+        function formatMethodType(mt) {
+            if (!mt) return 'Unknown';
+            if (typeof mt === 'string') return mt;
+            if (typeof mt === 'object') {
+                const keys = Object.keys(mt);
+                if (keys.length === 1) return keys[0] + ': ' + mt[keys[0]];
+                return JSON.stringify(mt);
+            }
+            return String(mt);
         }
 
         // Quick action functions

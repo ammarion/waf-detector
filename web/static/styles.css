@@ -119,7 +119,7 @@ body {
 /* Grid Layout */
 .dashboard-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
     gap: 2rem;
     margin-bottom: 2rem;
 }
@@ -1510,15 +1510,25 @@ body {
 }
 
 .evidence-item {
-    padding: 0.75rem;
+    padding: 0.75rem 1rem;
     margin-bottom: 0.5rem;
     background: rgba(255, 255, 255, 0.03);
     border-radius: var(--radius-sm);
     border-left: 3px solid var(--accent-secondary);
-    font-size: 0.9rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+    font-size: 0.85rem;
+    line-height: 1.7;
+    display: block;
+}
+
+.evidence-item strong {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--text-primary);
+}
+
+.evidence-item em {
+    color: var(--text-muted);
+    margin-right: 0.25rem;
 }
 
 .evidence-dns {
@@ -1639,17 +1649,103 @@ body[data-dashboard-mode="analyst"] .executive-only {
     background: transparent !important;
 }
 
+/* Quick Actions toolbar */
+.quick-actions-bar {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.btn-compact {
+    width: auto;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.85rem;
+}
+
+/* VA advanced toggle */
+.va-advanced-toggle {
+    margin-bottom: 1rem;
+}
+
+.va-advanced-toggle summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    padding: 0.5rem 0;
+    user-select: none;
+}
+
+.va-advanced-toggle summary:hover {
+    color: var(--accent-primary);
+}
+
+.va-advanced-toggle[open] summary {
+    margin-bottom: 0.5rem;
+}
+
+/* VA2 secondary actions */
+.va2-secondary-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* Executive mode hide detection inputs */
+body[data-dashboard-mode="executive"] #detectionInputGrid {
+    display: none !important;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
+    .container {
+        padding: 1rem;
+    }
+
+    .header {
+        margin-bottom: 2rem;
+    }
+
     .header h1 {
-        font-size: 2.5rem;
+        font-size: 2rem;
+    }
+
+    .header p {
+        font-size: 1rem;
     }
 
     .dashboard-grid {
         grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .card {
+        padding: 1.25rem;
     }
 
     .detection-info {
         grid-template-columns: 1fr;
+    }
+
+    .va-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .va-activity-controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .va-history-filters {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .evidence-item {
+        font-size: 0.8rem;
+    }
+
+    .btn {
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
     }
 }
