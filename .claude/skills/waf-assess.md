@@ -286,95 +286,117 @@ After all scans complete, generate the structured markdown report (see Section 3
 
 ## Section 3 — Report Template
 
-Generate this markdown report after all scans complete. Fill in values from scan results.
+IMPORTANT: The report MUST be table-driven and scannable. No essay paragraphs. Every data point goes in a table. Use box-drawing headers for visual separation. Keep explanations to single-line notes below tables.
 
-```markdown
-# WAF Security Assessment: {target}
-Date: {YYYY-MM-DD HH:MM UTC}
+After all scans complete, generate this exact structure:
 
-## Executive Summary
-- **Detected WAF/CDN**: {name} ({confidence}%)
-- **Posture Grade**: {grade} (Risk: {risk_score}/100)
-- **Enforcement Level**: {enforcement} (VA1 confidence: {score})
-- **Protection Maturity**: PMI {pmi} ({label})
-- **Smoke Test Effectiveness**: {effectiveness}%
+### Block 1: Header Banner
 
-## Detection Evidence
-| # | Method | Detail | Confidence |
-|---|--------|--------|------------|
-{for each evidence item: index, detection method, raw data/header, confidence %}
-
-## Smoke Test Results
-- **Total tests**: {total} | **Blocked**: {blocked} | **Allowed**: {allowed} | **Challenge**: {challenge}
-- **WAF Mode**: {mode}
-
-### Top Unblocked Payloads
-| Category | Payload (truncated) | Status |
-|----------|---------------------|--------|
-{top 5-10 unblocked payloads sorted by severity}
-
-## VA1 Enforcement Analysis
-VA1 tests whether known attack payloads are actively blocked, challenged, or allowed through the WAF. It sends categorized attack probes and measures the response.
-
-- **Enforcement Level**: {level}
-- **Confidence**: {score}
-- **Risk Label**: {label}
-
-### Per-Category Breakdown
-| Category | Blocked | Challenged | Allowed | Errors |
-|----------|---------|------------|---------|--------|
-| SemanticDrift | | | | |
-| ProtocolMutation | | | | |
-| EncodingBypass | | | | |
-| StructuralAbuse | | | | |
-| **Total** | {blocked} | {challenge} | {allowed} | {errors} |
-
-## VA2 Behavioral Profile
-VA2 tests WAF sophistication through 5-phase behavioral campaigns using paired control probes across multiple channels. It measures how well the WAF discriminates between attack and benign traffic.
-
-### WBF Signals (0.0-1.0 scale)
-| Signal | Score | Meaning |
-|--------|-------|---------|
-| Normalization | {score} | WAF decodes/normalizes payloads before matching (encoding bypass resistance) |
-| Statefulness | {score} | WAF tracks session state across requests (multi-step attack awareness) |
-| Challenge | {score} | WAF issues challenges (CAPTCHAs, JS challenges) for suspicious traffic |
-| Throttle | {score} | WAF rate-limits or throttles high-volume request patterns |
-| Differential | {score} | WAF treats attack payloads differently from benign baseline requests |
-
-### Channel Coverage
-| Channel | Discrimination % | Blind Spot? | What It Tests |
-|---------|-------------------|-------------|---------------|
-| Path | {rate}% | {yes/no} | Path traversal attacks (e.g., `/../../etc/passwd`) |
-| Query | {rate}% | {yes/no} | SQLi, XSS, command injection in query parameters |
-| Header | {rate}% | {yes/no} | XSS in Referer, SQLi in custom headers |
-| Body | {rate}% | {yes/no} | SQLi in POST body (application/x-www-form-urlencoded) |
-| Method | {rate}% | {yes/no} | Unusual HTTP methods (DELETE vs OPTIONS) |
-
-**Coverage Score**: {coverage_score}% (mean of per-channel rates)
-
-## Actionable Findings
-{severity-sorted list}
-
-### Critical Findings
-{for each critical finding:}
-- **{title}** (Source: {VA1/VA2/Smoke/Detection})
-  - Impact: {what an attacker can exploit}
-  - Recommendation: {specific action}
-
-### Medium Findings
-{for each medium finding:}
-- **{title}** (Source: {VA1/VA2/Smoke/Detection})
-  - Impact: {what an attacker can exploit}
-  - Recommendation: {specific action}
-
-### Low Findings
-{for each low finding:}
-- **{title}** (Source: {VA1/VA2/Smoke/Detection})
-  - Recommendation: {specific action}
-
-## Remediation Rules
-{See Section 4 — generate vendor-specific rules for every Critical and Medium finding}
 ```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║              WAF SECURITY ASSESSMENT: {target}                              ║
+║              Date: {YYYY-MM-DD HH:MM UTC}                                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+```
+
+### Block 2: Executive Summary Table
+
+| Metric | Value | Rating |
+|--------|-------|--------|
+| Detected WAF/CDN | {name} | {confidence}% confidence |
+| Posture Grade | **{grade}** | Risk: {risk_score}/100 |
+| Smoke Effectiveness | **{effectiveness}%** | {blocked}/{total} blocked |
+| VA1 Enforcement | {enforcement} | {context note} |
+| VA2 PMI | **{pmi}/100** | {label} |
+| WAF Mode | {mode} | {one-line description} |
+
+### Block 3: Detection Evidence Table
+
+| # | Method | Signal | Confidence |
+|---|--------|--------|:----------:|
+{for each UNIQUE evidence: index, method type, raw signal, confidence %}
+
+### Block 4: Smoke Test Category Scorecard
+
+| Category | Blocked/Total | Rate | Verdict |
+|----------|:-------------:|:----:|---------|
+{for each category, sorted by rate descending: name, blocked/total, percentage, STRONG/GOOD/MODERATE/WEAK/POOR/NONE}
+
+Verdict thresholds: 100%=STRONG, 80-99%=GOOD, 60-79%=MODERATE, 40-59%=WEAK, 1-39%=POOR, 0%=NONE
+
+### Block 5: VA1 Enforcement Table
+
+| Category | Blocked | Challenge | Allowed | Errors |
+|----------|:-------:|:---------:|:-------:|:------:|
+{for each VA1 category: counts}
+| **Total** | **{blocked}** | **{challenge}** | **{allowed}** | **{errors}** |
+
+> {one-line contextual note about VA1 results}
+
+### Block 6: VA2 WBF Signals Table
+
+Use a visual bar for each signal (10 chars: `#` for filled, `.` for empty, proportional to score).
+
+| Signal | Score | Bar | Assessment |
+|--------|:-----:|-----|-----------|
+| Normalization | **{score}** | {bar} | {one-line meaning} |
+| Differential | **{score}** | {bar} | {one-line meaning} |
+| Throttle | {score} | {bar} | {one-line meaning} |
+| Statefulness | {score} | {bar} | {one-line meaning} |
+| Challenge | {score} | {bar} | {one-line meaning} |
+
+Sort by score descending.
+
+### Block 7: VA2 Channel Coverage Table
+
+| Channel | Disc. % | Tested | Blind Spot? |
+|---------|:-------:|:------:|:-----------:|
+{for each channel: discrimination rate, pairs tested, yes/no/unknown}
+
+> {one-line note about early stopping or budget constraints}
+
+### Block 8: VA2 Paired Control Detail
+
+| Control Request | Attack Probe | Control | Probe | Outcome |
+|----------------|--------------|:-------:|:-----:|---------|
+{for each executed pair: control description, probe description, control status, probe status, DETECTED/NOT_DETECTED/INCONCLUSIVE}
+
+### Block 9: Findings Summary Table
+
+| # | Severity | Finding | Source | Pass Rate |
+|---|----------|---------|--------|:---------:|
+{for each finding sorted by severity then pass rate: number, CRITICAL/MEDIUM/LOW, title, source, metric}
+
+### Block 10: Remediation Rules Tables
+
+Split into CRITICAL (immediate) and MEDIUM (hardening) sections. Each is a table:
+
+#### CRITICAL — Immediate Action
+
+| # | Finding | Akamai Rule | Config |
+|---|---------|-------------|--------|
+{for each critical finding: number, title, rule type, one-line config summary}
+
+#### MEDIUM — Hardening
+
+| # | Finding | Akamai Rule | Config |
+|---|---------|-------------|--------|
+{for each medium finding: number, title, rule type, one-line config summary}
+
+Replace "Akamai" with detected WAF vendor name. Use the vendor-specific rule format from Section 4.
+
+### Block 11: Expected Impact Table
+
+| Metric | Current | After Remediation (est.) |
+|--------|---------|--------------------------|
+| Posture Grade | {current} | **{estimated}** |
+| Risk Score | {current} | **{estimated}** |
+| Smoke Effectiveness | {current}% | **{estimated}%** |
+| PMI | {current} ({label}) | **{estimated} ({label})** |
+
+### Block 12: Caveat Footer
+
+> {one-line caveat about origin health, staging validation, rate limit tuning, etc.}
 
 ---
 
