@@ -182,7 +182,7 @@ We aim for:
 
 - VA effectiveness tests require **consent and authorized targets**.
 - Automated VA tests are limited to unit coverage; end-to-end VA runs should be validated manually.
-- Use `MANUAL_UI_TESTING.md` for VA replay plan, history, and export checks.
+- Validate VA replay plan and export checks via CLI (`--va-replay`, `--va-replay-csv`).
 - Keep `cargo test` green after any VA probe or replay-plan changes.
 
 ## Troubleshooting

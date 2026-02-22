@@ -1,4 +1,4 @@
-use waf_detector::cli::{build_simple_cli, SimpleCliApp};
+use waf_detector::cli::{build_simple_cli, run_completions_command, SimpleCliApp};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -17,6 +17,17 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     };
+
+    if let Some(("completions", sub_matches)) = matches.subcommand() {
+        run_completions_command(sub_matches)?;
+        return Ok(());
+    }
+
+    if let Some(("doctor", _)) = matches.subcommand() {
+        if std::env::var_os("WAF_DETECTOR_NO_PROXY").is_none() {
+            std::env::set_var("WAF_DETECTOR_NO_PROXY", "1");
+        }
+    }
 
     let cli_app = SimpleCliApp::new().await?;
     cli_app.run_with_matches(matches).await?;
