@@ -550,7 +550,9 @@ fn ensure_va2_consent_and_target(consent_manager: &ConsentManager, target_url: &
 }
 
 fn build_va2_request(target_url: &str, step: &Va2CampaignStep) -> Result<Va2HttpRequest> {
-    let mut url = Url::parse(target_url).map_err(|err| anyhow!("invalid target url: {err}"))?;
+    let mut url = Url::parse(target_url).map_err(|_| {
+        anyhow!("Could not parse '{}' as a URL. Make sure it starts with https:// and contains a valid domain.", target_url)
+    })?;
     url.set_path(&step.path);
     if let Some(query) = &step.query {
         url.set_query(Some(query));
@@ -1036,9 +1038,11 @@ pub fn build_va2_campaign_plan(
     phases: &[Va2Phase],
     config: Va2CampaignConfig,
 ) -> Result<Va2CampaignPlan> {
-    let parsed = Url::parse(target_url).map_err(|err| anyhow!("invalid target url: {err}"))?;
+    let parsed = Url::parse(target_url).map_err(|_| {
+        anyhow!("Could not parse '{}' as a URL. Make sure it starts with https:// and contains a valid domain.", target_url)
+    })?;
     if parsed.host_str().is_none() {
-        return Err(anyhow!("target url must include host"));
+        return Err(anyhow!("URL must include a domain name (e.g. https://example.com)."));
     }
     if phases.is_empty() {
         return Err(anyhow!("va2 campaign requires at least one phase"));

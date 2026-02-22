@@ -184,7 +184,7 @@
                                 </label>
                             </div>
                         </div>
-                        <div id="vaActivityEmpty" class="va-activity-empty" style="text-align:center;padding:1rem 0;">Run a security test to see live activity here.</div>
+                        <div id="vaActivityEmpty" class="va-activity-empty" style="text-align:center;padding:1rem 0;">Run a security test to see live activity here. Each row shows a probe sent to your target &mdash; <strong>Blocked</strong> means the WAF caught it, <strong>Allowed</strong> means it got through. Hover on a category name to learn what it tests.</div>
                         <ul id="vaActivityLog" class="va-activity-log"></ul>
                     </div>
                 </div>
@@ -758,16 +758,320 @@ function escapeHtml(str) {
             };
         }
 
-        function showVa2Result(message, isError = false) {
+        function escHtml(str) {
+            const d = document.createElement('div');
+            d.textContent = String(str);
+            return d.innerHTML;
+        }
+
+        function showVa2Error(message) {
             const box = document.getElementById('va2Result');
             box.style.display = 'block';
+            box.style.borderColor = 'rgba(248,113,113,0.5)';
+            while (box.firstChild) box.removeChild(box.firstChild);
             box.textContent = message;
-            box.style.borderColor = isError ? 'rgba(248,113,113,0.5)' : 'rgba(34,197,94,0.4)';
+        }
+
+        function showVa2Info(message) {
+            const box = document.getElementById('va2Result');
+            box.style.display = 'block';
+            box.style.borderColor = 'rgba(34,197,94,0.4)';
+            while (box.firstChild) box.removeChild(box.firstChild);
+            box.textContent = message;
+        }
+
+        function scoreBarClass(score) {
+            if (score >= 0.5) return 'bar-good';
+            if (score >= 0.2) return 'bar-mid';
+            return 'bar-bad';
+        }
+
+        function signalVerdict(name, score, report) {
+            var verdicts = {
+                normalization: {
+                    good: 'Detects encoding tricks and path variations',
+                    bad: 'Does not detect encoding tricks or path variations'
+                },
+                statefulness: {
+                    good: 'Tracks request sequences across sessions',
+                    bad: 'No session tracking detected'
+                },
+                challenge: {
+                    good: 'Blocks malicious requests',
+                    bad: 'No blocking detected via behavioral signals'
+                },
+                throttle: {
+                    good: 'Throttles suspicious traffic under pressure',
+                    bad: 'No rate limiting detected'
+                }
+            };
+            var v = verdicts[name] || { good: 'Active', bad: 'Not detected' };
+            var pass = score > 0;
+
+            // Override challenge verdict when paired control shows detections
+            if (name === 'challenge' && !pass && report && report.paired_control) {
+                var detected = report.paired_control.detected_pairs || 0;
+                if (detected > 0) {
+                    return '\u2713 Blocked ' + detected + ' of ' + report.paired_control.executed_pairs + ' attack probes';
+                }
+            }
+
+            return pass ? '\u2713 ' + v.good : '\u2717 ' + v.bad;
+        }
+
+        function buildFindings(report) {
+            var lines = [];
+            var wbf = report.wbf || {};
+            var paired = report.paired_control;
+            var coverage = report.channel_coverage;
+            var detected = paired ? paired.detected_pairs : 0;
+            var executed = paired ? paired.executed_pairs : 0;
+            var blind = coverage ? (coverage.blind_spots || []) : [];
+
+            // What's working
+            if (detected > 0) {
+                var detecting = coverage && coverage.channels
+                    ? Object.entries(coverage.channels).filter(function(e) { return e[1] > 0; }).map(function(e) { return e[0]; })
+                    : [];
+                lines.push('The WAF blocked ' + detected + ' of ' + executed + ' attack probes' +
+                    (detecting.length > 0 ? ' across ' + detecting.join(' and ') + ' channels.' : '.'));
+            } else if (executed > 0) {
+                lines.push('The WAF did not block any of the ' + executed + ' attack probes tested.');
+            }
+
+            // What's missing
+            if (blind.length > 0) {
+                lines.push('Blind spots: no detection on ' + blind.join(', ') + ' channels \u2014 attacks through these vectors may go unnoticed.');
+            }
+
+            // Behavioral gaps
+            var gaps = [];
+            if (wbf.throttle_score === 0) gaps.push('rate limiting is not active, so automated attacks won\u2019t be throttled');
+            if (wbf.statefulness_score === 0) gaps.push('session tracking is not enabled, so multi-step attacks may not be correlated');
+            if (gaps.length > 0) {
+                lines.push('Additionally, ' + gaps.join(', and ') + '.');
+            }
+
+            if (lines.length === 0) {
+                lines.push('WAF configuration looks reasonable across all tested signals.');
+            }
+
+            return lines;
+        }
+
+        function renderChannelTable(coverage, container) {
+            if (!coverage || !coverage.channels) return;
+            const blindSet = new Set((coverage.blind_spots || []).map(function(b) { return typeof b === 'string' ? b : ''; }));
+            const order = [
+                { key: 'query', label: 'Query' },
+                { key: 'path', label: 'Path' },
+                { key: 'header', label: 'Header' },
+                { key: 'body', label: 'Body' },
+                { key: 'method', label: 'Method' },
+            ];
+
+            const title = document.createElement('div');
+            title.className = 'va2-detail-section-title';
+            title.textContent = 'Channel Coverage';
+            container.appendChild(title);
+
+            const table = document.createElement('table');
+            table.className = 'va2-channel-table';
+            const thead = document.createElement('thead');
+            const headRow = document.createElement('tr');
+            ['Channel', 'Discrimination', 'Status'].forEach(function(h) {
+                const th = document.createElement('th');
+                th.textContent = h;
+                headRow.appendChild(th);
+            });
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+            for (const ch of order) {
+                const rate = coverage.channels[ch.key];
+                if (rate === undefined) continue;
+                const isBlind = blindSet.has(ch.key) || rate === 0;
+                const cls = isBlind ? 'va2-blind-spot' : 'va2-detecting';
+                const tr = document.createElement('tr');
+                const tdName = document.createElement('td');
+                tdName.textContent = ch.label;
+                const tdRate = document.createElement('td');
+                tdRate.className = cls;
+                tdRate.textContent = rate.toFixed(2);
+                const tdStatus = document.createElement('td');
+                tdStatus.className = cls;
+                tdStatus.textContent = isBlind ? 'blind spot' : 'detecting';
+                tr.appendChild(tdName);
+                tr.appendChild(tdRate);
+                tr.appendChild(tdStatus);
+                tbody.appendChild(tr);
+            }
+            table.appendChild(tbody);
+            container.appendChild(table);
+        }
+
+        function renderPairedSummary(paired, container) {
+            if (!paired) return;
+            const title = document.createElement('div');
+            title.className = 'va2-detail-section-title';
+            title.textContent = 'Paired Probe Results';
+            container.appendChild(title);
+
+            const div = document.createElement('div');
+            div.className = 'va2-paired-summary';
+            div.textContent = paired.executed_pairs + ' probe pairs executed \u2014 ' +
+                paired.detected_pairs + ' detected \u00b7 ' +
+                paired.not_detected_pairs + ' not detected \u00b7 ' +
+                paired.inconclusive_pairs + ' inconclusive';
+            container.appendChild(div);
+
+            if (paired.early_stop_reason) {
+                const note = document.createElement('div');
+                note.style.cssText = 'font-size:0.78rem;color:var(--text-muted);margin-top:-0.3rem';
+                note.textContent = 'Stopped early: ' + paired.early_stop_reason;
+                container.appendChild(note);
+            }
+        }
+
+        function showVa2Report(report) {
+            const box = document.getElementById('va2Result');
+            box.style.display = 'block';
+            box.style.borderColor = 'rgba(34,197,94,0.4)';
+            while (box.firstChild) box.removeChild(box.firstChild);
+
+            const pmi = report.pmi || { score: 0, label: 'unknown' };
+            const wbf = report.wbf || {};
+            const pmiClass = pmi.score >= 80 ? 'pmi-strong' : pmi.score >= 55 ? 'pmi-moderate' : 'pmi-weak';
+            const errors = report.results ? report.results.filter(function(r) { return r.error; }).length : 0;
+            const steps = report.results ? report.results.length : 0;
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'va2-result-header';
+            const h3 = document.createElement('h3');
+            h3.textContent = 'Protection Maturity: ' + Math.round(pmi.score) + '/100';
+            const badge = document.createElement('span');
+            badge.className = 'va2-pmi-badge ' + pmiClass;
+            badge.textContent = pmi.label;
+            header.appendChild(h3);
+            header.appendChild(badge);
+            box.appendChild(header);
+
+            // Signal rows
+            const signals = [
+                { key: 'normalization', label: 'Normalization', score: wbf.normalization_score || 0 },
+                { key: 'statefulness', label: 'Session Tracking', score: wbf.statefulness_score || 0 },
+                { key: 'challenge', label: 'Attack Blocking', score: wbf.challenge_score || 0 },
+                { key: 'throttle', label: 'Rate Limiting', score: wbf.throttle_score || 0 },
+            ];
+            const sigContainer = document.createElement('div');
+            sigContainer.className = 'va2-signals';
+            for (const s of signals) {
+                const pct = Math.round(s.score * 100);
+                const row = document.createElement('div');
+                row.className = 'va2-signal-row';
+
+                const lbl = document.createElement('span');
+                lbl.className = 'va2-signal-label';
+                lbl.textContent = s.label;
+
+                const track = document.createElement('div');
+                track.className = 'va2-score-bar-track';
+                const fill = document.createElement('div');
+                // Override for challenge signal when paired control detected attacks
+                var effectiveScore = s.score;
+                if (s.key === 'challenge' && s.score === 0 && report && report.paired_control) {
+                    var det = report.paired_control.detected_pairs || 0;
+                    if (det > 0) effectiveScore = det / (report.paired_control.executed_pairs || 1);
+                }
+
+                fill.className = 'va2-score-bar-fill ' + scoreBarClass(effectiveScore);
+                fill.style.width = Math.round(effectiveScore * 100) + '%';
+                track.appendChild(fill);
+
+                const val = document.createElement('span');
+                val.className = 'va2-signal-value';
+                val.textContent = effectiveScore > 0 && effectiveScore !== s.score
+                    ? (report.paired_control.detected_pairs + '/' + report.paired_control.executed_pairs)
+                    : s.score.toFixed(2);
+
+                const verdict = document.createElement('div');
+                verdict.className = 'va2-signal-verdict';
+                const isPass = effectiveScore > 0;
+                const icon = document.createElement('span');
+                icon.className = isPass ? 'va2-check' : 'va2-cross';
+                icon.textContent = isPass ? '\u2713 ' : '\u2717 ';
+                verdict.appendChild(icon);
+                const verdictText = signalVerdict(s.key, s.score, report);
+                verdict.appendChild(document.createTextNode(verdictText.substring(2)));
+
+                row.appendChild(lbl);
+                row.appendChild(track);
+                row.appendChild(val);
+                row.appendChild(verdict);
+                sigContainer.appendChild(row);
+            }
+            box.appendChild(sigContainer);
+
+            // Findings
+            const rec = document.createElement('div');
+            rec.className = 'va2-recommendation';
+            const findings = buildFindings(report);
+            const title = document.createElement('strong');
+            title.textContent = 'Findings: ';
+            rec.appendChild(title);
+            findings.forEach(function(line, i) {
+                if (i > 0) rec.appendChild(document.createElement('br'));
+                rec.appendChild(document.createTextNode(line));
+            });
+            box.appendChild(rec);
+
+            // Build metadata text
+            function buildMetaText() {
+                var skipped = report.results ? report.results.filter(function(r) { return r.error && r.error.indexOf('skipped') === 0; }).length : 0;
+                var realErrors = errors - skipped;
+                var parts = [steps + ' steps'];
+                if (skipped > 0) parts.push(skipped + ' skipped (converged early)');
+                if (realErrors > 0) parts.push(realErrors + ' failed');
+                parts.push(report.target_url || '');
+                return parts.join(' \u00b7 ');
+            }
+
+            // Expandable detail
+            const hasCoverage = report.channel_coverage && report.channel_coverage.channels;
+            const hasPaired = !!report.paired_control;
+            if (hasCoverage || hasPaired) {
+                const details = document.createElement('details');
+                details.className = 'va2-detail-toggle';
+                const summary = document.createElement('summary');
+                summary.className = 'va2-detail-summary';
+                summary.textContent = 'Channel Coverage & Probe Details';
+                details.appendChild(summary);
+
+                const body = document.createElement('div');
+                body.className = 'va2-detail-body';
+                if (hasCoverage) renderChannelTable(report.channel_coverage, body);
+                if (hasPaired) renderPairedSummary(report.paired_control, body);
+
+                const meta = document.createElement('div');
+                meta.className = 'va2-run-meta';
+                meta.textContent = buildMetaText();
+                body.appendChild(meta);
+                details.appendChild(body);
+                box.appendChild(details);
+            } else {
+                const meta = document.createElement('div');
+                meta.className = 'va2-run-meta';
+                meta.style.padding = '0.5rem 1rem';
+                meta.textContent = buildMetaText();
+                box.appendChild(meta);
+            }
         }
 
         function downloadVa2Report(format) {
             if (!va2LastReport) {
-                showVa2Result('No VA2 report available. Run VA2 first.', true);
+                showVa2Error('No VA2 report available. Run VA2 first.');
                 return;
             }
             if (format === 'json') {
@@ -827,12 +1131,12 @@ function escapeHtml(str) {
                 const data = await response.json();
                 if (data.success && data.plan) {
                     const steps = data.plan.steps ? data.plan.steps.length : 0;
-                    showVa2Result(`Plan ready: ${steps} steps across ${data.plan.phases.length} phases.`);
+                    showVa2Info('Plan ready: ' + steps + ' steps across ' + data.plan.phases.length + ' phases.');
                 } else {
-                    showVa2Result(data.error || 'Failed to generate VA2 plan', true);
+                    showVa2Error(data.error || 'Failed to generate VA2 plan');
                 }
             } catch (error) {
-                showVa2Result(`Error: ${error.message}`, true);
+                showVa2Error('Error: ' + error.message);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '<span>Preview Plan</span>';
@@ -853,20 +1157,14 @@ function escapeHtml(str) {
                 });
                 const data = await response.json();
                 if (data.success && data.report) {
-                    const errors = data.report.results.filter(r => r.error).length;
                     va2LastReport = data.report;
-                    let summary = `VA2 run complete: ${data.report.results.length} steps, ${errors} errors.`;
-                    if (data.report.pmi && data.report.wbf) {
-                        summary += `\nPMI: ${data.report.pmi.score} (${data.report.pmi.label})`;
-                        summary += `\nWBF: norm=${data.report.wbf.normalization_score.toFixed(2)}, state=${data.report.wbf.statefulness_score.toFixed(2)}, challenge=${data.report.wbf.challenge_score.toFixed(2)}, throttle=${data.report.wbf.throttle_score.toFixed(2)}`;
-                    }
-                    showVa2Result(summary);
+                    showVa2Report(data.report);
                     showSuccessMessage(`VA2 completed for ${data.report.target_url}`);
                 } else {
-                    showVa2Result(data.error || 'VA2 run failed', true);
+                    showVa2Error(data.error || 'VA2 run failed');
                 }
             } catch (error) {
-                showVa2Result(`Error: ${error.message}`, true);
+                showVa2Error('Error: ' + error.message);
             } finally {
                 setButtonLoading(btn, icon, text, false, 'Run VA2');
             }
@@ -901,6 +1199,100 @@ function escapeHtml(str) {
             if (!reason) return '';
             if (vaReasonLevel === 'full') return reason;
             return reason.split(' status=')[0];
+        }
+
+        var categoryLabels = {
+            'SemanticDrift': {
+                label: 'Input Interpretation',
+                tip: 'Tests if the WAF and backend interpret duplicate or reordered parameters differently, which attackers exploit to slip payloads past inspection.'
+            },
+            'ProtocolMutation': {
+                label: 'Protocol Manipulation',
+                tip: 'Tests if the WAF handles non-standard HTTP headers, case variations, or transfer encodings that attackers use to bypass inspection.'
+            },
+            'EncodingBoundary': {
+                label: 'Encoding Evasion',
+                tip: 'Tests if the WAF decodes double-encoded or Unicode payloads, a common technique to smuggle malicious input past filters.'
+            },
+            'BehavioralThrottle': {
+                label: 'Rate Limit Test',
+                tip: 'Tests if the WAF detects and throttles rapid or unusual request patterns that indicate automated attacks.'
+            },
+            'ResponseFingerprint': {
+                label: 'Response Profiling',
+                tip: 'Tests how the server responds to unusual content negotiation, revealing WAF fingerprints and configuration details.'
+            },
+            'ParserAmbiguity': {
+                label: 'Parser Confusion',
+                tip: 'Tests if conflicting headers or malformed requests cause the WAF and backend to parse differently, enabling request smuggling.'
+            },
+            'SqlInjection': {
+                label: 'SQL Injection',
+                tip: 'Tests if the WAF blocks common SQL injection payloads in query parameters and request bodies.'
+            },
+            'Xss': {
+                label: 'Cross-Site Scripting',
+                tip: 'Tests if the WAF blocks script injection payloads that could execute in a victim\'s browser.'
+            },
+            'PathTraversal': {
+                label: 'Path Traversal',
+                tip: 'Tests if the WAF blocks directory traversal sequences that attempt to access files outside the web root.'
+            },
+            'AdversaryProbe': {
+                label: 'Adversary Probe',
+                tip: 'General adversarial probe testing WAF detection capabilities.'
+            },
+        };
+
+        function friendlyCategory(cat) {
+            const entry = categoryLabels[cat];
+            return entry ? entry.label : cat;
+        }
+
+        function friendlyReason(reason) {
+            if (!reason) return '';
+            var key = reason.split(' ')[0];
+            var labels = {
+                'no-anomaly': 'WAF did not react differently to this probe',
+                'status-change': 'WAF returned a different status code',
+                'blocked': 'WAF blocked the request',
+                'challenge': 'WAF issued a challenge (e.g. CAPTCHA)',
+                'body-diff': 'Response body changed, suggesting inspection',
+                'header-diff': 'Response headers changed, suggesting inspection',
+                'length-delta': 'Response size changed, suggesting filtering',
+                'replay': 'Replayed from a previous run',
+            };
+            var base = labels[key];
+            if (!base) return reason;
+            if (vaReasonLevel !== 'full') return base;
+            var parts = [];
+            var statusMatch = reason.match(/status=(\d+)/);
+            if (statusMatch) parts.push('HTTP ' + statusMatch[1]);
+            var headerMatch = reason.match(/header_diff=(\d+)/);
+            if (headerMatch && headerMatch[1] !== '0') parts.push(headerMatch[1] + ' headers changed');
+            var lenMatch = reason.match(/len_delta=(\d+)/);
+            if (lenMatch && lenMatch[1] !== '0') parts.push('body size differs by ' + lenMatch[1]);
+            if (parts.length > 0) return base + ' (' + parts.join(', ') + ')';
+            return base;
+        }
+
+        function friendlyEvidence(evidence) {
+            if (!evidence || evidence.length === 0) return '';
+            const map = {
+                'StatusCode': 'Status Code',
+                'ChallengeHeader': 'Challenge Header',
+                'BlockedKeyword': 'Blocked Keyword',
+                'ChallengeKeyword': 'Challenge Keyword',
+                'BaselineDeviation': 'Baseline Deviation',
+                'StatusChange': 'Status Change',
+                'HeaderDiff': 'Header Diff',
+                'LengthDelta': 'Length Delta',
+                'None': '',
+            };
+            return evidence.map(function(e) {
+                const label = typeof e === 'string' ? e : (e.type || e);
+                return map[label] !== undefined ? map[label] : label;
+            }).filter(Boolean);
         }
 
         function resetVaActivity() {
@@ -954,13 +1346,43 @@ function escapeHtml(str) {
                 const outcomeClass = event.outcome === 'Blocked' ? 'va-outcome-blocked' :
                     event.outcome === 'Challenge' ? 'va-outcome-challenge' :
                         event.outcome === 'Allowed' ? 'va-outcome-allowed' : 'va-outcome-error';
-                li.innerHTML = `
-                    <span class="va-activity-index">#${event.index}/${event.total}</span>
-                    <span class="va-activity-category">${escapeHtml(event.category)}</span>
-                    <span class="va-activity-outcome ${outcomeClass}">${escapeHtml(event.outcome)}</span>
-                    <span class="va-activity-reason">${escapeHtml(formatReason(event.reason))}</span>
-                    <span class="va-activity-evidence">${renderEvidenceChipsInline(event.evidence, 3)}</span>
-                `;
+
+                const idx = document.createElement('span');
+                idx.className = 'va-activity-index';
+                idx.textContent = '#' + event.index + '/' + event.total;
+
+                const cat = document.createElement('span');
+                cat.className = 'va-activity-category';
+                cat.textContent = friendlyCategory(event.category);
+                const catInfo = categoryLabels[event.category];
+                if (catInfo && catInfo.tip) cat.title = catInfo.tip;
+
+                const out = document.createElement('span');
+                out.className = 'va-activity-outcome ' + outcomeClass;
+                out.textContent = event.outcome;
+
+                const rsn = document.createElement('span');
+                rsn.className = 'va-activity-reason';
+                rsn.textContent = friendlyReason(event.reason);
+
+                li.appendChild(idx);
+                li.appendChild(cat);
+                li.appendChild(out);
+                li.appendChild(rsn);
+
+                const chips = friendlyEvidence(event.evidence);
+                if (chips.length > 0) {
+                    const ev = document.createElement('span');
+                    ev.className = 'va-activity-evidence';
+                    chips.slice(0, 3).forEach(function(chip) {
+                        const span = document.createElement('span');
+                        span.className = 'va-evidence-chip';
+                        span.textContent = chip;
+                        ev.appendChild(span);
+                    });
+                    li.appendChild(ev);
+                }
+
                 log.appendChild(li);
             });
 
