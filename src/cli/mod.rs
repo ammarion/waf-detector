@@ -262,6 +262,22 @@ impl SimpleCliApp {
             if matches.get_flag("va2-run") {
                 let runner = Va2Runner::new()?;
                 let report = runner.run_plan(plan).await?;
+
+                if matches.get_flag("va2-json") {
+                    let json = serde_json::to_string_pretty(&report)?;
+                    println!("{json}");
+                    self.write_perf_report_if_requested(&matches)?;
+                    return Ok(());
+                }
+
+                if let Some(output) = matches.get_one::<String>("va2-output") {
+                    let json = serde_json::to_string_pretty(&report)?;
+                    fs::write(output, &json)?;
+                    println!("📄 VA2 report saved to: {output}");
+                    self.write_perf_report_if_requested(&matches)?;
+                    return Ok(());
+                }
+
                 let errors = report
                     .results
                     .iter()

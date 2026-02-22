@@ -732,7 +732,9 @@ impl RealVaHttpAdapter {
 
 impl VaHttpAdapter for RealVaHttpAdapter {
     fn get(&self, url: &str) -> anyhow::Result<VaHttpResponse> {
-        let response = futures::executor::block_on(self.client.get(url))?;
+        let response = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.client.get(url))
+        })?;
         Ok(VaHttpResponse {
             status: response.status,
             headers: response.headers,
@@ -783,7 +785,9 @@ impl VaHttpAdapter for RealVaHttpAdapter {
             if let Some(body) = &request.body {
                 req = req.body(body.clone());
             }
-            let resp = futures::executor::block_on(req.send())?;
+            let resp = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(req.send())
+            })?;
             let status = resp.status().as_u16();
             let mut headers = std::collections::HashMap::new();
             for (name, value) in resp.headers() {
@@ -791,7 +795,10 @@ impl VaHttpAdapter for RealVaHttpAdapter {
                     headers.insert(name.to_string().to_lowercase(), v.to_string());
                 }
             }
-            let body = futures::executor::block_on(resp.text()).unwrap_or_default();
+            let body = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(resp.text())
+            })
+            .unwrap_or_default();
             return Ok(VaHttpResponse {
                 status,
                 headers,
@@ -799,12 +806,14 @@ impl VaHttpAdapter for RealVaHttpAdapter {
             });
         }
 
-        let response = futures::executor::block_on(self.client.request(
-            request.method,
-            &request.url,
-            &request.headers,
-            request.body.as_deref(),
-        ))?;
+        let response = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.client.request(
+                request.method,
+                &request.url,
+                &request.headers,
+                request.body.as_deref(),
+            ))
+        })?;
         Ok(VaHttpResponse {
             status: response.status,
             headers: response.headers,
@@ -819,6 +828,25 @@ pub enum VaPayloadCategory {
     Xss,
     PathTraversal,
     AdversaryProbe,
+    ParserAmbiguity,
+    ProtocolMutation,
+    EncodingBoundary,
+    BehavioralThrottle,
+    ResponseFingerprint,
+    SemanticDrift,
+}
+
+impl From<dae::ProbeClass> for VaPayloadCategory {
+    fn from(class: dae::ProbeClass) -> Self {
+        match class {
+            dae::ProbeClass::ParserAmbiguity => Self::ParserAmbiguity,
+            dae::ProbeClass::ProtocolMutation => Self::ProtocolMutation,
+            dae::ProbeClass::EncodingBoundary => Self::EncodingBoundary,
+            dae::ProbeClass::BehavioralThrottle => Self::BehavioralThrottle,
+            dae::ProbeClass::ResponseFingerprint => Self::ResponseFingerprint,
+            dae::ProbeClass::SemanticDrift => Self::SemanticDrift,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1091,7 +1119,7 @@ impl VirtualAdversaryRunner {
             report.summary.record(evaluation.outcome);
             report.results.push(VaResultRecord {
                 payload: plan_item.display,
-                category: VaPayloadCategory::AdversaryProbe,
+                category: VaPayloadCategory::from(plan_item.probe.class),
                 outcome: evaluation.outcome,
                 reason: format!("replay {}", evaluation.reason),
                 evidence: evaluation.evidence,
@@ -1133,7 +1161,7 @@ impl VirtualAdversaryRunner {
         report.replay_plan = Self::build_replay_plan(&plan);
         for (idx, item) in plan.into_iter().enumerate() {
             let payload_value = item.display.clone();
-            let category = VaPayloadCategory::AdversaryProbe;
+            let category = VaPayloadCategory::from(item.probe.class);
             let evaluation = self.evaluate_probe(&baseline, &item)?;
             report.summary.record(evaluation.outcome);
             report.results.push(VaResultRecord {
