@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub mod ai;
 pub mod cli;
 pub mod confidence;
 pub mod engine;
