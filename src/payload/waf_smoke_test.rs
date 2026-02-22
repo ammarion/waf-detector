@@ -20,6 +20,8 @@ pub struct SmokeTestConfig {
     pub max_concurrent_requests: usize,
     pub include_advanced_payloads: bool,
     pub custom_headers: HashMap<String, String>,
+    /// Suppress all stdout output (for TUI mode)
+    pub quiet: bool,
 }
 
 impl Default for SmokeTestConfig {
@@ -30,6 +32,7 @@ impl Default for SmokeTestConfig {
             max_concurrent_requests: 3,
             include_advanced_payloads: true,
             custom_headers: HashMap::new(),
+            quiet: false,
         }
     }
 }
@@ -367,9 +370,11 @@ impl WafSmokeTest {
         let start_time = Instant::now();
         let mut test_results = Vec::new();
 
-        println!("🔍 Starting Advanced WAF Effectiveness Test");
-        println!("🎯 Target: {url}");
-        println!("═══════════════════════════════════════════════════════════════");
+        if !self.config.quiet {
+            println!("🔍 Starting Advanced WAF Effectiveness Test");
+            println!("🎯 Target: {url}");
+            println!("═══════════════════════════════════════════════════════════════");
+        }
 
         let endpoint_context = self.analyze_endpoint_context(url).await.ok();
 
@@ -493,14 +498,16 @@ impl WafSmokeTest {
             ));
         }
 
-        // Print real-time result
-        self.print_test_result(
-            &payload_type,
-            payload,
-            &classification,
-            response.status,
-            response_time.as_millis() as u64,
-        );
+        // Print real-time result (suppressed in quiet/TUI mode)
+        if !self.config.quiet {
+            self.print_test_result(
+                &payload_type,
+                payload,
+                &classification,
+                response.status,
+                response_time.as_millis() as u64,
+            );
+        }
 
         Ok(PayloadTestResult {
             category: format!("{payload_type:?}"),

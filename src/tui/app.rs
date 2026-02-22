@@ -263,7 +263,10 @@ impl TuiApp {
             })
             .ok();
 
-            let smoke_config = SmokeTestConfig::default();
+            let smoke_config = SmokeTestConfig {
+                quiet: true,
+                ..SmokeTestConfig::default()
+            };
             match WafSmokeTest::new(smoke_config) {
                 Ok(smoke_tester) => match smoke_tester.run_test(&url).await {
                     Ok(result) => {
@@ -410,10 +413,10 @@ impl TuiApp {
                 for ch in &cc.blind_spots {
                     findings.push(Finding {
                         severity: FindingSeverity::Critical,
-                        title: format!("{:?} channel blind spot (0% discrimination)", ch),
-                        source: "VA2".to_string(),
+                        title: format!("{:?} channel has zero attack detection", ch),
+                        source: "Behavioral".to_string(),
                         impact: format!(
-                            "WAF does not inspect {:?} channel — attacks via this vector bypass all rules",
+                            "WAF does not inspect {:?} — attacks sent via this channel bypass all rules",
                             ch
                         ),
                         recommendation: format!(
@@ -429,12 +432,12 @@ impl TuiApp {
                 findings.push(Finding {
                     severity: FindingSeverity::Medium,
                     title: format!(
-                        "Low challenge score ({:.0}%)",
+                        "No bot challenge capability ({:.0}%)",
                         va2.wbf.challenge_score * 100.0
                     ),
-                    source: "VA2".to_string(),
-                    impact: "WAF lacks active challenge mechanisms (CAPTCHA, JS challenge)".to_string(),
-                    recommendation: "Configure challenge/CAPTCHA rules for suspicious requests"
+                    source: "Behavioral".to_string(),
+                    impact: "WAF never issues CAPTCHA or JS challenges to suspicious requests".to_string(),
+                    recommendation: "Enable bot challenge rules (CAPTCHA, JS challenge) for suspicious traffic"
                         .to_string(),
                 });
             }
@@ -444,10 +447,10 @@ impl TuiApp {
                 findings.push(Finding {
                     severity: FindingSeverity::Medium,
                     title: "No rate limiting detected".to_string(),
-                    source: "VA2".to_string(),
-                    impact: "No throttling observed — vulnerable to brute-force and volumetric attacks"
+                    source: "Behavioral".to_string(),
+                    impact: "WAF does not slow or block rapid requests — vulnerable to brute-force attacks"
                         .to_string(),
-                    recommendation: "Add rate-limiting rules (e.g., 100 req/min per IP)".to_string(),
+                    recommendation: "Add rate-limiting rules (e.g., 100 requests/min per IP)".to_string(),
                 });
             }
 
@@ -455,11 +458,11 @@ impl TuiApp {
             if va2.wbf.statefulness_score == 0.0 {
                 findings.push(Finding {
                     severity: FindingSeverity::Low,
-                    title: "No statefulness detected".to_string(),
-                    source: "VA2".to_string(),
-                    impact: "WAF treats each request independently — multi-step attacks may go undetected"
+                    title: "No session tracking detected".to_string(),
+                    source: "Behavioral".to_string(),
+                    impact: "WAF treats each request independently — multi-step attacks go undetected"
                         .to_string(),
-                    recommendation: "Enable session-aware WAF rules if available".to_string(),
+                    recommendation: "Enable session-aware WAF rules or IP reputation tracking".to_string(),
                 });
             }
         }
@@ -473,7 +476,7 @@ impl TuiApp {
                         "Low smoke test effectiveness ({:.0}%)",
                         smoke.summary.effectiveness_percentage
                     ),
-                    source: "Smoke".to_string(),
+                    source: "Smoke Test".to_string(),
                     impact: "WAF fails to block majority of common attack payloads".to_string(),
                     recommendation: "Enable OWASP CRS or equivalent managed ruleset".to_string(),
                 });
@@ -490,7 +493,7 @@ impl TuiApp {
                             smoke.summary.total_tests,
                             allowed_pct * 100.0
                         ),
-                        source: "Smoke".to_string(),
+                        source: "Smoke Test".to_string(),
                         impact: "Known attack patterns bypass WAF".to_string(),
                         recommendation: "Review WAF ruleset coverage for XSS, SQLi, path traversal"
                             .to_string(),
@@ -510,7 +513,7 @@ impl TuiApp {
                         "{:.0}% of attack probes allowed through",
                         allowed_rate * 100.0
                     ),
-                    source: "VA1".to_string(),
+                    source: "Enforcement".to_string(),
                     impact: "Significant portion of known attack patterns bypass WAF".to_string(),
                     recommendation: "Review WAF ruleset for gaps in coverage".to_string(),
                 });

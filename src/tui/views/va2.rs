@@ -32,13 +32,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5), // WBF signal bars
+            Constraint::Length(5), // Protection signal bars
             Constraint::Min(6),   // Channel coverage table
             Constraint::Length(3), // Paired control summary
         ])
         .split(inner);
 
-    // WBF Signal Bars
+    // Protection Signal Bars
     {
         let bar_rows = Layout::default()
             .direction(Direction::Vertical)
@@ -50,17 +50,17 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             ])
             .split(chunks[0]);
 
-        signal_bar::render(f, bar_rows[0], "Normalize  ", va2.wbf.normalization_score);
-        signal_bar::render(f, bar_rows[1], "Statefulness", va2.wbf.statefulness_score);
-        signal_bar::render(f, bar_rows[2], "Challenge  ", va2.wbf.challenge_score);
-        signal_bar::render(f, bar_rows[3], "Throttle   ", va2.wbf.throttle_score);
+        signal_bar::render(f, bar_rows[0], "Encoding Defense", va2.wbf.normalization_score);
+        signal_bar::render(f, bar_rows[1], "Session Tracking", va2.wbf.statefulness_score);
+        signal_bar::render(f, bar_rows[2], "Bot Challenge   ", va2.wbf.challenge_score);
+        signal_bar::render(f, bar_rows[3], "Rate Limiting   ", va2.wbf.throttle_score);
     }
 
     // Channel Coverage Table
     if let Some(cc) = &va2.channel_coverage {
         let header = Row::new(vec![
             Cell::from("Channel").style(Style::default().fg(Theme::ACCENT).add_modifier(Modifier::BOLD)),
-            Cell::from("Discrimination").style(Style::default().fg(Theme::ACCENT).add_modifier(Modifier::BOLD)),
+            Cell::from("Attack Detection").style(Style::default().fg(Theme::ACCENT).add_modifier(Modifier::BOLD)),
             Cell::from("Status").style(Style::default().fg(Theme::ACCENT).add_modifier(Modifier::BOLD)),
         ]);
 
@@ -112,14 +112,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     if let Some(pc) = &va2.paired_control {
         let line = Line::from(vec![
             Span::styled(
-                " Paired Controls: ",
+                " Attack vs Benign Tests: ",
                 Style::default()
                     .fg(Theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!(
-                    "Detected: {} | Not Detected: {} | Inconclusive: {} | Pairs: {}/{}",
+                    "Blocked: {} | Passed: {} | Unclear: {} | Tests: {}/{}",
                     pc.detected_pairs, pc.not_detected_pairs, pc.inconclusive_pairs,
                     pc.executed_pairs, pc.pair_cap
                 ),
