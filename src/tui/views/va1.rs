@@ -10,7 +10,7 @@ use crate::tui::theme::Theme;
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
-        .title(" VA1 Enforcement Testing ")
+        .title(" Enforcement Test ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Theme::BORDER));
 
@@ -21,7 +21,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Some(v) => v,
         None => {
             let p = Paragraph::new(Span::styled(
-                "  No VA1 data. Press [r] to scan.",
+                "  No enforcement data. Press [r] to scan.",
                 Theme::dim(),
             ));
             f.render_widget(p, inner);

@@ -23,8 +23,8 @@ fn tooltip_text(view: ViewState) -> &'static str {
     match view {
         ViewState::Dashboard => {
             "Dashboard shows the overall posture grade (A-F), risk score, detected WAF, \
-             PMI maturity index, and top findings. Grade is computed from detection confidence, \
-             behavioral profiling, and enforcement testing results."
+             protection score, and top findings. Grade is computed from detection confidence, \
+             behavioral analysis, and enforcement test results."
         }
         ViewState::Detection => {
             "Detection view shows evidence collected from HTTP headers, response bodies, \
@@ -38,20 +38,20 @@ fn tooltip_text(view: ViewState) -> &'static str {
              catches common attacks. Low effectiveness suggests gaps in the ruleset."
         }
         ViewState::VA1 => {
-            "VA1 (Virtual Adversary) tests WAF enforcement by sending categorized attack probes \
-             and measuring block/challenge/allow rates. Categories include SemanticDrift, \
-             ProtocolMutation, EncodingBypass, and more. High allowed rates indicate gaps."
+            "Enforcement test sends known attack payloads (SQLi, XSS, path traversal, etc.) \
+             and checks whether the WAF blocks, challenges, or allows each one. High allowed \
+             rates mean the WAF is not stopping attacks it should catch."
         }
         ViewState::VA2 => {
-            "VA2 behavioral profiling measures WAF maturity across 5 signals: Normalization, \
-             Statefulness, Challenge, Throttle, and Differential scoring. Channel coverage \
-             shows discrimination rates across Path, Query, Header, Body, and Method channels. \
-             Blind spots (0% discrimination) are critical findings."
+            "Behavioral analysis sends paired probes — one benign, one malicious — across \
+             5 channels (Path, Query, Header, Body, Method) to test how smart the WAF is. \
+             It measures encoding defense, session tracking, bot challenges, and rate limiting. \
+             Channels with 0% attack detection are unprotected."
         }
         ViewState::Findings => {
             "Findings are actionable items extracted from scan results, sorted by severity. \
-             Critical findings include channel blind spots. Medium findings include high attack \
-             pass rates and low challenge scores. Each finding includes impact and recommendation."
+             Critical findings include unprotected channels. Medium findings include high attack \
+             pass rates and missing bot challenges. Each finding includes impact and recommendation."
         }
         ViewState::Log => {
             "Event log shows real-time scan activity. Entries are color-coded: \

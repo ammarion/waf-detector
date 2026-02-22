@@ -538,12 +538,12 @@ impl Va2Runner {
 fn ensure_va2_consent_and_target(consent_manager: &ConsentManager, target_url: &str) -> Result<()> {
     if !consent_manager.has_valid_consent()? {
         return Err(anyhow!(
-            "Consent is required before running Virtual Adversary 2.0 tests"
+            "Consent is required before running behavioral analysis"
         ));
     }
     if !consent_manager.is_target_allowed(target_url)? {
         return Err(anyhow!(
-            "Target is not authorized for Virtual Adversary 2.0 testing"
+            "Target is not authorized for behavioral analysis"
         ));
     }
     Ok(())

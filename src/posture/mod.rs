@@ -147,7 +147,7 @@ pub fn compose_posture_summary(
     }
 
     if coverage_score < 0.35 {
-        caveats.push("Channel coverage is limited; blind spots likely remain".to_string());
+        caveats.push("Channel coverage is limited; unprotected channels likely remain".to_string());
     }
 
     if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
@@ -265,7 +265,7 @@ impl PostureBuilder {
             };
             let reduction = 30.0 * self.pmi_normalized * channel_factor;
             base -= reduction;
-            parts.push(format!("VA2 PMI {:.0}/100", self.pmi_normalized * 100.0));
+            parts.push(format!("protection {:.0}/100", self.pmi_normalized * 100.0));
             if self.channel_coverage_score > 0.0 {
                 parts.push(format!(
                     "channel coverage {:.0}%",
@@ -278,7 +278,7 @@ impl PostureBuilder {
             let reduction = 20.0 * self.enforcement_score;
             base -= reduction;
             parts.push(format!(
-                "VA1 enforcement {:.0}%",
+                "enforcement {:.0}%",
                 self.enforcement_score * 100.0
             ));
         }

@@ -82,7 +82,7 @@ impl TuiApp {
             TuiEvent::Va1Done(report) => {
                 self.state.va1 = Some(*report);
                 self.state.scan = ScanState::RunningVA2;
-                self.state.push_log(LogLevel::Info, "VA1 enforcement testing complete".to_string());
+                self.state.push_log(LogLevel::Info, "Enforcement test complete".to_string());
             }
             TuiEvent::Va2Done(report) => {
                 self.state.va2 = Some(*report);
@@ -90,7 +90,7 @@ impl TuiApp {
                 self.state.progress = None;
                 self.state.push_log(
                     LogLevel::Info,
-                    "VA2 behavioral profiling complete".to_string(),
+                    "Behavioral analysis complete".to_string(),
                 );
                 self.compute_posture();
                 self.extract_findings();
@@ -281,7 +281,7 @@ impl TuiApp {
                         // Advance state past smoke test
                         tx.send(TuiEvent::Log {
                             level: EventLogLevel::Info,
-                            msg: "Skipping smoke test, advancing to VA1...".to_string(),
+                            msg: "Skipping smoke test, advancing to enforcement test...".to_string(),
                         })
                         .ok();
                     }
@@ -295,10 +295,10 @@ impl TuiApp {
                 }
             }
 
-            // Phase 3: VA1 enforcement
+            // Phase 3: Enforcement test
             tx.send(TuiEvent::Log {
                 level: EventLogLevel::Info,
-                msg: "Running VA1 enforcement testing...".to_string(),
+                msg: "Running enforcement test...".to_string(),
             })
             .ok();
 
@@ -321,7 +321,7 @@ impl TuiApp {
                             msg: e.to_string(),
                         })
                         .ok();
-                        // Continue to VA2 even if VA1 fails
+                        // Continue to behavioral analysis even if enforcement fails
                         tx.send(TuiEvent::Va1Done(Box::new(
                             create_empty_va1_report(&url),
                         )))
@@ -331,10 +331,10 @@ impl TuiApp {
                 Err(e) => {
                     tx.send(TuiEvent::Log {
                         level: EventLogLevel::Warn,
-                        msg: format!("VA1 skipped (no consent?): {}", e),
+                        msg: format!("Enforcement test skipped (no consent?): {}", e),
                     })
                     .ok();
-                    // Send empty VA1 to proceed
+                    // Send empty enforcement result to proceed
                     tx.send(TuiEvent::Va1Done(Box::new(
                         create_empty_va1_report(&url),
                     )))
@@ -342,10 +342,10 @@ impl TuiApp {
                 }
             }
 
-            // Phase 3: VA2 behavioral profiling
+            // Phase 4: Behavioral analysis
             tx.send(TuiEvent::Log {
                 level: EventLogLevel::Info,
-                msg: "Running VA2 behavioral profiling...".to_string(),
+                msg: "Running behavioral analysis...".to_string(),
             })
             .ok();
 
@@ -371,7 +371,7 @@ impl TuiApp {
                     Err(e) => {
                         tx.send(TuiEvent::Error {
                             scan_type: ScanType::VA2,
-                            msg: format!("VA2 runner init failed: {}", e),
+                            msg: format!("Behavioral analysis init failed: {}", e),
                         })
                         .ok();
                     }
@@ -379,7 +379,7 @@ impl TuiApp {
                 Err(e) => {
                     tx.send(TuiEvent::Error {
                         scan_type: ScanType::VA2,
-                        msg: format!("VA2 plan failed: {}", e),
+                        msg: format!("Behavioral analysis plan failed: {}", e),
                     })
                     .ok();
                 }
@@ -407,7 +407,7 @@ impl TuiApp {
         use super::state::{Finding, FindingSeverity};
         let mut findings = Vec::new();
 
-        // VA2 channel blind spots (Critical)
+        // Unprotected channels (Critical)
         if let Some(va2) = &self.state.va2 {
             if let Some(cc) = &va2.channel_coverage {
                 for ch in &cc.blind_spots {
@@ -502,7 +502,7 @@ impl TuiApp {
             }
         }
 
-        // VA1 high allowed rate (Medium)
+        // Enforcement: high allowed rate (Medium)
         if let Some(va1) = &self.state.va1 {
             let total = va1.summary.total.max(1) as f64;
             let allowed_rate = va1.summary.allowed as f64 / total;
