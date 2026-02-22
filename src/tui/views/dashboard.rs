@@ -13,7 +13,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(5),  // Top: grade + WAF + risk
-            Constraint::Length(6),  // Middle: PMI + WBF signals
+            Constraint::Length(6),  // Middle: protection score + signal bars
             Constraint::Min(4),    // Bottom: top findings
         ])
         .split(area);
@@ -110,10 +110,10 @@ fn render_middle(f: &mut Frame, area: Rect, state: &AppState) {
             .constraints([Constraint::Length(25), Constraint::Min(20)])
             .split(inner);
 
-        // PMI badge
+        // Protection score badge
         badge::render_pmi(f, cols[0], va2.pmi.score, &va2.pmi.label);
 
-        // WBF signal bars
+        // Protection signal bars
         let bar_rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -124,10 +124,10 @@ fn render_middle(f: &mut Frame, area: Rect, state: &AppState) {
             ])
             .split(cols[1]);
 
-        signal_bar::render(f, bar_rows[0], "Normalize", va2.wbf.normalization_score);
-        signal_bar::render(f, bar_rows[1], "Stateful ", va2.wbf.statefulness_score);
-        signal_bar::render(f, bar_rows[2], "Challenge", va2.wbf.challenge_score);
-        signal_bar::render(f, bar_rows[3], "Throttle ", va2.wbf.throttle_score);
+        signal_bar::render(f, bar_rows[0], "Encoding Defense", va2.wbf.normalization_score);
+        signal_bar::render(f, bar_rows[1], "Session Tracking", va2.wbf.statefulness_score);
+        signal_bar::render(f, bar_rows[2], "Bot Challenge   ", va2.wbf.challenge_score);
+        signal_bar::render(f, bar_rows[3], "Rate Limiting   ", va2.wbf.throttle_score);
     } else {
         let p = Paragraph::new(Span::styled(
             "  No VA2 data. Press [r] to scan.",
