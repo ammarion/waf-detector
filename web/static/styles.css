@@ -736,14 +736,186 @@ select.input-field {
 
 .va2-result {
     margin-top: 0.75rem;
-    padding: 0.75rem;
+    padding: 0;
     background: var(--bg-base);
     border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+}
+
+/* ---- VA2 result card ---- */
+.va2-result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+.va2-result-header h3 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+.va2-pmi-badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
     border-radius: var(--radius-sm);
     font-family: var(--font-mono);
     font-size: 0.8rem;
-    white-space: pre-wrap;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.va2-pmi-badge.pmi-strong { background: rgba(34,197,94,0.15); color: var(--accent); }
+.va2-pmi-badge.pmi-moderate { background: rgba(234,179,8,0.15); color: var(--warning); }
+.va2-pmi-badge.pmi-weak { background: rgba(239,68,68,0.15); color: var(--danger); }
+
+.va2-signals {
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.va2-signal-row {
+    display: grid;
+    grid-template-columns: 140px 1fr auto;
+    align-items: center;
+    gap: 0.75rem;
+}
+.va2-signal-label {
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    font-weight: 500;
     color: var(--text-primary);
+}
+.va2-score-bar-track {
+    height: 6px;
+    background: var(--bg-elevated);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.va2-score-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+.va2-score-bar-fill.bar-good { background: var(--accent); }
+.va2-score-bar-fill.bar-mid { background: var(--warning); }
+.va2-score-bar-fill.bar-bad { background: var(--danger); }
+.va2-signal-value {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    min-width: 2.5rem;
+    text-align: right;
+}
+.va2-signal-verdict {
+    grid-column: 1 / -1;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: -0.4rem;
+    padding-left: 0.1rem;
+}
+.va2-signal-verdict .va2-check { color: var(--accent); }
+.va2-signal-verdict .va2-cross { color: var(--danger); }
+
+.va2-recommendation {
+    padding: 0.6rem 1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+.va2-recommendation strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* ---- VA2 expandable detail ---- */
+.va2-detail-toggle {
+    border-top: 1px solid var(--border);
+    padding: 0;
+}
+.va2-detail-summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    user-select: none;
+}
+.va2-detail-summary::-webkit-details-marker { display: none; }
+.va2-detail-summary::before {
+    content: '\25B6';
+    font-size: 0.55rem;
+    transition: transform 0.2s ease;
+    color: var(--text-muted);
+}
+.va2-detail-toggle[open] > .va2-detail-summary::before {
+    transform: rotate(90deg);
+}
+.va2-detail-body {
+    padding: 0 1rem 0.75rem;
+}
+.va2-detail-section-title {
+    font-family: var(--font-display);
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.4rem;
+}
+.va2-detail-section-title + .va2-detail-section-title {
+    margin-top: 1rem;
+}
+.va2-channel-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    margin-bottom: 0.75rem;
+}
+.va2-channel-table th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.va2-channel-table td {
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+}
+.va2-channel-table td:last-child {
+    font-family: var(--font-mono);
+}
+.va2-blind-spot {
+    color: var(--danger);
+    font-weight: 500;
+}
+.va2-detecting {
+    color: var(--accent);
+}
+.va2-paired-summary {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 0.5rem;
+}
+.va2-paired-summary strong {
+    color: var(--text-primary);
+}
+.va2-run-meta {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+    margin-top: 0.75rem;
 }
 
 .va-activity-header {
