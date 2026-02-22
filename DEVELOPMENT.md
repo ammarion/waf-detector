@@ -2,37 +2,36 @@
 
 This document contains information for developers who want to contribute to the WAF Detector project.
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    CLI Application                          │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│   Scan Command  │  Batch Command  │   List Command          │
-├─────────────────┴─────────────────┴─────────────────────────┤
-│                   Detection Engine                          │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│ Provider Registry│ Confidence Engine│  HTTP Client           │
-├─────────────────┴─────────────────┴─────────────────────────┤
-│                 Detection Providers                         │
-├─────────────────┬─────────────────┬─────────────────────────┤
-│ CloudFlare      │  AWS WAF        │  Akamai                 │
-├─────────────────┼─────────────────┼─────────────────────────┤
-│ Fastly          │  Vercel         │  Azure                  │
-├─────────────────┼─────────────────┼─────────────────────────┤
-│ F5 BIG-IP       │                 │                         │
-└─────────────────┴─────────────────┴─────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    CLI Application                            │
+├──────────┬───────────┬──────────┬──────────┬─────────────────┤
+│   Scan   │ Enforce.  │ Behav.   │ Posture  │  TUI            │
+│ Command  │ Test (va) │ (va2)    │ Report   │  (--tui)        │
+├──────────┴───────────┴──────────┴──────────┴─────────────────┤
+│                   Detection Engine                            │
+├──────────────────┬──────────────────┬────────────────────────┤
+│ Provider Registry│ Confidence Engine│  HTTP Client            │
+├──────────────────┴──────────────────┴────────────────────────┤
+│                  Detection Providers                          │
+├──────────────────┬──────────────────┬────────────────────────┤
+│ CloudFlare       │  AWS WAF         │  Akamai                │
+├──────────────────┼──────────────────┼────────────────────────┤
+│ Fastly           │  Vercel          │  Azure                 │
+├──────────────────┼──────────────────┼────────────────────────┤
+│ F5 BIG-IP        │  Sucuri          │  Imperva + others      │
+└──────────────────┴──────────────────┴────────────────────────┘
 ```
 
-### 🧠 Virtual Adversary Architecture
+### Enforcement Testing Architecture
 
-Virtual Adversary (VA) is a consent-gated effectiveness engine built around a **differential probe catalog** and **replayable plans**.
+Enforcement testing is a consent-gated engine that sends known attack payloads and measures block/challenge/allow rates.
 
-- **Probe Catalog**: `src/virtual_adversary/dae.rs`
 - **Runner + Evidence**: `src/virtual_adversary/mod.rs`
-- **Replay Plan**: exported in VA reports for audit and reproducibility
-- **Web UI**: report modal + history downloads (replay JSON/CSV)
-- **API Endpoints**: `/api/virtual-adversary/reports/:id/replay.json` and `.csv`
+- **Report Persistence**: `src/virtual_adversary/report_store.rs`
+- **Replay Plan**: exported in reports for audit and reproducibility
 
 Key flow:
 1. Build probe plan (tier + budget)
@@ -40,7 +39,16 @@ Key flow:
 3. Execute probes, record evidence, classify enforcement
 4. Store report with replay plan for later audit
 
-## 🧪 Testing
+### Behavioral Analysis Architecture
+
+Behavioral analysis profiles WAF sophistication via paired control probes across 5 channels (Path, Query, Header, Body, Method).
+
+- **Campaign Plan + Runner**: `src/virtual_adversary2/mod.rs`
+- **Fixture Replay**: `src/virtual_adversary2/fixture.rs` (deterministic testing)
+- 5 phases: Baseline, ProtocolVariance, StateEscalation, BehavioralPressure, ChallengeInteraction
+- Per-channel discrimination scoring and unprotected channel detection
+
+## Testing
 
 ### Run all tests:
 ```bash
@@ -49,17 +57,27 @@ cargo test
 
 ### Run specific test suites:
 ```bash
-# Unit tests only
+# Library tests only (261 tests)
 cargo test --lib
 
 # Integration tests
 cargo test integration_test
 
+# CLI tests
+cargo test --test va_cli_test
+
 # CloudFlare provider tests
 cargo test cloudflare
 ```
 
-## 🛠️ Adding New Providers
+### Validation scripts (CI):
+```bash
+./run_validation_tests.sh
+python3 ci_validation.py ./target/release/waf-detect
+python3 accuracy_validation.py ./target/release/waf-detect
+```
+
+## Adding New Providers
 
 1. **Create provider module:**
 ```rust
@@ -73,14 +91,14 @@ impl DetectionProvider for NewProvider {
     fn name(&self) -> &str { "NewProvider" }
     fn provider_type(&self) -> ProviderType { ProviderType::WAF }
     fn confidence_base(&self) -> f64 { 0.85 }
-    
+
     async fn detect(&self, context: &DetectionContext) -> anyhow::Result<Vec<Evidence>> {
         // Detection logic
     }
 }
 ```
 
-2. **Add comprehensive tests:**
+2. **Add tests:**
 ```rust
 #[cfg(test)]
 mod tests {
@@ -91,33 +109,28 @@ mod tests {
 }
 ```
 
-3. **Register in CLI:**
+3. **Register in CLI** (`src/cli/mod.rs`):
 ```rust
-// In cli/mod.rs
 let provider = Arc::new(NewProvider::new());
 registry.register_provider(provider, metadata)?;
 ```
 
-## 📋 Future Development
+## Future Development
 
-### High Priority
-- [ ] **Additional WAF Providers** - Support for more WAF vendors
-- [ ] **Active Probing** - Enhanced detection techniques
-- [ ] **Performance Benchmarks** - Criterion-based benchmarking
-- [ ] **VA Replay Runner** - Re-execute a stored replay plan against a target with integrity checks
+### Open
+- [ ] **Probabilistic enforcement model** — replace linear PMI weights with posterior distribution + confidence intervals
+- [ ] **Bypass distance metric** — count transformations needed before WAF response normalizes
+- [ ] **Monitor-mode detection** — infer WAF presence from subtle behavioral signals when nothing is blocked
+- [ ] **Posture CLI with VA1** — `--posture` integration with enforcement testing
+- [ ] **Cookie channel** — add cookie inspection as a probe channel
 
-### Medium Priority  
-- [ ] **DNS Analysis** - DNS-based detection methods
-- [ ] **TLS Fingerprinting** - JA3 hash analysis
-- [ ] **VA Replay Diffs** - Compare current run to previous replay plan results
+### Done
+- [x] Multi-channel perturbation (PR #29)
+- [x] Interactive TUI (PR #38)
+- [x] User-facing jargon cleanup (PR #39 + #40)
+- [x] Dead code / repo cleanup (PR #41)
 
-### Low Priority
-- [ ] **HTTP Server Mode** - REST API server
-- [ ] **WebSocket Streaming** - Real-time detection
-- [ ] **Signature Database** - External signature loading
-- [ ] **Machine Learning** - ML-based confidence scoring
-
-## 🤝 Contributing
+## Contributing
 
 1. **Fork the repository**
 2. **Create feature branch** (`git checkout -b feature/new-provider`)
@@ -126,14 +139,13 @@ registry.register_provider(provider, metadata)?;
 5. **Ensure all tests pass** (`cargo test`)
 6. **Submit pull request**
 
-### Contribution Guidelines:
+### Guidelines:
 - Follow TDD methodology
 - Maintain >80% test coverage
-- Document all public APIs
-- Include performance benchmarks for new features
 - Follow Rust idioms and best practices
+- Run `cargo fmt && cargo clippy -- -D warnings` before committing
 
-## 🔗 Related Projects
+## Related Projects
 
 - [WAFW00F](https://github.com/EnableSecurity/wafw00f) - Python WAF detection
 - [WhatWeb](https://github.com/urbanadventurer/WhatWeb) - Web technology identification
