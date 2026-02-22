@@ -7,12 +7,12 @@ use crate::tui::theme::Theme;
 
 pub fn render(f: &mut Frame, area: Rect) {
     let bindings = vec![
-        ("1-7", "Switch view (Dashboard, Detection, Smoke, VA1, VA2, Findings, Log)"),
+        ("1-7", "Switch view (Dashboard, Detection, Smoke, Enforce, Behav., Findings, Log)"),
         ("Tab", "Next view"),
         ("j/k or Up/Down", "Navigate items"),
         ("Enter", "Expand selected item"),
         ("Esc", "Collapse / back"),
-        ("r", "Run full scan (detection + VA1 + VA2 + posture)"),
+        ("r", "Run full scan (detection + enforcement + behavioral + posture)"),
         ("e", "Export report to JSON file"),
         ("a", "Auto-save for Claude analysis"),
         ("?", "Toggle educational tooltip"),

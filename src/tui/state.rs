@@ -32,8 +32,8 @@ impl ViewState {
             ViewState::Dashboard => "Dashboard",
             ViewState::Detection => "Detection",
             ViewState::SmokeTest => "Smoke",
-            ViewState::VA1 => "VA1",
-            ViewState::VA2 => "VA2",
+            ViewState::VA1 => "Enforce",
+            ViewState::VA2 => "Behav.",
             ViewState::Findings => "Findings",
             ViewState::Log => "Log",
         }
@@ -73,8 +73,8 @@ impl ScanState {
             ScanState::Idle => "Idle",
             ScanState::RunningDetection => "Detecting WAF/CDN...",
             ScanState::RunningSmokeTest => "Running smoke test...",
-            ScanState::RunningVA1 => "Running VA1 enforcement...",
-            ScanState::RunningVA2 => "Running VA2 behavioral...",
+            ScanState::RunningVA1 => "Testing enforcement...",
+            ScanState::RunningVA2 => "Analyzing behavior...",
             ScanState::Complete => "Complete",
         }
     }

@@ -606,11 +606,11 @@ impl SimpleCliApp {
                     }
                 }
                 if let Some(beh) = &posture.behavioral {
-                    println!("  VA2 PMI:    {:.0} ({})", beh.pmi_score, beh.pmi_label);
+                    println!("  Protection: {:.0}/100 ({})", beh.pmi_score, beh.pmi_label);
                 }
                 if let Some(enf) = &posture.enforcement {
                     println!(
-                        "  VA1:        {} ({:.0}%)",
+                        "  Enforce:    {} ({:.0}%)",
                         enf.enforcement,
                         enf.confidence_score * 100.0
                     );
@@ -649,7 +649,7 @@ impl SimpleCliApp {
                 if let Some(output) = matches.get_one::<String>("va2-output") {
                     let json = serde_json::to_string_pretty(&report)?;
                     fs::write(output, &json)?;
-                    println!("📄 VA2 report saved to: {output}");
+                    println!("📄 Behavioral analysis report saved to: {output}");
                     self.write_perf_report_if_requested(&matches)?;
                     return Ok(());
                 }
@@ -660,12 +660,12 @@ impl SimpleCliApp {
                     .filter(|result| result.error.is_some())
                     .count();
                 println!(
-                    "🧪 VA2 Run: {} steps | errors {}",
+                    "🧪 Behavioral Analysis: {} steps | errors {}",
                     report.results.len(),
                     errors
                 );
                 if let Some(cc) = &report.channel_coverage {
-                    println!("\nChannel Coverage:");
+                    println!("\nChannel Inspection:");
                     let mut channels: Vec<_> = cc.channels.iter().collect();
                     channels.sort_by_key(|(ch, _)| format!("{ch:?}"));
                     for (ch, rate) in &channels {
@@ -680,7 +680,7 @@ impl SimpleCliApp {
                             .filter(|d| d.channel == Some(**ch))
                             .count();
                         let blind = if cc.blind_spots.contains(ch) {
-                            " [blind spot]"
+                            " [UNPROTECTED]"
                         } else {
                             ""
                         };
@@ -709,13 +709,13 @@ impl SimpleCliApp {
             if let Some(output) = matches.get_one::<String>("va2-output") {
                 let json = serde_json::to_string_pretty(&plan)?;
                 fs::write(output, json)?;
-                println!("📄 VA2 plan saved to: {output}");
+                println!("📄 Behavioral analysis plan saved to: {output}");
                 self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
 
             println!(
-                "🧭 VA2 Dry Run: {} steps across {} phases (seed={}, budget={})",
+                "🧭 Behavioral Analysis Dry Run: {} steps across {} phases (seed={}, budget={})",
                 plan.steps.len(),
                 plan.phases.len(),
                 plan.seed,
@@ -794,13 +794,13 @@ impl SimpleCliApp {
                     report.summary.error
                 );
                 std::fs::write(&summary_path, summary)?;
-                println!("📄 VA replay report saved to: {output}");
-                println!("📄 VA replay summary saved to: {summary_path}");
+                println!("📄 Enforcement replay report saved to: {output}");
+                println!("📄 Enforcement replay summary saved to: {summary_path}");
                 self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             println!(
-                "🧪 Virtual Adversary Replay: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
+                "🧪 Enforcement Replay: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
                 report.target_url,
                 report.summary.total,
                 report.summary.blocked,
@@ -915,13 +915,13 @@ impl SimpleCliApp {
                     report.summary.error
                 );
                 std::fs::write(&summary_path, summary)?;
-                println!("📄 VA report saved to: {output}");
-                println!("📄 VA summary saved to: {summary_path}");
+                println!("📄 Enforcement report saved to: {output}");
+                println!("📄 Enforcement summary saved to: {summary_path}");
                 self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
             println!(
-                "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
+                "🧪 Enforcement Test: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
                 report.target_url,
                 report.summary.total,
                 report.summary.blocked,
@@ -1209,12 +1209,12 @@ impl SimpleCliApp {
                 report.summary.error
             );
             std::fs::write(&summary_path, summary)?;
-            println!("📄 VA report saved to: {output}");
-            println!("📄 VA summary saved to: {summary_path}");
+            println!("📄 Enforcement report saved to: {output}");
+            println!("📄 Enforcement summary saved to: {summary_path}");
             return Ok(());
         }
         println!(
-            "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
+            "🧪 Enforcement Test: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
             report.target_url,
             report.summary.total,
             report.summary.blocked,
@@ -1288,7 +1288,7 @@ impl SimpleCliApp {
             if let Some(output) = matches.get_one::<String>("output") {
                 let json = serde_json::to_string_pretty(&report)?;
                 fs::write(output, &json)?;
-                println!("📄 VA2 report saved to: {output}");
+                println!("📄 Behavioral analysis report saved to: {output}");
                 return Ok(());
             }
 
@@ -1298,12 +1298,12 @@ impl SimpleCliApp {
                 .filter(|result| result.error.is_some())
                 .count();
             println!(
-                "🧪 VA2 Run: {} steps | errors {}",
+                "🧪 Behavioral Analysis: {} steps | errors {}",
                 report.results.len(),
                 errors
             );
             if let Some(cc) = &report.channel_coverage {
-                println!("\nChannel Coverage:");
+                println!("\nChannel Inspection:");
                 let mut channels: Vec<_> = cc.channels.iter().collect();
                 channels.sort_by_key(|(ch, _)| format!("{ch:?}"));
                 for (ch, rate) in &channels {
@@ -1318,7 +1318,7 @@ impl SimpleCliApp {
                         .filter(|d| d.channel == Some(**ch))
                         .count();
                     let blind = if cc.blind_spots.contains(ch) {
-                        " [blind spot]"
+                        " [UNPROTECTED]"
                     } else {
                         ""
                     };
@@ -1345,12 +1345,12 @@ impl SimpleCliApp {
         if let Some(output) = matches.get_one::<String>("output") {
             let json = serde_json::to_string_pretty(&plan)?;
             fs::write(output, json)?;
-            println!("📄 VA2 plan saved to: {output}");
+            println!("📄 Behavioral analysis plan saved to: {output}");
             return Ok(());
         }
 
         println!(
-            "🧭 VA2 Dry Run: {} steps across {} phases (seed={}, budget={})",
+            "🧭 Behavioral Analysis Dry Run: {} steps across {} phases (seed={}, budget={})",
             plan.steps.len(),
             plan.phases.len(),
             plan.seed,
@@ -1466,7 +1466,7 @@ impl SimpleCliApp {
                     push_check(
                         "consent_status",
                         DoctorStatus::Warn,
-                        "no valid consent on file (required for VA/VA2/effectiveness runs)"
+                        "no valid consent on file (required for enforcement/behavioral/effectiveness tests)"
                             .to_string(),
                     );
                 }
@@ -2515,7 +2515,7 @@ fn build_benchmark_subcommand() -> Command {
 
 fn build_va_subcommand() -> Command {
     Command::new("va")
-        .about("Run Virtual Adversary effectiveness validation")
+        .about("Run enforcement test — send attack payloads and measure block rates")
         .arg(
             Arg::new("target")
                 .help("Target URL or domain")
@@ -2525,37 +2525,37 @@ fn build_va_subcommand() -> Command {
         .arg(
             Arg::new("dry-run")
                 .long("dry-run")
-                .help("Print planned VA payloads without executing")
+                .help("Print planned enforcement payloads without executing")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("json")
                 .long("json")
-                .help("Print VA report JSON to stdout")
+                .help("Print enforcement report JSON to stdout")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("replay")
                 .long("replay")
-                .help("Print VA replay plan JSON to stdout")
+                .help("Print enforcement replay plan JSON to stdout")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("replay-csv")
                 .long("replay-csv")
-                .help("Print VA replay plan CSV to stdout")
+                .help("Print enforcement replay plan CSV to stdout")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("output")
                 .long("output")
-                .help("Write VA report JSON and summary to file")
+                .help("Write enforcement report JSON and summary to file")
                 .value_name("FILE"),
         )
         .arg(
             Arg::new("top")
                 .long("top")
-                .help("Number of VA results to print")
+                .help("Number of enforcement results to print")
                 .value_name("COUNT")
                 .value_parser(clap::value_parser!(u8))
                 .default_value("3"),
@@ -2563,7 +2563,7 @@ fn build_va_subcommand() -> Command {
         .arg(
             Arg::new("reason-level")
                 .long("reason-level")
-                .help("VA reason verbosity (0=none, 1=default)")
+                .help("Reason verbosity (0=none, 1=default)")
                 .value_name("LEVEL")
                 .value_parser(clap::value_parser!(u8))
                 .default_value("1"),
@@ -2571,7 +2571,7 @@ fn build_va_subcommand() -> Command {
         .arg(
             Arg::new("max-len")
                 .long("max-len")
-                .help("Max payload length to print in VA output")
+                .help("Max payload length to print in enforcement output")
                 .value_name("LEN")
                 .value_parser(clap::value_parser!(u16))
                 .default_value("80"),
@@ -2579,7 +2579,7 @@ fn build_va_subcommand() -> Command {
         .arg(
             Arg::new("tier")
                 .long("tier")
-                .help("VA safety tier (1-3)")
+                .help("Safety tier (1-3)")
                 .value_name("TIER")
                 .value_parser(clap::value_parser!(u8))
                 .default_value("1"),
@@ -2587,7 +2587,7 @@ fn build_va_subcommand() -> Command {
         .arg(
             Arg::new("budget")
                 .long("budget")
-                .help("VA request budget (max total requests)")
+                .help("Request budget (max total requests)")
                 .value_name("BUDGET")
                 .value_parser(clap::value_parser!(u32))
                 .default_value("120"),
@@ -2595,7 +2595,7 @@ fn build_va_subcommand() -> Command {
         .arg(
             Arg::new("timeout")
                 .long("timeout")
-                .help("VA per-request timeout (seconds)")
+                .help("Per-request timeout (seconds)")
                 .value_name("SECONDS")
                 .value_parser(clap::value_parser!(u64))
                 .default_value("15"),
@@ -2603,7 +2603,7 @@ fn build_va_subcommand() -> Command {
         .arg(
             Arg::new("delay")
                 .long("delay")
-                .help("VA delay between requests (milliseconds)")
+                .help("Delay between requests (milliseconds)")
                 .value_name("MS")
                 .value_parser(clap::value_parser!(u64))
                 .default_value("750"),
@@ -2620,7 +2620,7 @@ fn build_va_subcommand() -> Command {
 
 fn build_va2_subcommand() -> Command {
     Command::new("va2")
-        .about("Run Virtual Adversary 2.0 behavioral campaign")
+        .about("Run behavioral analysis — paired probes testing WAF sophistication")
         .arg(
             Arg::new("target")
                 .help("Target URL or domain")
@@ -2630,32 +2630,32 @@ fn build_va2_subcommand() -> Command {
         .arg(
             Arg::new("run")
                 .long("run")
-                .help("Execute VA2 campaign plan (requires consent)")
+                .help("Execute behavioral analysis (requires consent)")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("json")
                 .long("json")
-                .help("Print VA2 plan/report JSON to stdout")
+                .help("Print behavioral analysis plan/report JSON to stdout")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("output")
                 .long("output")
-                .help("Write VA2 plan/report JSON to file")
+                .help("Write behavioral analysis plan/report JSON to file")
                 .value_name("FILE"),
         )
         .arg(
             Arg::new("phases")
                 .long("phases")
-                .help("VA2 phases (comma-separated)")
+                .help("Analysis phases (comma-separated)")
                 .value_name("LIST")
                 .default_value("baseline,protocol-variance"),
         )
         .arg(
             Arg::new("seed")
                 .long("seed")
-                .help("VA2 deterministic seed")
+                .help("Deterministic seed for reproducible analysis")
                 .value_name("SEED")
                 .value_parser(clap::value_parser!(u64))
                 .default_value("1337"),
@@ -2663,7 +2663,7 @@ fn build_va2_subcommand() -> Command {
         .arg(
             Arg::new("budget")
                 .long("budget")
-                .help("VA2 request budget")
+                .help("Request budget for behavioral analysis")
                 .value_name("COUNT")
                 .value_parser(clap::value_parser!(u32))
                 .default_value("60"),
@@ -2935,42 +2935,42 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va2")
                 .long("va2")
-                .help("Run Virtual Adversary 2.0 dry run (behavioral campaign)")
+                .help("Run behavioral analysis (paired probes testing WAF sophistication)")
                 .value_name("URL")
                 .num_args(1),
         )
         .arg(
             Arg::new("va2-dry-run")
                 .long("va2-dry-run")
-                .help("Print VA2 plan summary without execution")
+                .help("Print behavioral analysis plan without execution")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va2"),
         )
         .arg(
             Arg::new("va2-run")
                 .long("va2-run")
-                .help("Execute VA2 campaign plan (requires consent)")
+                .help("Execute behavioral analysis (requires consent)")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va2"),
         )
         .arg(
             Arg::new("va2-json")
                 .long("va2-json")
-                .help("Print VA2 plan JSON to stdout")
+                .help("Print behavioral analysis plan JSON to stdout")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va2"),
         )
         .arg(
             Arg::new("va2-output")
                 .long("va2-output")
-                .help("Write VA2 plan JSON to file")
+                .help("Write behavioral analysis plan JSON to file")
                 .value_name("FILE")
                 .requires("va2"),
         )
         .arg(
             Arg::new("va2-phases")
                 .long("va2-phases")
-                .help("VA2 phases (comma-separated)")
+                .help("Analysis phases (comma-separated)")
                 .value_name("LIST")
                 .default_value("baseline,protocol-variance")
                 .requires("va2"),
@@ -2978,7 +2978,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va2-seed")
                 .long("va2-seed")
-                .help("VA2 deterministic seed")
+                .help("Deterministic seed for reproducible analysis")
                 .value_name("SEED")
                 .value_parser(clap::value_parser!(u64))
                 .default_value("1337")
@@ -2987,7 +2987,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va2-budget")
                 .long("va2-budget")
-                .help("VA2 request budget")
+                .help("Request budget for behavioral analysis")
                 .value_name("COUNT")
                 .value_parser(clap::value_parser!(u32))
                 .default_value("60")
@@ -2996,21 +2996,21 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("posture")
                 .long("posture")
-                .help("Generate unified posture report (detection + optional VA2/VA1)")
+                .help("Generate unified posture report (detection + enforcement + behavioral)")
                 .value_name("URL")
                 .num_args(1),
         )
         .arg(
             Arg::new("posture-summary")
                 .long("posture-summary")
-                .help("Generate posture summary JSON (detection + VA2 paired-control)")
+                .help("Generate posture summary JSON (detection + behavioral paired-control)")
                 .value_name("URL")
                 .num_args(1),
         )
         .arg(
             Arg::new("posture-va2")
                 .long("posture-va2")
-                .help("Include VA2 behavioral profiling in posture report (requires consent)")
+                .help("Include behavioral analysis in posture report (requires consent)")
                 .action(clap::ArgAction::SetTrue)
                 .requires("posture"),
         )
@@ -3024,7 +3024,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va")
                 .long("va")
-                .help("Run Virtual Adversary effectiveness validation (requires consent)")
+                .help("Run enforcement test — send attack payloads and measure block rates (requires consent)")
                 .value_name("URL")
                 .num_args(1),
         )
@@ -3058,14 +3058,14 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va-dry-run")
                 .long("va-dry-run")
-                .help("Print planned VA payloads without executing")
+                .help("Print planned enforcement payloads without executing")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va"),
         )
         .arg(
             Arg::new("va-top")
                 .long("va-top")
-                .help("Number of VA results to print")
+                .help("Number of enforcement results to print")
                 .value_name("COUNT")
                 .value_parser(clap::value_parser!(u8))
                 .default_value("3")
@@ -3074,7 +3074,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va-reason-level")
                 .long("va-reason-level")
-                .help("VA reason verbosity (0=none, 1=default)")
+                .help("Reason verbosity (0=none, 1=default)")
                 .value_name("LEVEL")
                 .value_parser(clap::value_parser!(u8))
                 .default_value("1")
@@ -3083,7 +3083,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va-max-len")
                 .long("va-max-len")
-                .help("Max payload length to print in VA output")
+                .help("Max payload length to print in enforcement output")
                 .value_name("LEN")
                 .value_parser(clap::value_parser!(u16))
                 .default_value("80")
@@ -3092,35 +3092,35 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va-output")
                 .long("va-output")
-                .help("Write VA report JSON and summary to file")
+                .help("Write enforcement report JSON and summary to file")
                 .value_name("FILE")
                 .requires("va"),
         )
         .arg(
             Arg::new("va-json")
                 .long("va-json")
-                .help("Print VA report JSON to stdout")
+                .help("Print enforcement report JSON to stdout")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va"),
         )
         .arg(
             Arg::new("va-replay")
                 .long("va-replay")
-                .help("Print VA replay plan JSON to stdout")
+                .help("Print enforcement replay plan JSON to stdout")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va"),
         )
         .arg(
             Arg::new("va-replay-csv")
                 .long("va-replay-csv")
-                .help("Print VA replay plan CSV to stdout")
+                .help("Print enforcement replay plan CSV to stdout")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va"),
         )
         .arg(
             Arg::new("va-tier")
                 .long("va-tier")
-                .help("VA safety tier (1-3)")
+                .help("Safety tier (1-3)")
                 .value_name("TIER")
                 .value_parser(clap::value_parser!(u8))
                 .default_value("1")
@@ -3129,7 +3129,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va-budget")
                 .long("va-budget")
-                .help("VA request budget (max total requests)")
+                .help("Request budget (max total requests)")
                 .value_name("BUDGET")
                 .value_parser(clap::value_parser!(u32))
                 .default_value("120")
@@ -3138,7 +3138,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va-timeout")
                 .long("va-timeout")
-                .help("VA per-request timeout (seconds)")
+                .help("Per-request timeout (seconds)")
                 .value_name("SECONDS")
                 .value_parser(clap::value_parser!(u64))
                 .default_value("15")
@@ -3147,7 +3147,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va-delay")
                 .long("va-delay")
-                .help("VA delay between requests (milliseconds)")
+                .help("Delay between requests (milliseconds)")
                 .value_name("MS")
                 .value_parser(clap::value_parser!(u64))
                 .default_value("750")

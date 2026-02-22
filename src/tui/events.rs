@@ -17,8 +17,8 @@ impl std::fmt::Display for ScanType {
         match self {
             ScanType::Detection => write!(f, "Detection"),
             ScanType::SmokeTest => write!(f, "SmokeTest"),
-            ScanType::VA1 => write!(f, "VA1"),
-            ScanType::VA2 => write!(f, "VA2"),
+            ScanType::VA1 => write!(f, "Enforcement"),
+            ScanType::VA2 => write!(f, "Behavioral"),
         }
     }
 }

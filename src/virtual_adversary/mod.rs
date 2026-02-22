@@ -103,13 +103,13 @@ impl VirtualAdversaryConfig {
 pub fn ensure_consent_and_target(consent_manager: &ConsentManager, target_url: &str) -> Result<()> {
     if !consent_manager.has_valid_consent()? {
         return Err(anyhow!(
-            "Consent is required before running Virtual Adversary tests"
+            "Consent is required before running enforcement tests"
         ));
     }
 
     if !consent_manager.is_target_allowed(target_url)? {
         return Err(anyhow!(
-            "Target is not authorized for Virtual Adversary testing"
+            "Target is not authorized for enforcement testing"
         ));
     }
 
@@ -953,7 +953,7 @@ impl VirtualAdversaryRunner {
     pub fn new(config: VirtualAdversaryConfig) -> Result<Self> {
         config
             .validate()
-            .map_err(|err| anyhow!("invalid Virtual Adversary config: {err}"))?;
+            .map_err(|err| anyhow!("invalid enforcement test config: {err}"))?;
         let budget = RequestBudget::new(config.request_budget)?;
         let rate_limiter = RateLimiter::new(config.request_delay)?;
         let http = Box::new(RealVaHttpAdapter::new()?);

@@ -10,7 +10,7 @@ use crate::tui::theme::Theme;
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
-        .title(" VA2 Behavioral Profiling ")
+        .title(" Behavioral Analysis ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Theme::BORDER));
 
@@ -21,7 +21,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Some(v) => v,
         None => {
             let p = Paragraph::new(Span::styled(
-                "  No VA2 data. Press [r] to scan.",
+                "  No behavioral data. Press [r] to scan.",
                 Theme::dim(),
             ));
             f.render_widget(p, inner);
@@ -71,7 +71,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .iter()
             .map(|(ch, rate)| {
                 let is_blind = cc.blind_spots.contains(ch);
-                let status_text = if is_blind { "BLIND SPOT" } else { "OK" };
+                let status_text = if is_blind { "UNPROTECTED" } else { "OK" };
                 let status_color = if is_blind { Theme::CRITICAL } else { Theme::OK };
                 let rate_color = Theme::bar_color(**rate);
 

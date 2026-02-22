@@ -1,379 +1,268 @@
 # WAF Detector
 
-> Advanced Security Infrastructure Analysis & Visualization
-> 
-> **Dual Purpose Tool**: Detection + Effectiveness Testing for Web Application Firewalls
+A high-performance tool for detecting, testing, and profiling Web Application Firewalls (WAFs) and Content Delivery Networks (CDNs). Built for security engineers who need to validate their defensive infrastructure.
 
-## Features
+> **Important:** Only use against systems you own or have explicit authorization to test. Unauthorized scanning may violate terms of service or laws in your jurisdiction.
 
-- **Single URL Detection (CDN & WAF):** Detects which CDN and WAF are protecting a single target.
-- **Batch URL Detection (CDN & WAF):** Scan multiple URLs at once for CDN and WAF detection.
-- **WAF Smoke Test:** Live payload testing with detailed results.
-- **WAF Effectiveness Testing:** Comprehensive security validation with evasion techniques.
-- **Quick Actions:** Clear results, view API documentation, export results.
+## What It Does
 
-A high-performance tool for detecting and testing Web Application Firewalls (WAFs) and Content Delivery Networks (CDNs).
+| Mode | What it tests | Flag |
+|------|--------------|------|
+| **Detection** | Identifies which WAF/CDN protects a target | `waf-detect <url>` |
+| **Smoke Test** | Sends known attack payloads, measures block rates | `--smoke-test <url>` |
+| **Enforcement Test** | Sends categorized attack probes, measures block/challenge/allow | `--va <url>` |
+| **Behavioral Analysis** | Paired probes testing WAF sophistication across 5 channels | `--va2 <url> --va2-run` |
+| **Posture Report** | Unified grade (A-F) combining all test results | `--posture <url>` |
+| **TUI** | Interactive terminal dashboard with live scan results | `--tui <url>` |
 
-> ⚠️ **Important:** This tool should only be used against your own web services or with explicit authorization. Unauthorized scanning may violate terms of service or laws in your jurisdiction.
+## Quick Start
 
-## 🚀 Quick Start
-
-### Prerequisites
-- Rust 1.70+ and Cargo (install from [rustup.rs](https://rustup.rs))
-
-### Installation
 ```bash
-# Clone the repository
-git clone https://github.com/ammarion/waf-detector.git
-
-# Navigate to the project directory
-cd waf-detector
-
-# Build the project
+# Build
 cargo build --release
-```
 
-### Basic Usage
-
-**Scan a single URL:**
-```bash
+# Detect WAF/CDN
 ./target/release/waf-detect example.com
-```
 
-**Scan multiple URLs:**
-```bash
-./target/release/waf-detect example.com google.com cloudflare.com
-```
-
-**Batch scanning from file:**
-```bash
-# Create a file with URLs (one per line)
-echo "https://cloudflare.com" > urls.txt
-echo "https://example.com" >> urls.txt
-
-./target/release/waf-detect @urls.txt
-```
-
-**Include payload-based analysis (optional but recommended for full detection coverage):**
-```bash
-./target/release/waf-detect example.com --payload-analysis
-```
-
-## 🛡️ Features
-
-- **WAF & CDN Detection**: Identifies protection systems with high accuracy
-- **Multiple Providers**: CloudFlare, AWS WAF, Akamai, Fastly, Vercel, Azure, F5 BIG-IP
-- **Security Testing**: Tests WAF effectiveness against common attacks
-- **CLI + Agent First**: Built for terminal workflows and agent automation
-- **Detailed Reports**: Evidence collection and confidence scoring
-
-## 🧪 WAF Effectiveness Testing
-
-Test how well a WAF blocks common attack patterns:
-
-```bash
-# Using the command line
+# Run smoke test
 ./target/release/waf-detect --smoke-test example.com
-```
 
-**Status meanings:**
-- `BLOCKED`: Request was blocked by WAF or edge controls.
-- `CHALLENGE`: Challenge or bot protection triggered (e.g., JavaScript/CAPTCHA).
-- `ERROR`: Non-blocking failure (e.g., 404/500/timeout) that is not treated as a WAF block.
-
-### Attack Categories Tested
-
-- SQL Injection
-- Cross-Site Scripting (XSS)
-- Command Injection
-- Path Traversal
-- Remote/Local File Inclusion
-- Scanner Detection (Nikto, SQLmap, etc.)
-
-## 🔐 WAF Effectiveness Testing (Advanced)
-
-Test your WAF's ability to block sophisticated attacks and evasion techniques with our comprehensive testing suite:
-
-```bash
-# First-time setup: provide consent and authorized targets
+# Full posture report (detection + behavioral analysis)
 ./target/release/waf-detect --consent request
+./target/release/waf-detect --consent add-target example.com
+./target/release/waf-detect --posture example.com --posture-va2 --posture-json
 
-# Run comprehensive effectiveness testing
-./target/release/waf-detect --effectiveness example.com
-
-# Check consent status and authorized targets
-./target/release/waf-detect --consent
-
-# Add additional authorized targets
-./target/release/waf-detect --consent add-target newsite.com
+# Interactive TUI
+./target/release/waf-detect --tui example.com
 ```
 
-### Effectiveness Testing Features
+## Detection
 
-- **Multi-Phase Testing**: Baseline behavior analysis, detection capability testing, and advanced evasion techniques
-- **Intensity Levels**: Configurable testing intensity (1-5) to match your security requirements
-- **Attack Categories**: Tests SQL injection, XSS, command injection, XXE, SSRF, template injection, and more
-- **Evasion Techniques**: Advanced bypass methods including case variation, Unicode encoding, HTTP parameter pollution
-- **Risk Scoring**: Automated vulnerability assessment with 0-100 risk scores
-- **Detailed Reporting**: Comprehensive HTML and JSON reports with remediation guidance
-- **Rate Limiting**: Responsible testing with configurable request rates (default: 60/min)
-- **Audit Trail**: All tests are logged with timestamps for compliance and forensics
-- **Static Content Detection**: Warns if target appears to serve only static content
+Identifies WAF and CDN providers using HTTP headers, response bodies, DNS records, timing analysis, and TLS certificates.
 
-### Testing Phases Explained
-
-**Phase 1: Baseline Testing**
-- Establishes normal application behavior with benign requests
-- Detects parameter processing capabilities
-- Identifies baseline response patterns
-
-**Phase 2: Detection Testing**
-- Tests common attack patterns at configured intensity level
-- Validates WAF blocking capabilities across multiple attack categories
-- Records block rates and response patterns
-
-**Phase 3: Advanced Evasion Testing** (Intensity 4+)
-- Tests sophisticated bypass techniques
-- Evaluates WAF resilience against advanced persistent threats
-- Uses WAFFLED (Web Application Firewall Fuzzing and Low-level Evasion Detection) techniques
-
-### Performance Characteristics
-
-- **Request Rate**: Configurable (default 60 requests/minute)
-- **Response Time**: Typical tests complete in 5-15 minutes
-- **Request Delay**: 500ms between requests (configurable)
-- **Timeout**: 30 seconds per request (configurable)
-- **Memory Usage**: Minimal footprint with streaming results
-
-### Consent Management System
-
-The effectiveness testing module includes a robust consent management system:
-
-- **Explicit Consent Required**: Users must acknowledge terms before first use
-- **Authorized Target Lists**: Only pre-approved domains can be tested
-- **Consent Expiration**: Consent expires after 30 days for security
-- **Audit Logging**: All consent actions and test executions are logged
-- **Terms Versioning**: System tracks consent to specific terms versions
-
-⚠️ **Ethical Use Required**: Effectiveness testing includes advanced techniques that could bypass security controls. Only use on systems you own or have explicit permission to test. Unauthorized testing may violate laws and terms of service.
-
-## 🧠 Virtual Adversary (Beta)
-
-Virtual Adversary adds adaptive, consent-gated effectiveness testing with baseline-aware response analysis and strict request budgets.
+**Supported providers:** CloudFlare, AWS WAF, Akamai, Fastly, Vercel, Azure, F5 BIG-IP
 
 ```bash
-# First-time setup: provide consent and authorized targets
-./target/release/waf-detect --consent request
+# Single URL
+./target/release/waf-detect example.com
 
-# Run Virtual Adversary testing
-./target/release/waf-detect --va https://example.com
-```
+# Multiple URLs
+./target/release/waf-detect example.com google.com cloudflare.com
 
-**Common options:**
-- `--va-tier 1|2|3`: Safety tier for payload sophistication.
-- `--va-budget N`: Max requests allowed per run.
-- `--va-timeout SECONDS`: Per-request timeout in seconds.
-- `--va-delay MS`: Delay between requests in milliseconds.
-- `--va-variants N`: Variants per payload template.
-- `--va-output report.json`: Save JSON report (also writes a `.summary.txt`).
-- `--va-replay`: Print the replay plan JSON to stdout (probes, headers, and URLs).
-- `--va-replay-csv`: Print the replay plan CSV to stdout.
+# Batch from file
+./target/release/waf-detect @urls.txt
 
-**Replay plan exports:**
-- Use `--va-replay` for JSON replay plans.
-- Use `--va-replay-csv` for CSV replay plans.
-
-> ⚠️ **Ethical Use Required:** Virtual Adversary simulates evasive attackers. Only use on systems you own or have explicit permission to test.
-
-## 🧪 Virtual Adversary 2.0 (Experimental)
-
-Virtual Adversary 2.0 focuses on **behavioral profiling** (normalization variance, statefulness, challenge response, throttle curves) and produces a **WBF** (WAF Behavior Fingerprint) and **PMI** (Protection Maturity Index). It does **not** reuse OWASP payloads from the Smoke Test.
-
-```bash
-# Generate a deterministic VA2 plan (no execution)
-./target/release/waf-detect --va2 https://example.com --va2-dry-run
-
-# Run VA2 (consent required)
-./target/release/waf-detect --va2 https://example.com --va2-run
-```
-
-**VA2 options:**
-- `--va2-phases baseline,protocol-variance,state-escalation,behavioral-pressure,challenge-interaction`
-- `--va2-seed N`: Deterministic seed for replayable plans.
-- `--va2-budget N`: Request budget.
-- `--va2-json`: Print the plan JSON.
-- `--va2-output FILE`: Save the plan JSON.
-
-## 📊 Output Options
-
-```bash
 # JSON output
 ./target/release/waf-detect example.com --json
 
-# Pretty table format (default)
-./target/release/waf-detect example.com
-
-# Compact output
-./target/release/waf-detect example.com --compact
-
-# List available detection providers
-./target/release/waf-detect --list
+# With payload-based analysis (adds detection signals)
+./target/release/waf-detect example.com --payload-analysis
 ```
 
-## 🔧 Advanced Options
+## Smoke Test
+
+Sends known attack payloads and measures what the WAF blocks, challenges, or allows through.
 
 ```bash
-# Aggressive testing mode
+./target/release/waf-detect --smoke-test example.com
+
+# Aggressive mode (more payloads)
 ./target/release/waf-detect --smoke-test example.com --aggressive
 
-# Enable payload-based analysis (adds additional detection signals)
-./target/release/waf-detect example.com --payload-analysis
-
-# Custom headers for testing
-./target/release/waf-detect --smoke-test example.com -H "Authorization: Bearer token"
-
-# Export results to JSON
+# Export results
 ./target/release/waf-detect --smoke-test example.com -o results.json
 ```
 
-## 📋 Usage Examples
+**Attack categories tested:** SQL injection (basic + advanced), XSS (basic + advanced), command injection, path traversal, SSTI, SSRF, Log4Shell, file upload, scanner detection, GraphQL injection, HTTP request smuggling, prototype pollution, WebSocket injection, enumeration.
 
-### Complete Effectiveness Testing Workflow
+**Result classifications:**
+- `BLOCKED` — WAF blocked the request (typically 403)
+- `CHALLENGE` — Bot protection triggered (JS challenge, CAPTCHA)
+- `ALLOWED` — Request passed through to the origin
+- `ERROR` — Non-blocking failure (404, 500, timeout)
+
+## Enforcement Test
+
+Sends categorized attack probes and measures block/challenge/allow rates with confidence scoring. Requires consent.
 
 ```bash
-# Step 1: Initial setup and consent
+# Setup consent
 ./target/release/waf-detect --consent request
-# Follow prompts to acknowledge terms and add authorized targets
+./target/release/waf-detect --consent add-target example.com
 
-# Step 2: Basic WAF detection
-./target/release/waf-detect example.com --json
+# Run enforcement test
+./target/release/waf-detect --va https://example.com
 
-# Step 3: Quick smoke test
-./target/release/waf-detect --smoke-test example.com
+# With JSON output
+./target/release/waf-detect --va https://example.com --va-json
 
-# Step 4: Comprehensive effectiveness testing
-./target/release/waf-detect --effectiveness example.com
-
-# Step 5: Review and export results (results saved as HTML report)
+# Save report
+./target/release/waf-detect --va https://example.com --va-output report.json
 ```
 
-### Consent Management Examples
+**Options:**
+- `--va-tier 1|2|3` — Safety tier (1 = safest)
+- `--va-budget N` — Max requests per run (default: 120)
+- `--va-timeout SECONDS` — Per-request timeout (default: 15)
+- `--va-delay MS` — Delay between requests (default: 750)
+- `--va-variants N` — Variants per payload template (default: 4)
+- `--va-replay` — Export replay plan as JSON
+- `--va-replay-csv` — Export replay plan as CSV
+
+## Behavioral Analysis
+
+Tests WAF sophistication by sending paired probes — one benign, one malicious — across 5 HTTP channels. Measures whether the WAF treats them differently.
 
 ```bash
-# Check current consent status
+# Dry run (shows plan without executing)
+./target/release/waf-detect --va2 https://example.com
+
+# Run behavioral analysis (consent required)
+./target/release/waf-detect --va2 https://example.com --va2-run
+
+# Full 5-phase analysis
+./target/release/waf-detect --va2 https://example.com --va2-run \
+  --va2-phases baseline,protocol-variance,state-escalation,behavioral-pressure,challenge-interaction
+
+# Save results
+./target/release/waf-detect --va2 https://example.com --va2-run --va2-output results.json
+```
+
+**What it measures:**
+
+| Signal | What it tests |
+|--------|--------------|
+| Encoding Defense | Does the WAF normalize encoded paths before matching? |
+| Session Tracking | Does the WAF track session state and escalate on repeat abuse? |
+| Bot Challenge | Does the WAF issue CAPTCHA or JS challenges? |
+| Rate Limiting | Does the WAF throttle rapid requests? |
+| Attack Recognition | Does the WAF distinguish attack probes from benign requests? |
+
+**Channels tested:** Path, Query, Header, Body, Method. Channels with 0% attack detection are flagged as unprotected.
+
+**Options:**
+- `--va2-phases LIST` — Phases to run (comma-separated)
+- `--va2-seed N` — Deterministic seed for reproducible results (default: 1337)
+- `--va2-budget N` — Request budget (default: 60)
+- `--va2-json` — Print plan/report as JSON
+
+## Posture Report
+
+Generates a unified security grade (A-F) and risk score (0-100) combining detection confidence, enforcement results, and behavioral analysis.
+
+```bash
+# Detection only
+./target/release/waf-detect --posture example.com
+
+# Include behavioral analysis
+./target/release/waf-detect --posture example.com --posture-va2
+
+# JSON output
+./target/release/waf-detect --posture example.com --posture-va2 --posture-json
+```
+
+**Grade scale:**
+- **A** (0-20 risk) — Strong protection across all dimensions
+- **B** (21-40) — Good protection with minor gaps
+- **C** (41-60) — Moderate protection, notable weaknesses
+- **D** (61-80) — Weak protection, significant gaps
+- **F** (81-100) — Minimal or no effective protection
+
+## TUI (Terminal Dashboard)
+
+Interactive terminal interface with live scan results, signal bars, findings, and keyboard navigation.
+
+```bash
+# Launch with target
+./target/release/waf-detect --tui example.com
+
+# Launch in review mode (load last saved report)
+./target/release/waf-detect --tui
+```
+
+**Keyboard shortcuts:**
+- `1-7` — Switch views (Dashboard, Detection, Smoke, Enforce, Behav., Findings, Log)
+- `r` — Run full scan
+- `j/k` — Navigate items
+- `Enter` — Expand selected item
+- `e` — Export report to JSON
+- `?` — Toggle info tooltip
+- `q` — Quit
+
+## Consent Management
+
+Enforcement test, behavioral analysis, and effectiveness testing require explicit consent. Consent expires after 30 days.
+
+```bash
+# Check consent status
 ./target/release/waf-detect --consent
 
-# Request initial consent
+# Request consent
 ./target/release/waf-detect --consent request
 
-# Add new authorized target
+# Add authorized target
 ./target/release/waf-detect --consent add-target api.example.com
 
-# Re-consent after expiration (30 days)
-./target/release/waf-detect --consent request
+# Remove target
+./target/release/waf-detect --consent remove-target api.example.com
+
+# Revoke all consent
+./target/release/waf-detect --consent revoke
 ```
 
-### Performance Tuning Examples
+## Interpreting Results
+
+**Risk scores (posture report):**
+- **0-25** — Low risk, WAF well-configured
+- **25-50** — Medium risk, some gaps detected
+- **50-75** — High risk, significant security gaps
+- **75-100** — Critical risk, WAF misconfigured or ineffective
+
+**Common findings:**
+- High block rate (>90%) — Well-configured WAF
+- Low block rate (<50%) — WAF may be in detection-only mode
+- Unprotected channels — WAF doesn't inspect attacks in that HTTP channel
+- No bot challenges — Automated attacks proceed without friction
+- No rate limiting — Brute-force attacks face no throttling
+- Identical responses — Target may serve only static content
+
+## Additional Commands
 
 ```bash
-# Low intensity testing (safer for production)
-# Note: Intensity is configured in effectiveness testing config (levels 1-5)
-# Level 1-2: Basic patterns only
-# Level 3: Standard attack patterns (default)
-# Level 4: Advanced patterns + evasion techniques
-# Level 5: Most aggressive testing
+# List supported providers
+./target/release/waf-detect --list
 
-# The tool automatically adjusts based on detected WAF sensitivity
-```
-
-### Interpreting Results
-
-**Risk Scores:**
-- **0-25**: Low risk - WAF appears well-configured
-- **25-50**: Medium risk - Some vulnerabilities detected
-- **50-75**: High risk - Significant security gaps
-- **75-100**: Critical risk - WAF may be misconfigured or bypassed
-
-**Common Findings:**
-- **High block rate (>90%)**: Well-configured WAF
-- **Low block rate (<50%)**: WAF may be in detection-only mode
-- **Identical responses**: Target may serve only static content
-- **Timeout responses**: Rate limiting or performance issues
-
-### Report Analysis
-
-```bash
-# Generate and view reports
+# Effectiveness testing (advanced evasion techniques)
 ./target/release/waf-detect --effectiveness example.com
-# Creates: effectiveness_report_example.com_YYYY-MM-DD.html
-# And: effectiveness_report_example.com_YYYY-MM-DD.json
 
-# Key sections to review:
-# 1. Risk Score: Overall security posture
-# 2. Vulnerabilities: Specific attack vectors that succeeded
-# 3. Recommendations: Actionable remediation steps
-# 4. Statistics: Block rates and response times
+# Benchmark against corpus
+./target/release/waf-detect --benchmark corpus.json
+
+# Performance snapshot
+./target/release/waf-detect example.com --perf-report perf.json
+
+# Debug output
+./target/release/waf-detect example.com --debug --verbose
 ```
 
-## 📚 Help & Documentation
-
-For complete documentation:
+## Development
 
 ```bash
-./target/release/waf-detect --help
+# Build
+cargo build --release
+
+# Run tests
+cargo test --all
+
+# Lint
+cargo clippy -- -D warnings
+
+# Format
+cargo fmt
 ```
 
-## 📄 License
+**Branch workflow:** `main` is protected. Use feature branches (`feature/name`) and pull requests.
+
+## License
 
 MIT OR Apache-2.0
-
----
-
-**Built with ❤️ using Rust** 🦀
-
-## 🛠️ Getting Started as a New Developer
-
-Follow these steps to contribute a new feature or test:
-
-1. **Clone the repository:**
-   ```sh
-   git clone https://github.com/ammarion/waf-detector.git
-   cd waf-detector
-   ```
-
-2. **Create a new feature branch:**
-   ```sh
-   git checkout -b feature/your-feature-name
-   # or for a test:
-   git checkout -b test/your-test-name
-   ```
-
-3. **Build the project:**
-   ```sh
-   cargo build --release
-   ```
-
-4. **Run a local smoke test:**
-   ```sh
-   ./target/release/waf-detect --smoke-test example.com
-   ```
-
-5. **Validate CLI behavior:**
-   - Check help output: `./target/release/waf-detect --help`
-   - Run a detection command with JSON output.
-
-6. **Commit your changes:**
-   ```sh
-   git add .
-   git commit -m "Add <your feature or test>"
-   ```
-
-7. **Push your branch and open a Pull Request:**
-   ```sh
-   git push origin feature/your-feature-name
-   # Then open a PR on GitHub
-   ```
-
-8. **Get your code reviewed and merged!**
-
-> **Note:** Direct commits to `main` are not allowed. Always use a feature or test branch and open a PR.

@@ -130,7 +130,7 @@ fn render_middle(f: &mut Frame, area: Rect, state: &AppState) {
         signal_bar::render(f, bar_rows[3], "Rate Limiting   ", va2.wbf.throttle_score);
     } else {
         let p = Paragraph::new(Span::styled(
-            "  No VA2 data. Press [r] to scan.",
+            "  No behavioral data. Press [r] to scan.",
             Theme::dim(),
         ));
         f.render_widget(p, inner);
