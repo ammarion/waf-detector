@@ -488,6 +488,17 @@ impl SimpleCliApp {
             .set_payload_analysis_enabled(payload_analysis_enabled);
         let engine = DetectionEngine::new(self.registry.clone())?.with_waf_mode_detection();
 
+        // Handle TUI mode (before other modes)
+        if matches.get_flag("tui") {
+            let url = matches
+                .get_many::<String>("targets")
+                .and_then(|mut t| t.next().cloned())
+                .map(|u| self.normalize_url(&u))
+                .transpose()?;
+            return crate::tui::TuiApp::run(engine, url).await;
+        }
+
+
         if matches.get_flag("list") {
             return self.list_providers(&engine).await;
         }
@@ -2793,6 +2804,13 @@ The tool automatically adds https:// for bare domains where supported.
                     "Enable active payload-based probing during detection (authorized targets only)",
                 )
                 .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("tui")
+                .long("tui")
+                .help("Launch interactive TUI with navigable scan results")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with_all(["json", "yaml"]),
         )
         .arg(
             Arg::new("list")

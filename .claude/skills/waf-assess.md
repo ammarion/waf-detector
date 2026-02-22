@@ -14,52 +14,158 @@ You are orchestrating a comprehensive WAF security assessment using the `waf-det
 
 Binary: `./target/release/waf-detect` (or `cargo run --release --`)
 
-### Canonical Subcommand Style (Preferred)
+### Core Detection
 
-```bash
-waf-detect scan <targets...>
-waf-detect va <url>
-waf-detect va2 <url> --run
-waf-detect benchmark <corpus.json>
-waf-detect providers
-waf-detect doctor
-waf-detect completions zsh -o ~/.zsh/completions/_waf-detect
+```
+waf-detect <targets...>
 ```
 
-| Command | Purpose | Key options |
-|---------|---------|-------------|
-| `scan` | Detect WAF/CDN for one or more targets | `--stdin`, `--json`, `--ndjson`, `--yaml`, `--compact`, `--debug`, `--verbose`, `--fail-on-error`, `--payload-analysis` |
-| `va` | Run VA1 effectiveness validation | `--dry-run`, `--json`, `--output`, `--replay`, `--replay-csv`, `--tier`, `--budget`, `--timeout`, `--delay`, `--variants` |
-| `va2` | Run VA2 behavioral campaign | `--run`, `--json`, `--output`, `--phases`, `--seed`, `--budget` |
-| `benchmark` | Run offline benchmark corpus | `--output`, `--workers`, `--mode live|fixture`, `--fixtures` |
-| `providers` | List detection providers | (none) |
-| `doctor` | Run environment/runtime health checks | `--json`, `--strict` |
-| `completions` | Generate shell completion scripts | `<bash|zsh|fish>`, `-o/--output` |
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `targets` | | | Domain names, URLs, or `@file.txt` to scan (positional, multiple) |
+| `--json` | | false | Output results in JSON format |
+| `--yaml` | | false | Output results in YAML format |
+| `--compact` | `-c` | false | Compact one-line output format |
+| `--debug` | `-d` | false | Show detailed debug information |
+| `--verbose` | `-v` | false | Show verbose scanning progress |
+| `--payload-analysis` | | false | Enable active payload-based probing during detection (authorized targets only) |
+| `--list` | | false | List available detection providers |
 
-### Commands Still in Flag Mode (Current CLI)
+### TUI / Web Server
 
-These flows are still flag-based in the current CLI:
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--tui` | | false | Launch interactive TUI with navigable scan results |
+| `--web` | `-w` | false | Start web server mode with dashboard |
+| `--port` | `-p` | 8080 | Port for web server |
 
-```bash
-waf-detect --consent
-waf-detect --consent request
-waf-detect --consent add-target <domain>
-waf-detect --smoke-test <url> --aggressive -o /tmp/smoke-results.json
-waf-detect --posture <url> --posture-va2 --posture-json
+Note: `--tui` conflicts with `--web`, `--json`, `--yaml`.
+
+### Smoke Testing
+
+```
+waf-detect --smoke-test <url>
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--smoke-test` | | false | Run comprehensive WAF effectiveness smoke test |
+| `--output` | `-o` | | Export results to JSON file |
+| `--header` | `-H` | | Custom headers (format: `Key: Value`, repeatable) |
+| `--aggressive` | | false | Enable aggressive testing mode (more payloads, faster) |
+
+### VA1 Enforcement Testing
+
+```
+waf-detect --va <url>
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--va` | | | Run Virtual Adversary effectiveness validation (requires consent) |
+| `--va-tier` | | 1 | Safety tier (1-3) |
+| `--va-budget` | | 120 | Max total requests |
+| `--va-timeout` | | 15 | Per-request timeout in seconds |
+| `--va-delay` | | 750 | Delay between requests in milliseconds |
+| `--va-variants` | | 4 | Max variants per payload |
+| `--va-json` | | false | Print VA report JSON to stdout |
+| `--va-output` | | | Write VA report JSON and summary to file |
+| `--va-replay` | | false | Print VA replay plan JSON to stdout |
+| `--va-replay-csv` | | false | Print VA replay plan CSV to stdout |
+| `--va-dry-run` | | false | Print planned payloads without executing |
+| `--va-top` | | 3 | Number of VA results to print |
+| `--va-reason-level` | | 1 | Reason verbosity (0=none, 1=default) |
+| `--va-max-len` | | 80 | Max payload length to print in output |
+| `--va-schema` | | false | Print VA report JSON schema |
+
+### VA1 Replay
+
+```
+waf-detect --va-replay-run <file.json>
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--va-replay-run` | | | Run a saved VA replay plan from a JSON report |
+| `--va-replay-target` | | | Override target URL for replay run |
+
+### VA2 Behavioral Profiling
+
+```
+waf-detect --va2 <url>              # dry run (plan only)
+waf-detect --va2 <url> --va2-run    # execute campaign
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--va2` | | | Run Virtual Adversary 2.0 behavioral campaign |
+| `--va2-run` | | false | Execute VA2 campaign plan (requires consent) |
+| `--va2-dry-run` | | false | Print VA2 plan summary without execution |
+| `--va2-json` | | false | Print VA2 plan JSON to stdout |
+| `--va2-output` | | | Write VA2 plan JSON to file |
+| `--va2-phases` | | `baseline,protocol-variance` | Phases to run (comma-separated) |
+| `--va2-seed` | | 1337 | Deterministic seed |
+| `--va2-budget` | | 60 | Request budget |
+
+Available phases: `baseline`, `protocol-variance`, `state-escalation`, `behavioral-pressure`, `challenge-interaction`
+
+### Posture Report
+
+```
+waf-detect --posture <url>
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--posture` | | | Generate unified posture report |
+| `--posture-va2` | | false | Include VA2 behavioral profiling (requires consent) |
+| `--posture-json` | | false | Output posture report as JSON |
+| `--posture-summary` | | | Generate posture summary JSON (requires `WAF_DETECTOR_POSTURE_SUMMARY=1` env var) |
+
+### Effectiveness Testing
+
+```
 waf-detect --effectiveness <url>
 ```
 
-### Compatibility (Legacy Flag Mode)
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--effectiveness` | | | Run comprehensive WAF effectiveness testing (requires consent) |
+| `--effectiveness-config` | | | Path to TOML config overrides |
+| `--effectiveness-similarity-threshold` | | | Response body similarity threshold (0.0-1.0) |
+| `--effectiveness-reduction-ratio` | | | Response body reduction ratio (0.0-1.0) |
+| `--effectiveness-min-length-diff` | | | Minimum response body length diff |
 
-Use only when maintaining older scripts. Prefer the subcommands above for all new guidance:
+### Consent Management
 
-```bash
-waf-detect <targets...> --json
-waf-detect --va <url> --va-json
-waf-detect --va2 <url> --va2-run --va2-json
-waf-detect --benchmark <corpus.json>
-waf-detect --list
 ```
+waf-detect --consent                     # show consent status
+waf-detect --consent request             # request user consent
+waf-detect --consent status              # check status
+waf-detect --consent add-target <domain> # authorize a target
+waf-detect --consent remove-target <domain>
+waf-detect --consent revoke              # revoke all consent
+```
+
+### Benchmark
+
+```
+waf-detect --benchmark <corpus.json>
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--benchmark` | | | Run offline detection benchmark against labeled corpus |
+| `--benchmark-output` | | | Save benchmark results as JSON |
+| `--benchmark-workers` | | 3 | Number of concurrent detection workers |
+| `--benchmark-mode` | | `live` | Execution mode: `live` or `fixture` |
+| `--benchmark-fixtures` | | | Directory containing benchmark fixture corpus |
+
+### Performance Reporting
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--perf-report` | | | Write performance snapshot (p95/p99) to JSON file |
 
 ---
 
@@ -67,18 +173,7 @@ waf-detect --list
 
 When the user invokes `/waf-assess <target>`, follow these steps in order. After each step, print a brief status summary before proceeding to the next.
 
-### Step 1: Preflight (Doctor)
-
-```bash
-./target/release/waf-detect doctor
-```
-
-Interpretation policy:
-- `FAIL`: stop and remediate before running assessment steps.
-- `WARN`: advisory by default; continue and note warnings in the report.
-- If the user explicitly requests strict gating, run `./target/release/waf-detect doctor --strict` and stop on non-zero exit.
-
-### Step 2: Build
+### Step 1: Build
 
 Check if the binary exists and is up to date:
 
@@ -92,7 +187,7 @@ cargo build --release
 
 If the build fails, stop and report the error.
 
-### Step 3: Consent Check
+### Step 2: Consent Check
 
 ```bash
 ./target/release/waf-detect --consent
@@ -112,10 +207,10 @@ Parse the output. If consent has not been granted:
 
 If consent is already active, verify the target domain is authorized. Add it if needed.
 
-### Step 4: Detection
+### Step 3: Detection
 
 ```bash
-./target/release/waf-detect scan <url> --json
+./target/release/waf-detect <url> --json
 ```
 
 Parse the JSON output. Extract:
@@ -126,7 +221,7 @@ Parse the JSON output. Extract:
 
 Print summary: `Detected: {waf_name} ({confidence}%) with {evidence_count} evidence items`
 
-### Step 5: Smoke Test
+### Step 4: Smoke Test
 
 ```bash
 ./target/release/waf-detect --smoke-test <url> --aggressive -o /tmp/smoke-results.json
@@ -140,10 +235,10 @@ Parse `/tmp/smoke-results.json`. Extract:
 
 Print summary: `Smoke test: {blocked}/{total} blocked ({effectiveness}%), WAF mode: {mode}`
 
-### Step 6: VA1 Enforcement
+### Step 5: VA1 Enforcement
 
 ```bash
-./target/release/waf-detect va <url> --json --tier 1 --budget 120
+./target/release/waf-detect --va <url> --va-json --va-tier 1 --va-budget 120
 ```
 
 Parse the JSON output. Extract:
@@ -155,10 +250,10 @@ Parse the JSON output. Extract:
 
 Print summary: `VA1 enforcement: {enforcement_level}, {blocked} blocked / {allowed} allowed, confidence: {score}`
 
-### Step 7: VA2 Behavioral Profiling
+### Step 6: VA2 Behavioral Profiling
 
 ```bash
-./target/release/waf-detect va2 <url> --run --json --phases baseline,protocol-variance,state-escalation,behavioral-pressure,challenge-interaction --budget 60
+./target/release/waf-detect --va2 <url> --va2-run --va2-phases baseline,protocol-variance,state-escalation,behavioral-pressure,challenge-interaction --va2-budget 60
 ```
 
 Capture stdout. Extract:
@@ -170,7 +265,7 @@ Capture stdout. Extract:
 
 Print summary: `VA2 behavioral: PMI {pmi} ({label}), blind spots: {blind_spots or "none"}`
 
-### Step 8: Posture Report
+### Step 7: Posture Report
 
 ```bash
 ./target/release/waf-detect --posture <url> --posture-va2 --posture-json
@@ -183,7 +278,7 @@ Parse the JSON output. Extract:
 
 Print summary: `Posture: Grade {grade}, Risk {risk_score}/100`
 
-### Step 9: Generate Report
+### Step 8: Generate Report
 
 After all scans complete, generate the structured markdown report (see Section 3) and present it to the user. Then propose remediation rules (see Section 4) for every Critical and Medium finding.
 
