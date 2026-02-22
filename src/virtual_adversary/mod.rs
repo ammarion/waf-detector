@@ -16,6 +16,7 @@ use crate::http::HttpClient;
 use crate::virtual_adversary::dae::{probe_catalog_for_tier, Probe};
 
 pub mod dae;
+pub mod report_store;
 
 fn parse_probe_class(value: &str) -> Result<dae::ProbeClass> {
     match value.to_lowercase().as_str() {

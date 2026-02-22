@@ -14,15 +14,51 @@ use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner};
 use crate::DetectionResult;
 use anyhow::{anyhow, Result};
-use clap::{Arg, ArgMatches, Command};
-use std::collections::HashMap;
+use clap::{Arg, ArgGroup, ArgMatches, Command};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::path::PathBuf;
 use std::time::Instant;
 use url::Url;
 
 mod benchmark;
 pub use benchmark::BenchmarkReport;
 use benchmark::{BenchmarkMode, BenchmarkOptions};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Json,
+    Ndjson,
+    Yaml,
+    Compact,
+    Table,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum DoctorStatus {
+    Pass,
+    Warn,
+    Fail,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorCheck {
+    name: String,
+    status: DoctorStatus,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorReport {
+    ok: bool,
+    warning_count: usize,
+    failure_count: usize,
+    checks: Vec<DoctorCheck>,
+}
 
 fn csv_escape(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') {
@@ -61,6 +97,311 @@ fn parse_benchmark_mode(raw: &str) -> Result<BenchmarkMode> {
     }
 }
 
+fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    if max_chars <= 3 {
+        return ".".repeat(max_chars);
+    }
+    let mut output = String::with_capacity(max_chars);
+    for ch in value.chars().take(max_chars - 3) {
+        output.push(ch);
+    }
+    output.push_str("...");
+    output
+}
+
+fn completion_subcommands() -> &'static [&'static str] {
+    &["scan", "va", "va2", "benchmark", "providers", "doctor", "completions"]
+}
+
+fn completion_global_options() -> &'static [&'static str] {
+    &[
+        "-h",
+        "--help",
+        "-V",
+        "--version",
+        "--perf-report",
+        // Legacy root-mode compatibility flags
+        "--stdin",
+        "--json",
+        "--ndjson",
+        "--yaml",
+        "-c",
+        "--compact",
+        "-d",
+        "--debug",
+        "-v",
+        "--verbose",
+        "--fail-on-error",
+        "--payload-analysis",
+        "--list",
+        "--smoke-test",
+        "-o",
+        "--output",
+        "-H",
+        "--header",
+        "--aggressive",
+        "--benchmark",
+        "--benchmark-output",
+        "--benchmark-workers",
+        "--benchmark-mode",
+        "--benchmark-fixtures",
+        "--consent",
+        "--effectiveness",
+        "--effectiveness-config",
+        "--effectiveness-similarity-threshold",
+        "--effectiveness-reduction-ratio",
+        "--effectiveness-min-length-diff",
+        "--va2",
+        "--va2-dry-run",
+        "--va2-run",
+        "--va2-json",
+        "--va2-output",
+        "--va2-phases",
+        "--va2-seed",
+        "--va2-budget",
+        "--posture",
+        "--posture-summary",
+        "--posture-va2",
+        "--posture-json",
+        "--va",
+        "--va-replay-run",
+        "--va-replay-target",
+        "--va-schema",
+        "--va-dry-run",
+        "--va-top",
+        "--va-reason-level",
+        "--va-max-len",
+        "--va-output",
+        "--va-json",
+        "--va-replay",
+        "--va-replay-csv",
+        "--va-tier",
+        "--va-budget",
+        "--va-timeout",
+        "--va-delay",
+        "--va-variants",
+    ]
+}
+
+fn completion_scan_options() -> &'static [&'static str] {
+    &[
+        "--stdin",
+        "--json",
+        "--ndjson",
+        "--yaml",
+        "-c",
+        "--compact",
+        "-d",
+        "--debug",
+        "-v",
+        "--verbose",
+        "--fail-on-error",
+        "--payload-analysis",
+        "--perf-report",
+        "-h",
+        "--help",
+    ]
+}
+
+fn completion_va_options() -> &'static [&'static str] {
+    &[
+        "--dry-run",
+        "--json",
+        "--replay",
+        "--replay-csv",
+        "--output",
+        "--top",
+        "--reason-level",
+        "--max-len",
+        "--tier",
+        "--budget",
+        "--timeout",
+        "--delay",
+        "--variants",
+        "--perf-report",
+        "-h",
+        "--help",
+    ]
+}
+
+fn completion_va2_options() -> &'static [&'static str] {
+    &[
+        "--run",
+        "--json",
+        "--output",
+        "--phases",
+        "--seed",
+        "--budget",
+        "--perf-report",
+        "-h",
+        "--help",
+    ]
+}
+
+fn completion_benchmark_options() -> &'static [&'static str] {
+    &[
+        "--output",
+        "--workers",
+        "--mode",
+        "--fixtures",
+        "--perf-report",
+        "-h",
+        "--help",
+    ]
+}
+
+fn completion_doctor_options() -> &'static [&'static str] {
+    &["--json", "--strict", "--perf-report", "-h", "--help"]
+}
+
+fn completion_completions_options() -> &'static [&'static str] {
+    &["--output", "--perf-report", "-h", "--help"]
+}
+
+fn render_bash_completion() -> String {
+    let subs = completion_subcommands().join(" ");
+    let globals = completion_global_options().join(" ");
+    let scan_opts = completion_scan_options().join(" ");
+    let va_opts = completion_va_options().join(" ");
+    let va2_opts = completion_va2_options().join(" ");
+    let benchmark_opts = completion_benchmark_options().join(" ");
+    let doctor_opts = completion_doctor_options().join(" ");
+    let completions_opts = completion_completions_options().join(" ");
+
+    format!(
+        r#"_waf_detect_complete() {{
+  local cur prev words cword
+  COMPREPLY=()
+  cur="${{COMP_WORDS[COMP_CWORD]}}"
+  prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+
+  local subcommands="{subs}"
+  local global_opts="{globals}"
+
+  if [[ $COMP_CWORD -eq 1 ]]; then
+    COMPREPLY=( $(compgen -W "$subcommands $global_opts" -- "$cur") )
+    return 0
+  fi
+
+  local cmd="${{COMP_WORDS[1]}}"
+  local opts=""
+    case "$cmd" in
+      scan) opts="{scan_opts}" ;;
+      va) opts="{va_opts}" ;;
+      va2) opts="{va2_opts}" ;;
+      benchmark) opts="{benchmark_opts}" ;;
+      providers) opts="--perf-report -h --help" ;;
+      doctor) opts="{doctor_opts}" ;;
+    completions) opts="{completions_opts}" ;;
+    *) opts="$global_opts" ;;
+  esac
+
+  COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+}}
+complete -F _waf_detect_complete waf-detect
+"#
+    )
+}
+
+fn render_zsh_completion() -> String {
+    let subs = completion_subcommands().join(" ");
+    let scan_opts = completion_scan_options().join(" ");
+    let va_opts = completion_va_options().join(" ");
+    let va2_opts = completion_va2_options().join(" ");
+    let benchmark_opts = completion_benchmark_options().join(" ");
+    let doctor_opts = completion_doctor_options().join(" ");
+    let completions_opts = completion_completions_options().join(" ");
+    let global_opts = completion_global_options().join(" ");
+
+    format!(
+        r#"#compdef waf-detect
+
+_waf_detect() {{
+  local -a subcommands
+  subcommands=({subs})
+
+  if (( CURRENT == 2 )); then
+    _describe 'subcommand' subcommands
+    _describe 'option' ({global_opts})
+    return
+  fi
+
+  local cmd=${{words[2]}}
+  local -a opts
+    case "$cmd" in
+      scan) opts=({scan_opts}) ;;
+      va) opts=({va_opts}) ;;
+      va2) opts=({va2_opts}) ;;
+      benchmark) opts=({benchmark_opts}) ;;
+      providers) opts=(--perf-report -h --help) ;;
+      doctor) opts=({doctor_opts}) ;;
+    completions) opts=({completions_opts}) ;;
+    *) opts=({global_opts}) ;;
+  esac
+  _describe 'option' opts
+}}
+
+compdef _waf_detect waf-detect
+"#
+    )
+}
+
+fn render_fish_completion() -> String {
+    let mut lines = Vec::new();
+    lines.push("complete -c waf-detect -f".to_string());
+
+    for sub in completion_subcommands() {
+        lines.push(format!(
+            "complete -c waf-detect -n \"__fish_use_subcommand\" -a \"{sub}\""
+        ));
+    }
+
+    for option in completion_global_options() {
+        if let Some(long) = option.strip_prefix("--") {
+            lines.push(format!(
+                "complete -c waf-detect -n \"__fish_use_subcommand\" -l \"{long}\""
+            ));
+        } else if let Some(short) = option.strip_prefix('-') {
+            if short.len() == 1 {
+                lines.push(format!(
+                    "complete -c waf-detect -n \"__fish_use_subcommand\" -s \"{short}\""
+                ));
+            }
+        }
+    }
+
+    let per_cmd = [
+        ("scan", completion_scan_options()),
+        ("va", completion_va_options()),
+        ("va2", completion_va2_options()),
+        ("benchmark", completion_benchmark_options()),
+        ("providers", &["--perf-report", "-h", "--help"][..]),
+        ("doctor", completion_doctor_options()),
+        ("completions", completion_completions_options()),
+    ];
+
+    for (cmd, opts) in per_cmd {
+        for option in opts {
+            if let Some(long) = option.strip_prefix("--") {
+                lines.push(format!(
+                    "complete -c waf-detect -n \"__fish_seen_subcommand_from {cmd}\" -l \"{long}\""
+                ));
+            } else if let Some(short) = option.strip_prefix('-') {
+                if short.len() == 1 {
+                    lines.push(format!(
+                        "complete -c waf-detect -n \"__fish_seen_subcommand_from {cmd}\" -s \"{short}\""
+                    ));
+                }
+            }
+        }
+    }
+
+    lines.join("\n") + "\n"
+}
+
 fn feature_enabled(env_key: &str) -> bool {
     std::env::var(env_key)
         .map(|value| {
@@ -68,6 +409,28 @@ fn feature_enabled(env_key: &str) -> bool {
             trimmed == "1" || trimmed == "true" || trimmed == "yes" || trimmed == "on"
         })
         .unwrap_or(false)
+}
+
+fn waf_detector_home() -> PathBuf {
+    match std::env::var("WAF_DETECTOR_HOME") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+    }
+}
+
+fn binary_on_path(binary: &str) -> bool {
+    let path_var = match std::env::var_os("PATH") {
+        Some(path) => path,
+        None => return false,
+    };
+
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(binary);
+        if candidate.is_file() {
+            return true;
+        }
+    }
+    false
 }
 
 fn load_effectiveness_overrides(
@@ -113,16 +476,17 @@ impl SimpleCliApp {
         let mode = crate::DeploymentMode::from_env();
         tracing::info!("WAF Detector running in {:?} mode", mode);
 
+        if let Some((subcommand, sub_matches)) = matches.subcommand() {
+            self.validate_subcommand_root_flags(&matches)?;
+            return self.run_subcommand(subcommand, sub_matches).await;
+        }
+
+        self.validate_matches(&matches)?;
+
         let payload_analysis_enabled = matches.get_flag("payload-analysis");
         self.registry
             .set_payload_analysis_enabled(payload_analysis_enabled);
         let engine = DetectionEngine::new(self.registry.clone())?.with_waf_mode_detection();
-
-        // Handle special commands first
-        if matches.get_flag("web") {
-            let port = matches.get_one::<u16>("port").copied().unwrap_or(8080);
-            return self.start_web_server(&engine, port).await;
-        }
 
         if matches.get_flag("list") {
             return self.list_providers(&engine).await;
@@ -248,6 +612,7 @@ impl SimpleCliApp {
 
         // Handle virtual adversary 2.0 (VA2)
         if let Some(url) = matches.get_one::<String>("va2") {
+            let normalized = self.normalize_url(url)?;
             let phases_raw = matches
                 .get_one::<String>("va2-phases")
                 .map(String::as_str)
@@ -257,7 +622,7 @@ impl SimpleCliApp {
                 seed: *matches.get_one::<u64>("va2-seed").unwrap_or(&1337),
                 budget: *matches.get_one::<u32>("va2-budget").unwrap_or(&60),
             };
-            let plan = build_va2_campaign_plan(url, &phases, config)?;
+            let plan = build_va2_campaign_plan(&normalized, &phases, config)?;
 
             if matches.get_flag("va2-run") {
                 let runner = Va2Runner::new()?;
@@ -354,8 +719,10 @@ impl SimpleCliApp {
             let raw = fs::read_to_string(replay_path)?;
             let report = serde_json::from_str::<crate::virtual_adversary::VaRunReport>(&raw)
                 .or_else(|_| {
-                    serde_json::from_str::<crate::web::VaStoredReport>(&raw)
-                        .map(|stored| stored.report)
+                    serde_json::from_str::<crate::virtual_adversary::report_store::VaStoredReport>(
+                        &raw,
+                    )
+                    .map(|stored| stored.report)
                 })
                 .map_err(|err| anyhow!("failed to parse replay report: {err}"))?;
             let target = matches
@@ -440,11 +807,7 @@ impl SimpleCliApp {
                 let reason_level = *matches.get_one::<u8>("va-reason-level").unwrap_or(&1);
                 let max_len = *matches.get_one::<u16>("va-max-len").unwrap_or(&80) as usize;
                 for result in report.results.iter().take(max_results) {
-                    let payload = if result.payload.len() > max_len {
-                        format!("{}...", &result.payload[..max_len.saturating_sub(3)])
-                    } else {
-                        result.payload.clone()
-                    };
+                    let payload = truncate_with_ellipsis(&result.payload, max_len);
                     if reason_level == 0 {
                         println!(
                             "   - {:?} | {} | {:?}",
@@ -463,6 +826,7 @@ impl SimpleCliApp {
         }
 
         if let Some(url) = matches.get_one::<String>("va") {
+            let normalized = self.normalize_url(url)?;
             let config = VirtualAdversaryConfig {
                 tier: *matches.get_one::<u8>("va-tier").unwrap_or(&1),
                 request_budget: *matches.get_one::<u32>("va-budget").unwrap_or(&120),
@@ -477,7 +841,7 @@ impl SimpleCliApp {
             };
             let mut runner = VirtualAdversaryRunner::new(config)?;
             if matches.get_flag("va-dry-run") {
-                let plan = runner.plan(url);
+                let plan = runner.plan(&normalized);
                 println!("🧪 VA Dry Run: {} planned probes", plan.len());
                 for probe in plan {
                     println!(
@@ -488,7 +852,7 @@ impl SimpleCliApp {
                 self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
-            let report = runner.run(url)?;
+            let report = runner.run(&normalized)?;
             if matches.get_flag("va-json") {
                 let json = serde_json::to_string_pretty(&report)?;
                 println!("{json}");
@@ -572,11 +936,7 @@ impl SimpleCliApp {
                 let reason_level = *matches.get_one::<u8>("va-reason-level").unwrap_or(&1);
                 let max_len = *matches.get_one::<u16>("va-max-len").unwrap_or(&80) as usize;
                 for result in report.results.iter().take(max_results) {
-                    let payload = if result.payload.len() > max_len {
-                        format!("{}...", &result.payload[..max_len.saturating_sub(3)])
-                    } else {
-                        result.payload.clone()
-                    };
+                    let payload = truncate_with_ellipsis(&result.payload, max_len);
                     if reason_level == 0 {
                         println!(
                             "   - {:?} | {} | {:?}",
@@ -595,32 +955,768 @@ impl SimpleCliApp {
         }
 
         // Get targets to scan
-        let targets = self.parse_targets(&matches)?;
-
-        if targets.is_empty() {
-            println!("❌ No targets specified. Use --help for usage.");
-            return Ok(());
-        }
-
-        // Determine output format
-        let format = self.determine_format(&matches);
-        let debug = matches.get_flag("debug");
-        let verbose = matches.get_flag("verbose");
-
-        // Scan targets
-        let result = if targets.len() == 1 {
-            self.scan_single(&engine, &targets[0], &format, debug, verbose)
-                .await
-        } else {
-            self.scan_batch(&engine, &targets, &format, debug, verbose)
-                .await
-        };
+        let result = self.run_scan_mode(&engine, &matches).await;
         self.write_perf_report_if_requested(&matches)?;
         result
     }
 
+    fn validate_subcommand_root_flags(&self, matches: &ArgMatches) -> Result<()> {
+        let mut incompatible = Vec::new();
+        if matches.get_many::<String>("targets").is_some() {
+            incompatible.push("TARGET");
+        }
+
+        let root_flags = [
+            ("--stdin", matches.get_flag("stdin")),
+            ("--json", matches.get_flag("json")),
+            ("--ndjson", matches.get_flag("ndjson")),
+            ("--yaml", matches.get_flag("yaml")),
+            ("--compact", matches.get_flag("compact")),
+            ("--debug", matches.get_flag("debug")),
+            ("--verbose", matches.get_flag("verbose")),
+            ("--fail-on-error", matches.get_flag("fail-on-error")),
+            ("--payload-analysis", matches.get_flag("payload-analysis")),
+            ("--list", matches.get_flag("list")),
+            ("--smoke-test", matches.get_flag("smoke-test")),
+            ("--va-schema", matches.get_flag("va-schema")),
+            ("--consent", matches.get_many::<String>("consent").is_some()),
+            (
+                "--benchmark",
+                matches.get_one::<String>("benchmark").is_some(),
+            ),
+            (
+                "--effectiveness",
+                matches.get_one::<String>("effectiveness").is_some(),
+            ),
+            ("--posture", matches.get_one::<String>("posture").is_some()),
+            (
+                "--posture-summary",
+                matches.get_one::<String>("posture-summary").is_some(),
+            ),
+            ("--va2", matches.get_one::<String>("va2").is_some()),
+            ("--va", matches.get_one::<String>("va").is_some()),
+            (
+                "--va-replay-run",
+                matches.get_one::<String>("va-replay-run").is_some(),
+            ),
+        ];
+
+        for (flag, enabled) in root_flags {
+            if enabled {
+                incompatible.push(flag);
+            }
+        }
+
+        if !incompatible.is_empty() {
+            return Err(anyhow!(
+                "Do not mix legacy root flags with subcommands. Move these after the subcommand: {}",
+                incompatible.join(", ")
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn build_engine(&self, payload_analysis_enabled: bool) -> Result<DetectionEngine> {
+        self.registry
+            .set_payload_analysis_enabled(payload_analysis_enabled);
+        Ok(DetectionEngine::new(self.registry.clone())?.with_waf_mode_detection())
+    }
+
+    async fn run_subcommand(&self, subcommand: &str, matches: &ArgMatches) -> Result<()> {
+        match subcommand {
+            "scan" => {
+                self.validate_scan_matches(matches)?;
+                let engine = self.build_engine(matches.get_flag("payload-analysis"))?;
+                let result = self.run_scan_mode(&engine, matches).await;
+                self.write_perf_report_if_requested(matches)?;
+                result
+            }
+            "providers" => {
+                let engine = self.build_engine(false)?;
+                self.list_providers(&engine).await
+            }
+            "benchmark" => {
+                let engine = self.build_engine(false)?;
+                let corpus = matches
+                    .get_one::<String>("benchmark")
+                    .ok_or_else(|| anyhow!("benchmark requires a corpus path"))?;
+                let result = self.run_benchmark(&engine, corpus, matches).await;
+                self.write_perf_report_if_requested(matches)?;
+                result
+            }
+            "va" => {
+                let result = self.run_va_subcommand(matches).await;
+                self.write_perf_report_if_requested(matches)?;
+                result
+            }
+            "va2" => {
+                let result = self.run_va2_subcommand(matches).await;
+                self.write_perf_report_if_requested(matches)?;
+                result
+            }
+            "doctor" => {
+                let result = self.run_doctor_subcommand(matches).await;
+                self.write_perf_report_if_requested(matches)?;
+                result
+            }
+            "completions" => {
+                self.run_completions_subcommand(matches)?;
+                self.write_perf_report_if_requested(matches)?;
+                Ok(())
+            }
+            other => Err(anyhow!("Unknown subcommand: {other}")),
+        }
+    }
+
+    fn validate_scan_matches(&self, matches: &ArgMatches) -> Result<()> {
+        let machine_output =
+            matches.get_flag("json") || matches.get_flag("yaml") || matches.get_flag("ndjson");
+        if matches.get_flag("verbose") && machine_output {
+            return Err(anyhow!(
+                "--verbose cannot be combined with --json, --yaml, or --ndjson."
+            ));
+        }
+
+        if matches.get_flag("debug")
+            && (matches.get_flag("json")
+                || matches.get_flag("yaml")
+                || matches.get_flag("compact")
+                || matches.get_flag("ndjson"))
+        {
+            return Err(anyhow!(
+                "--debug is only supported with the default table output format."
+            ));
+        }
+
+        Ok(())
+    }
+
+    async fn run_scan_mode(&self, engine: &DetectionEngine, matches: &ArgMatches) -> Result<()> {
+        let targets = self.parse_targets(matches)?;
+
+        if targets.is_empty() {
+            return Err(anyhow!(
+                "No targets specified. Provide TARGET args, @file input, or --stdin."
+            ));
+        }
+
+        // Determine output format
+        let format = self.determine_format(matches);
+        let debug = matches.get_flag("debug");
+        let verbose = matches.get_flag("verbose");
+        let fail_on_error = matches.get_flag("fail-on-error");
+
+        // Scan targets
+        if targets.len() == 1 {
+            self.scan_single(engine, &targets[0], &format, debug, verbose)
+                .await
+        } else {
+            self.scan_batch(engine, &targets, &format, debug, verbose, fail_on_error)
+                .await
+        }
+    }
+
+    async fn run_va_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        let target = matches
+            .get_one::<String>("target")
+            .ok_or_else(|| anyhow!("va requires a target URL"))?;
+        let normalized = self.normalize_url(target)?;
+
+        let config = VirtualAdversaryConfig {
+            tier: *matches.get_one::<u8>("tier").unwrap_or(&1),
+            request_budget: *matches.get_one::<u32>("budget").unwrap_or(&120),
+            request_timeout: std::time::Duration::from_secs(
+                *matches.get_one::<u64>("timeout").unwrap_or(&15),
+            ),
+            request_delay: std::time::Duration::from_millis(
+                *matches.get_one::<u64>("delay").unwrap_or(&750),
+            ),
+            max_variants_per_payload: *matches.get_one::<u8>("variants").unwrap_or(&4),
+            skip_dns_validation: false,
+        };
+
+        let mut runner = VirtualAdversaryRunner::new(config)?;
+        if matches.get_flag("dry-run") {
+            let plan = runner.plan(&normalized);
+            println!("🧪 VA Dry Run: {} planned probes", plan.len());
+            for probe in plan {
+                println!(
+                    " - {:?}::{:?}: {}",
+                    probe.probe.class, probe.probe.channel, probe.display
+                );
+            }
+            return Ok(());
+        }
+
+        let report = runner.run(&normalized)?;
+        if matches.get_flag("json") {
+            let json = serde_json::to_string_pretty(&report)?;
+            println!("{json}");
+            return Ok(());
+        }
+        if matches.get_flag("replay") {
+            let json = serde_json::to_string_pretty(&report.replay_plan)?;
+            println!("{json}");
+            return Ok(());
+        }
+        if matches.get_flag("replay-csv") {
+            let mut lines = Vec::new();
+            lines.push(
+                "index,probe_class,probe_channel,probe_description,method,url,headers,body"
+                    .to_string(),
+            );
+            for item in &report.replay_plan {
+                let row = [
+                    item.index.to_string(),
+                    csv_escape(&item.class),
+                    csv_escape(&item.channel),
+                    csv_escape(&item.description),
+                    csv_escape(&item.method),
+                    csv_escape(&item.url),
+                    csv_escape(&serde_json::to_string(&item.headers).unwrap_or_default()),
+                    csv_escape(&item.body.clone().unwrap_or_default()),
+                ]
+                .join(",");
+                lines.push(row);
+            }
+            println!("{}", lines.join("\n"));
+            return Ok(());
+        }
+        if let Some(output) = matches.get_one::<String>("output") {
+            let json = serde_json::to_string_pretty(&report)?;
+            std::fs::write(output, json)?;
+            let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
+            let summary = format!(
+                "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
+                report.target_url,
+                report.summary.confidence_score(),
+                report.summary.risk_label(),
+                report.summary.blocked,
+                report.summary.challenge,
+                report.summary.allowed,
+                report.summary.error
+            );
+            std::fs::write(&summary_path, summary)?;
+            println!("📄 VA report saved to: {output}");
+            println!("📄 VA summary saved to: {summary_path}");
+            return Ok(());
+        }
+        println!(
+            "🧪 Virtual Adversary: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
+            report.target_url,
+            report.summary.total,
+            report.summary.blocked,
+            report.summary.challenge,
+            report.summary.allowed,
+            report.summary.error,
+            report.summary.confidence_score(),
+            report.summary.risk_label(),
+            report.enforcement,
+            report.evidence_score
+        );
+        println!(
+            "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",
+            report.config.tier,
+            report.config.request_budget,
+            report.config.request_delay.as_millis(),
+            report.config.request_timeout.as_secs(),
+            report.config.max_variants_per_payload
+        );
+        let max_results = *matches.get_one::<u8>("top").unwrap_or(&3) as usize;
+        if !report.results.is_empty() {
+            println!("   Top Results:");
+            let reason_level = *matches.get_one::<u8>("reason-level").unwrap_or(&1);
+            let max_len = *matches.get_one::<u16>("max-len").unwrap_or(&80) as usize;
+            for result in report.results.iter().take(max_results) {
+                let payload = truncate_with_ellipsis(&result.payload, max_len);
+                if reason_level == 0 {
+                    println!(
+                        "   - {:?} | {} | {:?}",
+                        result.category, payload, result.outcome
+                    );
+                } else {
+                    println!(
+                        "   - {:?} | {} | {:?} | {}",
+                        result.category, payload, result.outcome, result.reason
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn run_va2_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        let target = matches
+            .get_one::<String>("target")
+            .ok_or_else(|| anyhow!("va2 requires a target URL"))?;
+        let normalized = self.normalize_url(target)?;
+
+        let phases_raw = matches
+            .get_one::<String>("phases")
+            .map(String::as_str)
+            .unwrap_or("baseline,protocol-variance");
+        let phases = parse_va2_phases(phases_raw)?;
+        let config = Va2CampaignConfig {
+            seed: *matches.get_one::<u64>("seed").unwrap_or(&1337),
+            budget: *matches.get_one::<u32>("budget").unwrap_or(&60),
+        };
+        let plan = build_va2_campaign_plan(&normalized, &phases, config)?;
+
+        if matches.get_flag("run") {
+            let runner = Va2Runner::new()?;
+            let report = runner.run_plan(plan).await?;
+
+            if matches.get_flag("json") {
+                let json = serde_json::to_string_pretty(&report)?;
+                println!("{json}");
+                return Ok(());
+            }
+
+            if let Some(output) = matches.get_one::<String>("output") {
+                let json = serde_json::to_string_pretty(&report)?;
+                fs::write(output, &json)?;
+                println!("📄 VA2 report saved to: {output}");
+                return Ok(());
+            }
+
+            let errors = report
+                .results
+                .iter()
+                .filter(|result| result.error.is_some())
+                .count();
+            println!(
+                "🧪 VA2 Run: {} steps | errors {}",
+                report.results.len(),
+                errors
+            );
+            if let Some(cc) = &report.channel_coverage {
+                println!("\nChannel Coverage:");
+                let mut channels: Vec<_> = cc.channels.iter().collect();
+                channels.sort_by_key(|(ch, _)| format!("{ch:?}"));
+                for (ch, rate) in &channels {
+                    let disc_count = report
+                        .differential
+                        .iter()
+                        .filter(|d| d.channel == Some(**ch) && d.discriminated)
+                        .count();
+                    let total_count = report
+                        .differential
+                        .iter()
+                        .filter(|d| d.channel == Some(**ch))
+                        .count();
+                    let blind = if cc.blind_spots.contains(ch) {
+                        " [blind spot]"
+                    } else {
+                        ""
+                    };
+                    println!(
+                        "  {:<8} {:>3.0}% ({}/{}){}",
+                        ch.to_string() + ":",
+                        *rate * 100.0,
+                        disc_count,
+                        total_count,
+                        blind
+                    );
+                }
+                println!("  Overall: {:.0}%", cc.coverage_score * 100.0);
+            }
+            return Ok(());
+        }
+
+        if matches.get_flag("json") {
+            let json = serde_json::to_string_pretty(&plan)?;
+            println!("{json}");
+            return Ok(());
+        }
+
+        if let Some(output) = matches.get_one::<String>("output") {
+            let json = serde_json::to_string_pretty(&plan)?;
+            fs::write(output, json)?;
+            println!("📄 VA2 plan saved to: {output}");
+            return Ok(());
+        }
+
+        println!(
+            "🧭 VA2 Dry Run: {} steps across {} phases (seed={}, budget={})",
+            plan.steps.len(),
+            plan.phases.len(),
+            plan.seed,
+            plan.budget
+        );
+        Ok(())
+    }
+
+    async fn run_doctor_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        let as_json = matches.get_flag("json");
+        let strict = matches.get_flag("strict");
+        let original_no_proxy = std::env::var_os("WAF_DETECTOR_NO_PROXY");
+        if original_no_proxy.is_none() {
+            std::env::set_var("WAF_DETECTOR_NO_PROXY", "1");
+        }
+        let mut checks: Vec<DoctorCheck> = Vec::new();
+
+        let mut push_check = |name: &str, status: DoctorStatus, message: String| {
+            checks.push(DoctorCheck {
+                name: name.to_string(),
+                status,
+                message,
+            });
+        };
+
+        match std::env::current_exe() {
+            Ok(path) => {
+                push_check(
+                    "binary_location",
+                    DoctorStatus::Pass,
+                    format!("running as {}", path.display()),
+                );
+            }
+            Err(err) => {
+                push_check(
+                    "binary_location",
+                    DoctorStatus::Warn,
+                    format!("unable to resolve current executable path: {err}"),
+                );
+            }
+        }
+
+        if binary_on_path("waf-detect") {
+            push_check(
+                "path_lookup",
+                DoctorStatus::Pass,
+                "waf-detect found on PATH".to_string(),
+            );
+        } else {
+            push_check(
+                "path_lookup",
+                DoctorStatus::Warn,
+                "waf-detect not found on PATH (shell completion install may need full path)"
+                    .to_string(),
+            );
+        }
+
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "unknown".to_string());
+        if shell == "unknown" {
+            push_check(
+                "shell_env",
+                DoctorStatus::Warn,
+                "SHELL environment variable is not set".to_string(),
+            );
+        } else {
+            push_check("shell_env", DoctorStatus::Pass, format!("SHELL={shell}"));
+        }
+
+        let home_dir = waf_detector_home();
+        let home_writable = (|| -> Result<()> {
+            fs::create_dir_all(&home_dir)?;
+            let probe = home_dir.join(".waf-detector-doctor-write-test");
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&probe)?;
+            file.write_all(b"ok")?;
+            drop(file);
+            let _ = fs::remove_file(&probe);
+            Ok(())
+        })();
+        match home_writable {
+            Ok(()) => push_check(
+                "home_dir",
+                DoctorStatus::Pass,
+                format!("writable home directory: {}", home_dir.display()),
+            ),
+            Err(err) => push_check(
+                "home_dir",
+                DoctorStatus::Warn,
+                format!(
+                    "cannot write under {}: {err} (set WAF_DETECTOR_HOME to a writable path)",
+                    home_dir.display()
+                ),
+            ),
+        }
+
+        let consent_manager = crate::effectiveness::consent::ConsentManager::new();
+        match consent_manager.status() {
+            Ok(status) => {
+                if status.has_consent {
+                    push_check(
+                        "consent_status",
+                        DoctorStatus::Pass,
+                        format!(
+                            "valid consent (targets={}, expires_in_days={})",
+                            status.authorized_targets.len(),
+                            status.expires_in_days.unwrap_or_default()
+                        ),
+                    );
+                } else {
+                    push_check(
+                        "consent_status",
+                        DoctorStatus::Warn,
+                        "no valid consent on file (required for VA/VA2/effectiveness runs)"
+                            .to_string(),
+                    );
+                }
+            }
+            Err(err) => push_check(
+                "consent_status",
+                DoctorStatus::Fail,
+                format!("failed to load consent status: {err}"),
+            ),
+        }
+
+        if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
+            push_check(
+                "tls_mode",
+                DoctorStatus::Warn,
+                "WAF_DETECTOR_INSECURE_TLS is enabled (certificate validation disabled)"
+                    .to_string(),
+            );
+        } else {
+            push_check(
+                "tls_mode",
+                DoctorStatus::Pass,
+                "TLS certificate validation is enabled".to_string(),
+            );
+        }
+
+        let api_token_present = std::env::var("WAF_DETECTOR_API_TOKEN")
+            .map(|token| !token.trim().is_empty())
+            .unwrap_or(false);
+        if api_token_present {
+            push_check(
+                "api_token",
+                DoctorStatus::Pass,
+                "WAF_DETECTOR_API_TOKEN is configured".to_string(),
+            );
+        } else {
+            push_check(
+                "api_token",
+                DoctorStatus::Warn,
+                "WAF_DETECTOR_API_TOKEN is not set (API auth disabled)".to_string(),
+            );
+        }
+
+        match crate::http::HttpClient::new() {
+            Ok(_) => push_check(
+                "http_client",
+                DoctorStatus::Pass,
+                "HTTP client initialization succeeded".to_string(),
+            ),
+            Err(err) => push_check(
+                "http_client",
+                DoctorStatus::Fail,
+                format!("HTTP client initialization failed: {err}"),
+            ),
+        }
+
+        match crate::dns::optimized::DnsResolver::new() {
+            Ok(_) => push_check(
+                "dns_resolver",
+                DoctorStatus::Pass,
+                "DNS resolver initialization succeeded".to_string(),
+            ),
+            Err(err) => push_check(
+                "dns_resolver",
+                DoctorStatus::Fail,
+                format!("DNS resolver initialization failed: {err}"),
+            ),
+        }
+
+        match self.build_engine(false) {
+            Ok(engine) => push_check(
+                "providers",
+                DoctorStatus::Pass,
+                format!("{} detection providers loaded", engine.get_provider_count()),
+            ),
+            Err(err) => push_check(
+                "providers",
+                DoctorStatus::Fail,
+                format!("failed to initialize detection engine: {err}"),
+            ),
+        }
+
+        let failure_count = checks
+            .iter()
+            .filter(|check| check.status == DoctorStatus::Fail)
+            .count();
+        let warning_count = checks
+            .iter()
+            .filter(|check| check.status == DoctorStatus::Warn)
+            .count();
+        let ok = failure_count == 0 && (!strict || warning_count == 0);
+        let report = DoctorReport {
+            ok,
+            warning_count,
+            failure_count,
+            checks,
+        };
+
+        if as_json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("WAF Detector Doctor");
+            println!("──────────────────");
+            for check in &report.checks {
+                let label = match check.status {
+                    DoctorStatus::Pass => "PASS",
+                    DoctorStatus::Warn => "WARN",
+                    DoctorStatus::Fail => "FAIL",
+                };
+                println!("[{label}] {:<16} {}", check.name, check.message);
+            }
+            println!();
+            println!(
+                "Summary: ok={} warnings={} failures={} strict={}",
+                report.ok, report.warning_count, report.failure_count, strict
+            );
+        }
+
+        if report.failure_count > 0 {
+            if let Some(value) = &original_no_proxy {
+                std::env::set_var("WAF_DETECTOR_NO_PROXY", value);
+            } else {
+                std::env::remove_var("WAF_DETECTOR_NO_PROXY");
+            }
+            return Err(anyhow!(
+                "doctor found {} failing check(s)",
+                report.failure_count
+            ));
+        }
+        if strict && report.warning_count > 0 {
+            if let Some(value) = &original_no_proxy {
+                std::env::set_var("WAF_DETECTOR_NO_PROXY", value);
+            } else {
+                std::env::remove_var("WAF_DETECTOR_NO_PROXY");
+            }
+            return Err(anyhow!(
+                "doctor strict mode failed due to {} warning(s)",
+                report.warning_count
+            ));
+        }
+
+        if let Some(value) = &original_no_proxy {
+            std::env::set_var("WAF_DETECTOR_NO_PROXY", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_NO_PROXY");
+        }
+
+        Ok(())
+    }
+
+    fn run_completions_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        run_completions_command(matches)
+    }
+
+    fn validate_matches(&self, matches: &ArgMatches) -> Result<()> {
+        let modes = [
+            ("--list", matches.get_flag("list")),
+            ("--consent", matches.get_many::<String>("consent").is_some()),
+            (
+                "--benchmark",
+                matches.get_one::<String>("benchmark").is_some(),
+            ),
+            (
+                "--effectiveness",
+                matches.get_one::<String>("effectiveness").is_some(),
+            ),
+            ("--smoke-test", matches.get_flag("smoke-test")),
+            ("--va-schema", matches.get_flag("va-schema")),
+            ("--posture", matches.get_one::<String>("posture").is_some()),
+            (
+                "--posture-summary",
+                matches.get_one::<String>("posture-summary").is_some(),
+            ),
+            ("--va2", matches.get_one::<String>("va2").is_some()),
+            ("--va", matches.get_one::<String>("va").is_some()),
+            (
+                "--va-replay-run",
+                matches.get_one::<String>("va-replay-run").is_some(),
+            ),
+        ];
+
+        let active_modes: Vec<&str> = modes
+            .iter()
+            .filter(|(_, active)| *active)
+            .map(|(name, _)| *name)
+            .collect();
+
+        if active_modes.len() > 1 {
+            return Err(anyhow!(
+                "Conflicting modes selected: {}. Choose exactly one execution mode.",
+                active_modes.join(", ")
+            ));
+        }
+
+        let is_smoke_test = matches.get_flag("smoke-test");
+        let target_count = matches
+            .get_many::<String>("targets")
+            .map(|items| items.len())
+            .unwrap_or(0);
+
+        if target_count > 0 && !active_modes.is_empty() && !is_smoke_test {
+            return Err(anyhow!(
+                "Positional TARGET arguments are only valid for default scan mode and --smoke-test."
+            ));
+        }
+
+        if is_smoke_test && target_count != 1 {
+            return Err(anyhow!(
+                "--smoke-test requires exactly one TARGET argument."
+            ));
+        }
+
+        let machine_output =
+            matches.get_flag("json") || matches.get_flag("yaml") || matches.get_flag("ndjson");
+        if matches.get_flag("verbose") && machine_output {
+            return Err(anyhow!(
+                "--verbose cannot be combined with --json, --yaml, or --ndjson."
+            ));
+        }
+
+        if matches.get_flag("debug")
+            && (matches.get_flag("json")
+                || matches.get_flag("yaml")
+                || matches.get_flag("compact")
+                || matches.get_flag("ndjson"))
+        {
+            return Err(anyhow!(
+                "--debug is only supported with the default table output format."
+            ));
+        }
+
+        let scan_only_flags = [
+            ("--json", matches.get_flag("json")),
+            ("--yaml", matches.get_flag("yaml")),
+            ("--compact", matches.get_flag("compact")),
+            ("--ndjson", matches.get_flag("ndjson")),
+            ("--debug", matches.get_flag("debug")),
+            ("--verbose", matches.get_flag("verbose")),
+            ("--payload-analysis", matches.get_flag("payload-analysis")),
+            ("--stdin", matches.get_flag("stdin")),
+            ("--fail-on-error", matches.get_flag("fail-on-error")),
+        ];
+        let active_scan_only: Vec<&str> = scan_only_flags
+            .iter()
+            .filter(|(_, active)| *active)
+            .map(|(name, _)| *name)
+            .collect();
+        if !active_modes.is_empty() && !active_scan_only.is_empty() {
+            return Err(anyhow!(
+                "Scan-only flags cannot be used with {}: {}",
+                active_modes.join(", "),
+                active_scan_only.join(", ")
+            ));
+        }
+
+        Ok(())
+    }
+
     fn parse_targets(&self, matches: &ArgMatches) -> Result<Vec<String>> {
         let mut targets = Vec::new();
+        let mut seen = HashSet::new();
 
         // Get targets from direct arguments
         if let Some(domains) = matches.get_many::<String>("targets") {
@@ -630,15 +1726,42 @@ impl SimpleCliApp {
                     let content = fs::read_to_string(filename)
                         .map_err(|e| anyhow!("Failed to read file '{}': {}", filename, e))?;
 
-                    for line in content.lines() {
+                    for (line_idx, line) in content.lines().enumerate() {
                         let line = line.trim();
-                        if !line.is_empty() && !line.starts_with('#') {
-                            targets.push(self.normalize_url(line)?);
+                        if line.is_empty() || line.starts_with('#') {
+                            continue;
+                        }
+                        let normalized = self
+                            .normalize_url(line)
+                            .map_err(|e| anyhow!("{}:{}: {}", filename, line_idx + 1, e))?;
+                        if seen.insert(normalized.clone()) {
+                            targets.push(normalized);
                         }
                     }
                 } else {
-                    // Direct domain/URL
-                    targets.push(self.normalize_url(domain)?);
+                    let normalized = self
+                        .normalize_url(domain)
+                        .map_err(|e| anyhow!("target '{}': {}", domain, e))?;
+                    if seen.insert(normalized.clone()) {
+                        targets.push(normalized);
+                    }
+                }
+            }
+        }
+
+        if matches.get_flag("stdin") {
+            let mut input = String::new();
+            std::io::stdin().read_to_string(&mut input)?;
+            for (line_idx, line) in input.lines().enumerate() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let normalized = self
+                    .normalize_url(line)
+                    .map_err(|e| anyhow!("stdin:{}: {}", line_idx + 1, e))?;
+                if seen.insert(normalized.clone()) {
+                    targets.push(normalized);
                 }
             }
         }
@@ -661,15 +1784,17 @@ impl SimpleCliApp {
         Err(anyhow!("Invalid URL or domain: {}", input))
     }
 
-    fn determine_format(&self, matches: &ArgMatches) -> String {
+    fn determine_format(&self, matches: &ArgMatches) -> OutputFormat {
         if matches.get_flag("json") {
-            "json".to_string()
+            OutputFormat::Json
+        } else if matches.get_flag("ndjson") {
+            OutputFormat::Ndjson
         } else if matches.get_flag("yaml") {
-            "yaml".to_string()
+            OutputFormat::Yaml
         } else if matches.get_flag("compact") {
-            "compact".to_string()
+            OutputFormat::Compact
         } else {
-            "table".to_string()
+            OutputFormat::Table
         }
     }
 
@@ -687,11 +1812,12 @@ impl SimpleCliApp {
         &self,
         engine: &DetectionEngine,
         url: &str,
-        format: &str,
+        format: &OutputFormat,
         debug: bool,
         verbose: bool,
     ) -> Result<()> {
-        if verbose {
+        let human_output = matches!(format, OutputFormat::Table | OutputFormat::Compact);
+        if verbose && human_output {
             println!("🔍 Scanning: {url}");
         }
 
@@ -700,21 +1826,24 @@ impl SimpleCliApp {
         let scan_time = start_time.elapsed();
 
         match format {
-            "json" => {
+            OutputFormat::Json => {
                 println!("{}", serde_json::to_string_pretty(&detection_result)?);
             }
-            "yaml" => {
+            OutputFormat::Ndjson => {
+                println!("{}", serde_json::to_string(&detection_result)?);
+            }
+            OutputFormat::Yaml => {
                 println!("{}", serde_yml::to_string(&detection_result)?);
             }
-            "compact" => {
+            OutputFormat::Compact => {
                 self.print_compact(&detection_result);
             }
-            _ => {
+            OutputFormat::Table => {
                 self.print_table_format(&detection_result, debug);
             }
         }
 
-        if verbose {
+        if verbose && human_output {
             println!("⏱️  Scan completed in {:.2}ms", scan_time.as_millis());
         }
 
@@ -725,11 +1854,13 @@ impl SimpleCliApp {
         &self,
         engine: &DetectionEngine,
         urls: &[String],
-        format: &str,
+        format: &OutputFormat,
         debug: bool,
         verbose: bool,
+        fail_on_error: bool,
     ) -> Result<()> {
-        if verbose {
+        let human_output = matches!(format, OutputFormat::Table | OutputFormat::Compact);
+        if verbose && human_output {
             println!("🔍 Scanning {} targets...", urls.len());
         }
 
@@ -742,7 +1873,7 @@ impl SimpleCliApp {
         // Convert HashMap results back to Vec in original order for consistent output
         let mut results = Vec::new();
         for (i, url) in urls.iter().enumerate() {
-            if verbose {
+            if verbose && human_output {
                 println!("({}/{}) {} - Processing...", i + 1, urls.len(), url);
             }
 
@@ -754,18 +1885,23 @@ impl SimpleCliApp {
         let total_time = total_start.elapsed();
 
         match format {
-            "json" => {
+            OutputFormat::Json => {
                 println!("{}", serde_json::to_string_pretty(&results)?);
             }
-            "yaml" => {
+            OutputFormat::Ndjson => {
+                for result in &results {
+                    println!("{}", serde_json::to_string(result)?);
+                }
+            }
+            OutputFormat::Yaml => {
                 println!("{}", serde_yml::to_string(&results)?);
             }
-            "compact" => {
+            OutputFormat::Compact => {
                 for result in &results {
                     self.print_compact(result);
                 }
             }
-            _ => {
+            OutputFormat::Table => {
                 for (i, result) in results.iter().enumerate() {
                     if i > 0 {
                         println!();
@@ -775,19 +1911,64 @@ impl SimpleCliApp {
             }
         }
 
-        if verbose {
+        let error_count = results
+            .iter()
+            .filter(|result| result.error.is_some())
+            .count();
+        if human_output {
+            self.print_batch_summary(&results, total_time);
+        } else if verbose {
             println!("\n⏱️  Total scan time: {:.2}s", total_time.as_secs_f64());
+        }
+
+        if fail_on_error && error_count > 0 {
+            return Err(anyhow!(
+                "{error_count} target(s) failed detection in batch run (--fail-on-error enabled)"
+            ));
         }
 
         Ok(())
     }
 
-    fn print_compact(&self, result: &DetectionResult) {
-        let url_short = if result.url.len() > 40 {
-            format!("{}...", &result.url[..37])
+    fn print_batch_summary(&self, results: &[DetectionResult], total_time: std::time::Duration) {
+        let total = results.len();
+        if total == 0 {
+            return;
+        }
+
+        let waf = results.iter().filter(|r| r.detected_waf.is_some()).count();
+        let cdn = results.iter().filter(|r| r.detected_cdn.is_some()).count();
+        let both = results
+            .iter()
+            .filter(|r| r.detected_waf.is_some() && r.detected_cdn.is_some())
+            .count();
+        let errors = results.iter().filter(|r| r.error.is_some()).count();
+        let successful_durations: Vec<u64> = results
+            .iter()
+            .filter(|r| r.error.is_none())
+            .map(|r| r.detection_time_ms)
+            .collect();
+        let avg_ms = if successful_durations.is_empty() {
+            0.0
         } else {
-            result.url.clone()
+            successful_durations.iter().sum::<u64>() as f64 / successful_durations.len() as f64
         };
+
+        println!();
+        println!(
+            "Summary: targets={} waf={} cdn={} both={} errors={} avg_scan_ms={:.1} total_time_s={:.2}",
+            total,
+            waf,
+            cdn,
+            both,
+            errors,
+            avg_ms,
+            total_time.as_secs_f64()
+        );
+    }
+
+    fn print_compact(&self, result: &DetectionResult) {
+        let url_short = truncate_with_ellipsis(&result.url, 40);
 
         match (&result.detected_waf, &result.detected_cdn) {
             (Some(waf), Some(cdn)) if waf.name == cdn.name => {
@@ -841,11 +2022,7 @@ impl SimpleCliApp {
         println!("├─────────────────────────────────────────────────────────────────────────┤");
 
         // URL (truncate if too long)
-        let url_display = if result.url.len() > 67 {
-            format!("{}...", &result.url[..64])
-        } else {
-            result.url.clone()
-        };
+        let url_display = truncate_with_ellipsis(&result.url, 67);
         println!("│ URL: {url_display:<67} │");
         println!("├─────────────────────────────────────────────────────────────────────────┤");
 
@@ -891,11 +2068,7 @@ impl SimpleCliApp {
 
                     for (i, evidence) in evidence_list.iter().enumerate() {
                         if i < 3 {
-                            let desc = if evidence.description.len() > 45 {
-                                format!("{}...", &evidence.description[..42])
-                            } else {
-                                evidence.description.clone()
-                            };
+                            let desc = truncate_with_ellipsis(&evidence.description, 45);
                             println!("│   - {:<45} ({:.0}%) │", desc, evidence.confidence * 100.0);
                             if !evidence.raw_data.is_empty() && evidence.raw_data.len() <= 60 {
                                 println!("│     Data: {:<57} │", evidence.raw_data);
@@ -1003,35 +2176,6 @@ impl SimpleCliApp {
 
         println!("Total providers: {}", providers.len());
         Ok(())
-    }
-
-    async fn start_web_server(&self, engine: &DetectionEngine, port: u16) -> Result<()> {
-        println!("🌐 Starting WAF Detector Web Server...");
-
-        let mut last_error: Option<anyhow::Error> = None;
-        let max_attempts = 10u16;
-
-        for offset in 0..max_attempts {
-            let candidate = port.saturating_add(offset);
-            let web_server = crate::web::WebServer::new(engine.clone());
-            match web_server.start(candidate).await {
-                Ok(()) => return Ok(()),
-                Err(err) => {
-                    let addr_in_use = err
-                        .downcast_ref::<std::io::Error>()
-                        .map(|io_err| io_err.kind() == std::io::ErrorKind::AddrInUse)
-                        .unwrap_or(false);
-                    if addr_in_use {
-                        println!("⚠️  Port {candidate} is in use, trying next port...");
-                        last_error = Some(err);
-                        continue;
-                    }
-                    return Err(err);
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| anyhow!("Unable to bind to a free port")))
     }
 
     async fn run_effectiveness_test(&self, url: &str, matches: &ArgMatches) -> Result<()> {
@@ -1210,38 +2354,40 @@ impl SimpleCliApp {
     }
 }
 
-pub fn build_simple_cli() -> Command {
-    Command::new("waf-detect")
-        .version("0.1.0")
-        .author("WAF Detector Team")
-        .about("🔍 Simple WAF/CDN Detection - Just specify domains!")
-        .long_about(
-            r#"
-🔍 WAF/CDN Detection Tool - Modern CLI
+pub fn run_completions_command(matches: &ArgMatches) -> Result<()> {
+    let shell = matches
+        .get_one::<String>("shell")
+        .ok_or_else(|| anyhow!("completions requires a shell name"))?;
 
-DETECTION USAGE:
-  waf-detect cloudflare.com                    # Scan single domain
-  waf-detect cloudflare.com discord.com        # Scan multiple domains  
-  waf-detect @urls.txt                         # Scan from file
-  waf-detect cloudflare.com --json             # JSON output
-  waf-detect example.com --payload-analysis    # Enable active payload probing (authorized targets only)
+    let script = match shell.as_str() {
+        "bash" => render_bash_completion(),
+        "zsh" => render_zsh_completion(),
+        "fish" => render_fish_completion(),
+        other => {
+            return Err(anyhow!(
+                "unsupported shell '{other}' (expected bash|zsh|fish)"
+            ));
+        }
+    };
 
-SMOKE TESTING:
-  waf-detect --smoke-test cloudflare.com       # Test WAF effectiveness
-  waf-detect --smoke-test example.com -o results.json  # Export results
-  waf-detect --smoke-test site.com -H "Authorization: Bearer token"  # Custom headers
-  waf-detect --smoke-test site.com --aggressive  # More thorough testing
+    if let Some(output) = matches.get_one::<String>("output") {
+        fs::write(output, &script)?;
+        let output_path = PathBuf::from(output);
+        let display_path = output_path
+            .canonicalize()
+            .unwrap_or_else(|_| output_path.clone());
+        println!("Completion script written to: {output}");
+        println!("Load it with: source {}", display_path.display());
+        return Ok(());
+    }
 
-WEB SERVER:
-  waf-detect --web                             # Start web server
-  waf-detect --web --port 3000                 # Web server on port 3000
+    print!("{script}");
+    Ok(())
+}
 
-OTHER:
-  waf-detect --list                            # List providers
-
-The tool automatically adds https:// if needed and supports both domain names and full URLs.
-        "#,
-        )
+fn build_scan_subcommand() -> Command {
+    Command::new("scan")
+        .about("Scan one or more targets for WAF/CDN detection")
         .arg(
             Arg::new("targets")
                 .help("Domain names, URLs, or @file.txt to scan")
@@ -1250,9 +2396,21 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .num_args(0..),
         )
         .arg(
+            Arg::new("stdin")
+                .long("stdin")
+                .help("Read newline-delimited targets from stdin (comments with # are ignored)")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("json")
                 .long("json")
                 .help("Output results in JSON format")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("ndjson")
+                .long("ndjson")
+                .help("Output results as newline-delimited JSON (one result per line)")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -1283,28 +2441,358 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("fail-on-error")
+                .long("fail-on-error")
+                .help("Exit non-zero when any target fails in batch scan mode")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("payload-analysis")
+                .long("payload-analysis")
+                .help("Enable active payload-based probing during detection (authorized targets only)")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .group(
+            ArgGroup::new("scan-subcommand-output-format")
+                .args(["json", "yaml", "compact", "ndjson"])
+                .multiple(false),
+        )
+}
+
+fn build_providers_subcommand() -> Command {
+    Command::new("providers").about("List available detection providers")
+}
+
+fn build_benchmark_subcommand() -> Command {
+    Command::new("benchmark")
+        .about("Run offline detection benchmark against a labeled corpus")
+        .arg(
+            Arg::new("benchmark")
+                .help("Path to benchmark corpus JSON file")
+                .value_name("CORPUS")
+                .required(true),
+        )
+        .arg(
+            Arg::new("benchmark-output")
+                .long("output")
+                .help("Save benchmark results as JSON to file")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("benchmark-workers")
+                .long("workers")
+                .help("Number of concurrent detection workers (default: 3)")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(usize))
+                .default_value("3"),
+        )
+        .arg(
+            Arg::new("benchmark-mode")
+                .long("mode")
+                .help("Benchmark execution mode: live network or fixture replay")
+                .value_name("MODE")
+                .value_parser(["live", "fixture"])
+                .default_value("live"),
+        )
+        .arg(
+            Arg::new("benchmark-fixtures")
+                .long("fixtures")
+                .help("Directory containing benchmark fixture corpus (fixtures.json)")
+                .value_name("DIR"),
+        )
+}
+
+fn build_va_subcommand() -> Command {
+    Command::new("va")
+        .about("Run Virtual Adversary effectiveness validation")
+        .arg(
+            Arg::new("target")
+                .help("Target URL or domain")
+                .value_name("URL")
+                .required(true),
+        )
+        .arg(
+            Arg::new("dry-run")
+                .long("dry-run")
+                .help("Print planned VA payloads without executing")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .help("Print VA report JSON to stdout")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("replay")
+                .long("replay")
+                .help("Print VA replay plan JSON to stdout")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("replay-csv")
+                .long("replay-csv")
+                .help("Print VA replay plan CSV to stdout")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .help("Write VA report JSON and summary to file")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("top")
+                .long("top")
+                .help("Number of VA results to print")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("3"),
+        )
+        .arg(
+            Arg::new("reason-level")
+                .long("reason-level")
+                .help("VA reason verbosity (0=none, 1=default)")
+                .value_name("LEVEL")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("1"),
+        )
+        .arg(
+            Arg::new("max-len")
+                .long("max-len")
+                .help("Max payload length to print in VA output")
+                .value_name("LEN")
+                .value_parser(clap::value_parser!(u16))
+                .default_value("80"),
+        )
+        .arg(
+            Arg::new("tier")
+                .long("tier")
+                .help("VA safety tier (1-3)")
+                .value_name("TIER")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("1"),
+        )
+        .arg(
+            Arg::new("budget")
+                .long("budget")
+                .help("VA request budget (max total requests)")
+                .value_name("BUDGET")
+                .value_parser(clap::value_parser!(u32))
+                .default_value("120"),
+        )
+        .arg(
+            Arg::new("timeout")
+                .long("timeout")
+                .help("VA per-request timeout (seconds)")
+                .value_name("SECONDS")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("15"),
+        )
+        .arg(
+            Arg::new("delay")
+                .long("delay")
+                .help("VA delay between requests (milliseconds)")
+                .value_name("MS")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("750"),
+        )
+        .arg(
+            Arg::new("variants")
+                .long("variants")
+                .help("VA max variants per payload")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(u8))
+                .default_value("4"),
+        )
+}
+
+fn build_va2_subcommand() -> Command {
+    Command::new("va2")
+        .about("Run Virtual Adversary 2.0 behavioral campaign")
+        .arg(
+            Arg::new("target")
+                .help("Target URL or domain")
+                .value_name("URL")
+                .required(true),
+        )
+        .arg(
+            Arg::new("run")
+                .long("run")
+                .help("Execute VA2 campaign plan (requires consent)")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .help("Print VA2 plan/report JSON to stdout")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .help("Write VA2 plan/report JSON to file")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("phases")
+                .long("phases")
+                .help("VA2 phases (comma-separated)")
+                .value_name("LIST")
+                .default_value("baseline,protocol-variance"),
+        )
+        .arg(
+            Arg::new("seed")
+                .long("seed")
+                .help("VA2 deterministic seed")
+                .value_name("SEED")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("1337"),
+        )
+        .arg(
+            Arg::new("budget")
+                .long("budget")
+                .help("VA2 request budget")
+                .value_name("COUNT")
+                .value_parser(clap::value_parser!(u32))
+                .default_value("60"),
+        )
+}
+
+fn build_doctor_subcommand() -> Command {
+    Command::new("doctor")
+        .about("Run environment and runtime health checks")
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .help("Output doctor report as JSON")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("strict")
+                .long("strict")
+                .help("Treat warnings as failures (non-zero exit)")
+                .action(clap::ArgAction::SetTrue),
+        )
+}
+
+fn build_completions_subcommand() -> Command {
+    Command::new("completions")
+        .about("Generate shell completion scripts")
+        .arg(
+            Arg::new("shell")
+                .help("Shell to generate completions for")
+                .value_name("SHELL")
+                .value_parser(["bash", "zsh", "fish"])
+                .required(true),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .short('o')
+                .help("Write completion script to file instead of stdout")
+                .value_name("FILE"),
+        )
+}
+
+pub fn build_simple_cli() -> Command {
+    Command::new("waf-detect")
+        .version("0.1.0")
+        .author("WAF Detector Team")
+        .about("WAF/CDN detection CLI with modern subcommands and legacy compatibility")
+        .long_about(
+            r#"
+MODERN COMMANDS (recommended):
+  waf-detect scan cloudflare.com
+  waf-detect scan @urls.txt --ndjson
+  cat urls.txt | waf-detect scan --stdin --compact
+  waf-detect va example.com --dry-run
+  waf-detect va2 example.com --run --json
+  waf-detect benchmark benchmark_corpus.json --workers 8
+  waf-detect providers
+  waf-detect doctor
+  waf-detect completions zsh -o ~/.zsh/completions/_waf-detect
+
+LEGACY FLAG MODE (still supported):
+  waf-detect cloudflare.com --json
+  waf-detect --va https://example.com
+  waf-detect --va2 https://example.com --va2-run
+
+The tool automatically adds https:// for bare domains where supported.
+        "#,
+        )
+        .subcommand(build_scan_subcommand())
+        .subcommand(build_va_subcommand())
+        .subcommand(build_va2_subcommand())
+        .subcommand(build_benchmark_subcommand())
+        .subcommand(build_providers_subcommand())
+        .subcommand(build_doctor_subcommand())
+        .subcommand(build_completions_subcommand())
+        .arg(
+            Arg::new("targets")
+                .help("Domain names, URLs, or @file.txt to scan")
+                .value_name("TARGET")
+                .action(clap::ArgAction::Append)
+                .num_args(0..),
+        )
+        .arg(
+            Arg::new("stdin")
+                .long("stdin")
+                .help("Read newline-delimited targets from stdin (comments with # are ignored)")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .help("Output results in JSON format")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("ndjson")
+                .long("ndjson")
+                .help("Output results as newline-delimited JSON (one result per line)")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("yaml")
+                .long("yaml")
+                .help("Output results in YAML format")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("compact")
+                .long("compact")
+                .short('c')
+                .help("Compact one-line output format")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("debug")
+                .long("debug")
+                .short('d')
+                .help("Show detailed debug information")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("verbose")
+                .long("verbose")
+                .short('v')
+                .help("Show verbose scanning progress")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("fail-on-error")
+                .long("fail-on-error")
+                .help("Exit non-zero when any target fails in batch scan mode")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("payload-analysis")
                 .long("payload-analysis")
                 .help(
                     "Enable active payload-based probing during detection (authorized targets only)",
                 )
                 .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("web")
-                .long("web")
-                .short('w')
-                .help("Start web server mode with beautiful dashboard")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("port")
-                .long("port")
-                .short('p')
-                .help("Port for web server (default: 8080)")
-                .value_name("PORT")
-                .value_parser(clap::value_parser!(u16))
-                .default_value("8080"),
         )
         .arg(
             Arg::new("list")
@@ -1526,7 +3014,8 @@ The tool automatically adds https:// if needed and supports both domain names an
             Arg::new("perf-report")
                 .long("perf-report")
                 .help("Write current performance snapshot (p95/p99) to JSON file")
-                .value_name("FILE"),
+                .value_name("FILE")
+                .global(true),
         )
         .arg(
             Arg::new("va-replay-run")
@@ -1654,6 +3143,28 @@ The tool automatically adds https:// if needed and supports both domain names an
                 .value_parser(clap::value_parser!(u8))
                 .default_value("4")
                 .requires("va"),
+        )
+        .group(
+            ArgGroup::new("scan-output-format")
+                .args(["json", "yaml", "compact", "ndjson"])
+                .multiple(false),
+        )
+        .group(
+            ArgGroup::new("exclusive-mode")
+                .args([
+                    "list",
+                    "consent",
+                    "benchmark",
+                    "effectiveness",
+                    "smoke-test",
+                    "va-schema",
+                    "posture",
+                    "posture-summary",
+                    "va2",
+                    "va",
+                    "va-replay-run",
+                ])
+                .multiple(false),
         )
 }
 

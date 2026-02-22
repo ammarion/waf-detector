@@ -60,11 +60,17 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libssl-dev pkg-config
     
-    - name: Build
+    - name: Build (default features)
       run: cargo build --release --verbose
+
+    - name: Build (all features)
+      run: cargo build --release --all-features --verbose
     
-    - name: Run unit tests
+    - name: Run unit tests (default features)
       run: cargo test --lib --verbose
+
+    - name: Run unit tests (all features)
+      run: cargo test --lib --all-features --verbose
     
     - name: Run integration tests
       run: |

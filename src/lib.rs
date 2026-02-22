@@ -11,7 +11,6 @@ pub mod providers;
 pub mod registry;
 pub mod script_executor;
 pub mod utils;
-pub mod web;
 
 #[cfg(test)]
 mod test_utils;
@@ -263,7 +262,7 @@ impl DetectionResult {
         self.detection_time_ms
     }
 
-    /// Get all evidence as a flat list for web display
+    /// Get all evidence as a flat list for CLI/report rendering.
     pub fn evidence(&self) -> Vec<Evidence> {
         if !self.evidence.is_empty() {
             self.evidence.clone()

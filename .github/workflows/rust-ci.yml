@@ -28,7 +28,10 @@ jobs:
     - name: Check formatting
       run: cargo fmt --all -- --check
     
-    - name: Run Clippy
+    - name: Run Clippy (default features)
+      run: cargo clippy --all-targets -- -D warnings
+
+    - name: Run Clippy (all features)
       run: cargo clippy --all-targets --all-features -- -D warnings
     
     - name: Check compilation
@@ -49,7 +52,10 @@ jobs:
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
     
-    - name: Run tests
+    - name: Run tests (default features)
+      run: cargo test
+
+    - name: Run tests (all features)
       run: cargo test --all-features
     
     - name: Run doc tests

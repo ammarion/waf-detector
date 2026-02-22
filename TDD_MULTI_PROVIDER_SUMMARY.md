@@ -264,52 +264,30 @@ if let Some(origin) = result.get_origin() {
 
 ---
 
-## Next Steps to Fix UI
+## Next Steps for CLI Output
 
-### 1. Update Web API Response
+### 1. Improve JSON Shape
 
-**Current API (`src/web/mod.rs`):**
-```json
-{
-  "detected_waf": {"name": "AWS", "confidence": 0.94},
-  "detected_cdn": {"name": "AWS", "confidence": 0.94}
-}
+Ensure the JSON output consistently includes:
+- `providers`
+- `primary_waf`
+- `origin`
+
+### 2. Improve Table/Compact Display
+
+Show provider roles in terminal output:
+```
+Primary WAF: Akamai (90%)
+Origin: AWS (94%)
+Providers: Akamai [WAF], AWS [Origin]
 ```
 
-**New API (to add):**
-```json
-{
-  "detected_waf": {"name": "AWS", "confidence": 0.94},
-  "detected_cdn": {"name": "AWS", "confidence": 0.94},
-  "providers": [
-    {"name": "Akamai", "role": "WAF", "confidence": 0.90},
-    {"name": "AWS", "role": "Origin", "confidence": 0.94}
-  ],
-  "primary_waf": {"name": "Akamai", "role": "WAF", "confidence": 0.90},
-  "origin": {"name": "AWS", "role": "Origin", "confidence": 0.94}
-}
-```
+### 3. Keep CLI/Agent Parity
 
-### 2. Update Frontend Display
-
-**Current UI:**
-```
-WAF Detected: AWS (94%)
-```
-
-**New UI:**
-```
-🛡️ Primary WAF: Akamai (90%)
-☁️ Origin: AWS S3/CloudFront (94%)
-
-All Providers Detected:
-  • Akamai (WAF) - 90%
-  • AWS (Origin) - 94%
-```
-
-### 3. Update Templates
-
-Modify `src/web/templates.rs` to show multi-provider results clearly.
+Use the same field names and ordering across:
+- `scan --json`
+- `scan --compact`
+- Agent-generated markdown reports
 
 ---
 

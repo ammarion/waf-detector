@@ -1,7 +1,5 @@
 # WAF Detector
 
-![WAF Detector Dashboard](docs/ui-dashboard.png)
-
 > Advanced Security Infrastructure Analysis & Visualization
 > 
 > **Dual Purpose Tool**: Detection + Effectiveness Testing for Web Application Firewalls
@@ -56,33 +54,6 @@ echo "https://example.com" >> urls.txt
 ./target/release/waf-detect @urls.txt
 ```
 
-**Web interface (recommended for beginners):**
-```bash
-./target/release/waf-detect --web
-# Then open http://localhost:8080 in your browser
-```
-
-## 🤖 AI Summaries (Local, Results-Only)
-
-The dashboard can generate plain-language summaries for detection and smoke-test
-results using a local LLM. Only the existing results shown in the UI are sent to
-the model (no raw payloads or response bodies).
-
-### Prerequisites
-
-- Install and run Ollama locally.
-- Pull a model (default is `llama3.2:3b`).
-
-### Environment Variables
-
-- `WAF_DETECTOR_AI_ENABLED=true|false` (default: false)
-- `WAF_DETECTOR_AI_ENDPOINT=http://127.0.0.1:11434`
-- `WAF_DETECTOR_AI_MODEL=llama3.2:3b`
-- `WAF_DETECTOR_AI_TIMEOUT_MS=4000`
-
-When enabled, the UI shows an "AI Summary" button on result cards. If the model
-is unavailable, the UI displays a friendly inline error.
-
 **Include payload-based analysis (optional but recommended for full detection coverage):**
 ```bash
 ./target/release/waf-detect example.com --payload-analysis
@@ -93,7 +64,7 @@ is unavailable, the UI displays a friendly inline error.
 - **WAF & CDN Detection**: Identifies protection systems with high accuracy
 - **Multiple Providers**: CloudFlare, AWS WAF, Akamai, Fastly, Vercel, Azure, F5 BIG-IP
 - **Security Testing**: Tests WAF effectiveness against common attacks
-- **User-friendly Interface**: Web dashboard for easy visualization
+- **CLI + Agent First**: Built for terminal workflows and agent automation
 - **Detailed Reports**: Evidence collection and confidence scoring
 
 ## 🧪 WAF Effectiveness Testing
@@ -101,10 +72,6 @@ is unavailable, the UI displays a friendly inline error.
 Test how well a WAF blocks common attack patterns:
 
 ```bash
-# Using the web interface (easiest method)
-./target/release/waf-detect --web
-# Then use the "WAF Smoke Test" option in the web interface
-
 # Using the command line
 ./target/release/waf-detect --smoke-test example.com
 ```
@@ -212,9 +179,9 @@ Virtual Adversary adds adaptive, consent-gated effectiveness testing with baseli
 - `--va-replay`: Print the replay plan JSON to stdout (probes, headers, and URLs).
 - `--va-replay-csv`: Print the replay plan CSV to stdout.
 
-**Replay plan exports (web UI):**
-- VA history entries expose **Replay JSON** and **Replay CSV** downloads.
-- Reports also include replay plan metadata in VA CSV exports.
+**Replay plan exports:**
+- Use `--va-replay` for JSON replay plans.
+- Use `--va-replay-csv` for CSV replay plans.
 
 > ⚠️ **Ethical Use Required:** Virtual Adversary simulates evasive attackers. Only use on systems you own or have explicit permission to test.
 
@@ -256,9 +223,6 @@ Virtual Adversary 2.0 focuses on **behavioral profiling** (normalization varianc
 ## 🔧 Advanced Options
 
 ```bash
-# Custom port for web interface
-./target/release/waf-detect --web --port 3000
-
 # Aggressive testing mode
 ./target/release/waf-detect --smoke-test example.com --aggressive
 
@@ -359,8 +323,6 @@ For complete documentation:
 ./target/release/waf-detect --help
 ```
 
-When using the web interface, visit the API Documentation page for details on the REST API endpoints.
-
 ## 📄 License
 
 MIT OR Apache-2.0
@@ -391,16 +353,14 @@ Follow these steps to contribute a new feature or test:
    cargo build --release
    ```
 
-4. **Run the server:**
+4. **Run a local smoke test:**
    ```sh
-   ./start_server.sh
-   # or for debug mode:
-   ./debug_server.sh
+   ./target/release/waf-detect --smoke-test example.com
    ```
 
-5. **Test the UI:**
-   - Open your browser to [http://localhost:8080](http://localhost:8080)
-   - Try out the features as described above.
+5. **Validate CLI behavior:**
+   - Check help output: `./target/release/waf-detect --help`
+   - Run a detection command with JSON output.
 
 6. **Commit your changes:**
    ```sh
