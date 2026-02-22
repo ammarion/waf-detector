@@ -13,9 +13,6 @@ categories = ["command-line-utilities", "web-programming", "network-programming"
 name = "waf-detect"
 path = "src/main.rs"
 
-[[bin]]
-name = "test-integration"
-path = "test_integration.rs"
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }

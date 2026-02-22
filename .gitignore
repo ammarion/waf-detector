@@ -1,7 +1,6 @@
 # Rust
 target/
 **/*.rs.bk
-integration_test_report.txt
 
 # OS
 .DS_Store
@@ -10,19 +9,27 @@ integration_test_report.txt
 .idea/
 .vscode/
 
-# Node (just in case)
+# Node
 node_modules/
 
-# Local keys or binaries
+# Local keys
 waf-detect
 waf-detect.pub
 
-# Local docs
+# Local docs / session memory
 PRD_*.md
-node_modules
-
-# Session memory (local only)
 MEMORY.md
 CLAUDE.md
+
+# Worktrees
 .worktrees/
 
+# Test output
+integration_test_report.txt
+*.log
+
+# Playwright
+.playwright-mcp/
+
+# Temp files
+.tmp/
