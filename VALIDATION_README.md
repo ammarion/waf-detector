@@ -178,12 +178,12 @@ We aim for:
 4. Commit and push - CI will validate again
 5. Check PR comments for validation results
 
-### Virtual Adversary (VA) Validation Notes
+### Enforcement / Behavioral Testing Validation Notes
 
-- VA effectiveness tests require **consent and authorized targets**.
-- Automated VA tests are limited to unit coverage; end-to-end VA runs should be validated manually.
-- Validate VA replay plan and export checks via CLI (`--va-replay`, `--va-replay-csv`).
-- Keep `cargo test` green after any VA probe or replay-plan changes.
+- Enforcement and behavioral tests require **consent and authorized targets**.
+- Automated tests are limited to unit coverage; end-to-end runs should be validated manually.
+- Validate enforcement replay plan and export checks via CLI (`va --replay`, `va --replay-csv`).
+- Keep `cargo test` green after any probe or replay-plan changes.
 
 ## Troubleshooting
 
