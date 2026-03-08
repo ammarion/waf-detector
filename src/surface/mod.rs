@@ -424,8 +424,10 @@ pub(crate) fn stable_endpoint_id(
 }
 
 pub(crate) fn summarize_surface_map(endpoints: &[SurfaceEndpoint]) -> SurfaceMapSummary {
-    let mut summary = SurfaceMapSummary::default();
-    summary.total_endpoints = endpoints.len();
+    let mut summary = SurfaceMapSummary {
+        total_endpoints: endpoints.len(),
+        ..Default::default()
+    };
 
     for endpoint in endpoints {
         if !endpoint.excluded {

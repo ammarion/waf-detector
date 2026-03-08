@@ -4,6 +4,16 @@ CLI tool for detecting, testing, and profiling Web Application Firewalls (WAFs) 
 
 > **Important:** Only test systems you own or have explicit authorization to test.
 
+## What It Does
+
+| Mode | What it tests | Flag |
+|------|--------------|------|
+| **Detection** | Identifies which WAF/CDN protects a target | `waf-detect <url>` |
+| **Smoke Test** | Sends known attack payloads, measures block rates | `--smoke-test <url>` |
+| **Enforcement Test** | Sends categorized attack probes, measures block/challenge/allow | `--va <url>` |
+| **Behavioral Analysis** | Paired probes testing WAF sophistication across 5 channels | `--va2 <url> --va2-run` |
+| **Posture Report** | Unified grade (A-F) combining all test results | `--posture <url>` |
+
 ## Quick Start
 
 ```bash

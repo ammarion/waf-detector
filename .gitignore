@@ -46,8 +46,10 @@ integration_test_report.txt
 waf-effectiveness-*.json
 tokui-*
 
-# WAF assessment reports (waf-assess workflow)
+# Internal / company-specific — never commit to public repo
 **/WAF_ASSESSMENT_*.md
+adobe_urls.txt
+pattern_analysis/
 
 # Captured traffic / live session artifacts
 *.har
@@ -56,7 +58,3 @@ tests/fixtures/tokenizer_ui_mock*
 # Personal files (resume, CV, etc.)
 Ammar_Alim_*
 *.pdf
-
-# Local test data / discovery output
-adobe_urls.txt
-pattern_analysis/

@@ -22,7 +22,7 @@ pub struct SmokeTestConfig {
     pub max_concurrent_requests: usize,
     pub include_advanced_payloads: bool,
     pub custom_headers: HashMap<String, String>,
-    /// Suppress all stdout output (for TUI mode)
+    /// Suppress all stdout output for non-interactive execution
     pub quiet: bool,
 }
 
@@ -522,7 +522,7 @@ impl WafSmokeTest {
             ));
         }
 
-        // Print real-time result (suppressed in quiet/TUI mode)
+        // Print real-time result (suppressed in quiet mode)
         if !self.config.quiet {
             self.print_test_result(
                 &payload_type,
