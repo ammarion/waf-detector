@@ -9,6 +9,7 @@ use crate::engine::DetectionEngine;
 use crate::hardening::{
     CiGateMode, HardeningConfig, HardeningOrchestrator, RegressionRunner, VendorMode,
 };
+use crate::origin_probe::{OriginProbeConfig, OriginProber};
 use crate::payload::waf_smoke_test::{SmokeTestConfig, WafSmokeTest};
 use crate::posture::PostureBuilder;
 use crate::providers::{
@@ -19,7 +20,6 @@ use crate::providers::{
 };
 use crate::registry::ProviderRegistry;
 use crate::surface::{CompilerInputs, SurfaceMap, SurfaceMapCompiler, AUTH_PROFILE_ENV};
-use crate::origin_probe::{OriginProbeConfig, OriginProber};
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner};
 use crate::DetectionResult;
@@ -656,7 +656,6 @@ impl SimpleCliApp {
         self.registry
             .set_payload_analysis_enabled(payload_analysis_enabled);
         let engine = DetectionEngine::new(self.registry.clone())?.with_waf_mode_detection();
-
 
         if matches.get_flag("list") {
             return self.list_providers(&engine).await;
@@ -3388,7 +3387,9 @@ fn build_origin_probe_subcommand() -> Command {
         .arg(
             Arg::new("no-attack-probe")
                 .long("no-attack-probe")
-                .help("Skip attack probe — discovery only (check bypass paths without sending probe)")
+                .help(
+                    "Skip attack probe — discovery only (check bypass paths without sending probe)",
+                )
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(

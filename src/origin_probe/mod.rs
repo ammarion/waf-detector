@@ -28,12 +28,7 @@ pub const WELL_KNOWN_BYPASS_PATHS: &[&str] = &[
     "/favicon.ico",
 ];
 
-const BLOCK_KEYWORDS: &[&str] = &[
-    "access denied",
-    "request blocked",
-    "forbidden",
-    "blocked",
-];
+const BLOCK_KEYWORDS: &[&str] = &["access denied", "request blocked", "forbidden", "blocked"];
 
 const BLOCK_STATUS_CODES: &[u16] = &[403, 406, 429, 503];
 
@@ -138,12 +133,8 @@ impl OriginProber {
             let (main_status, waf_bypassed) = if self.config.send_attack_probe {
                 self.sleep_delay().await;
 
-                let probe_url =
-                    format!("{}?waf_probe={WAF_PROBE_MARKER}", base_url);
-                let host_header = vec![(
-                    "Host".to_string(),
-                    target.host.clone(),
-                )];
+                let probe_url = format!("{}?waf_probe={WAF_PROBE_MARKER}", base_url);
+                let host_header = vec![("Host".to_string(), target.host.clone())];
 
                 let probe_resp = self
                     .http
@@ -161,9 +152,8 @@ impl OriginProber {
                     Ok(r) => {
                         let body_lower = r.body.to_lowercase();
                         let blocked_by_status = BLOCK_STATUS_CODES.contains(&r.status);
-                        let blocked_by_body = BLOCK_KEYWORDS
-                            .iter()
-                            .any(|kw| body_lower.contains(kw));
+                        let blocked_by_body =
+                            BLOCK_KEYWORDS.iter().any(|kw| body_lower.contains(kw));
                         let bypassed = !blocked_by_status && !blocked_by_body;
                         if bypassed {
                             evidence.push(format!(
