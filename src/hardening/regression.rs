@@ -424,9 +424,8 @@ fn response_deviates_from_baseline(
     response: &HttpResponse,
     baseline_response: Option<&HttpResponse>,
 ) -> bool {
-    baseline_response.map_or(true, |baseline| {
-        response.status != baseline.status || response.body != baseline.body
-    })
+    baseline_response
+        .is_none_or(|baseline| response.status != baseline.status || response.body != baseline.body)
 }
 
 fn classify_response(
@@ -685,6 +684,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn test_runner_replays_pack_and_counts_failures() {
         let _guard = crate::test_utils::env_lock()
             .lock()

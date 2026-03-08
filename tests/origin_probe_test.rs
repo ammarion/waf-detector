@@ -70,8 +70,7 @@ fn test_origin_probe_cli_parses() {
     let app = waf_detector::cli::build_simple_cli();
     let result = app.try_get_matches_from(vec!["waf-detect", "origin-probe", "--help"]);
     // --help causes an early exit with a DisplayHelp error, which is expected
-    match result {
-        Err(e) => assert_eq!(e.kind(), clap::error::ErrorKind::DisplayHelp),
-        Ok(_) => {}
+    if let Err(e) = result {
+        assert_eq!(e.kind(), clap::error::ErrorKind::DisplayHelp);
     }
 }

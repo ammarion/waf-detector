@@ -381,10 +381,10 @@ pub fn ci_gate_triggered(findings: &[HardeningFinding], ci_gate: CiGateMode) -> 
     ci_gate_failures(findings, ci_gate).next().is_some()
 }
 
-pub fn ci_gate_failures<'a>(
-    findings: &'a [HardeningFinding],
+pub fn ci_gate_failures(
+    findings: &[HardeningFinding],
     ci_gate: CiGateMode,
-) -> impl Iterator<Item = &'a HardeningFinding> {
+) -> impl Iterator<Item = &HardeningFinding> {
     findings.iter().filter(move |finding| match ci_gate {
         CiGateMode::Off => false,
         CiGateMode::Critical => {

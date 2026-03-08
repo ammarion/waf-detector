@@ -830,6 +830,7 @@ mod effectiveness_tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
     async fn test_effectiveness_runs_parser_discrepancy_phase_by_default() {
         let _guard = crate::test_utils::env_lock()
             .lock()
@@ -840,9 +841,11 @@ mod effectiveness_tests {
         write_valid_consent(&temp_dir, &["127.0.0.1"]);
         let (url, handle) = start_effectiveness_server().await;
 
-        let mut config = EffectivenessConfig::default();
-        config.max_requests_per_minute = 10_000;
-        config.request_delay = std::time::Duration::from_millis(0);
+        let config = EffectivenessConfig {
+            max_requests_per_minute: 10_000,
+            request_delay: std::time::Duration::from_millis(0),
+            ..Default::default()
+        };
 
         let mut test = EffectivenessTest::new(config).await.unwrap();
         let target = make_test_target(&url);
@@ -865,6 +868,7 @@ mod effectiveness_tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
     async fn test_effectiveness_can_disable_parser_discrepancy_via_toml_override() {
         let _guard = crate::test_utils::env_lock()
             .lock()
@@ -875,7 +879,6 @@ mod effectiveness_tests {
         write_valid_consent(&temp_dir, &["127.0.0.1"]);
         let (url, handle) = start_effectiveness_server().await;
 
-        let mut config = EffectivenessConfig::default();
         let overrides: EffectivenessConfigOverrides = toml::from_str(
             r#"
 parser_discrepancy_enabled = false
@@ -883,9 +886,12 @@ parser_discrepancy_max_pairs = 3
 "#,
         )
         .unwrap();
+        let mut config = EffectivenessConfig {
+            max_requests_per_minute: 10_000,
+            request_delay: std::time::Duration::from_millis(0),
+            ..Default::default()
+        };
         config.apply_overrides(overrides);
-        config.max_requests_per_minute = 10_000;
-        config.request_delay = std::time::Duration::from_millis(0);
 
         let mut test = EffectivenessTest::new(config).await.unwrap();
         let target = make_test_target(&url);

@@ -277,7 +277,7 @@ impl HardeningOrchestrator {
         let mut plan = build_va2_campaign_plan(
             &target.normalized_url,
             &self.config.va2_phases,
-            self.config.va2.clone(),
+            self.config.va2,
         )?;
         if let Some(endpoint) = endpoint {
             rewrite_va2_plan_for_endpoint(&mut plan, endpoint);

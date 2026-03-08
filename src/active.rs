@@ -315,7 +315,7 @@ fn classify_ipv4(ip: Ipv4Addr) -> IpClassification {
     if octets[0] == 192 && octets[1] == 0 && octets[2] == 2 {
         return IpClassification::Documentation;
     }
-    if octets[0] == 198 && octets[1] == 18 || octets[0] == 198 && octets[1] == 19 {
+    if octets[0] == 198 && (octets[1] == 18 || octets[1] == 19) {
         return IpClassification::Benchmark;
     }
     if octets[0] == 198 && octets[1] == 51 && octets[2] == 100 {

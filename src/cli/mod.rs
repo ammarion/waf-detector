@@ -1472,6 +1472,7 @@ impl SimpleCliApp {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_va_report(
         &self,
         report: &mut crate::virtual_adversary::VaRunReport,
