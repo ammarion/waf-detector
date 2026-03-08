@@ -133,6 +133,32 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
         method: "GET",
         body: None,
     });
+    // A-1: XFF loopback spoof
+    probes.push(Probe {
+        class: ProbeClass::ProtocolMutation,
+        channel: ProbeChannel::Header,
+        description: "XFF loopback spoof",
+        payload: "xff-loopback-spoof".to_string(),
+        headers: vec![("X-Forwarded-For".to_string(), "127.0.0.1".to_string())],
+        method: "GET",
+        body: None,
+    });
+    // A-9: HTTP/1.0 downgrade signal
+    probes.push(Probe {
+        class: ProbeClass::ProtocolMutation,
+        channel: ProbeChannel::Header,
+        description: "HTTP/1.0 downgrade via proxy hint",
+        payload: "http10-downgrade-via".to_string(),
+        headers: vec![
+            (
+                "Via".to_string(),
+                "1.0 proxy.legacy.internal".to_string(),
+            ),
+            ("Pragma".to_string(), "no-cache".to_string()),
+        ],
+        method: "GET",
+        body: None,
+    });
 
     if tier >= 2 {
         probes.push(Probe {
@@ -170,6 +196,98 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
             channel: ProbeChannel::Query,
             description: "Unicode normalization boundary",
             payload: "q=%E2%85%A0".to_string(), // Roman numeral one
+            headers: Vec::new(),
+            method: "GET",
+            body: None,
+        });
+        // A-2: IP trust header cluster
+        probes.push(Probe {
+            class: ProbeClass::ProtocolMutation,
+            channel: ProbeChannel::Header,
+            description: "IP trust header cluster",
+            payload: "ip-trust-header-cluster".to_string(),
+            headers: vec![
+                ("X-Real-IP".to_string(), "127.0.0.1".to_string()),
+                ("True-Client-IP".to_string(), "127.0.0.1".to_string()),
+                ("CF-Connecting-IP".to_string(), "127.0.0.1".to_string()),
+            ],
+            method: "GET",
+            body: None,
+        });
+        // A-3: X-Original-URL override
+        probes.push(Probe {
+            class: ProbeClass::SemanticDrift,
+            channel: ProbeChannel::Header,
+            description: "X-Original-URL path override",
+            payload: "x-original-url-override".to_string(),
+            headers: vec![("X-Original-URL".to_string(), "/admin".to_string())],
+            method: "GET",
+            body: None,
+        });
+        // A-4: X-Rewrite-URL override
+        probes.push(Probe {
+            class: ProbeClass::SemanticDrift,
+            channel: ProbeChannel::Header,
+            description: "X-Rewrite-URL path override",
+            payload: "x-rewrite-url-override".to_string(),
+            headers: vec![("X-Rewrite-URL".to_string(), "/admin".to_string())],
+            method: "GET",
+            body: None,
+        });
+        // A-5: h2c cleartext upgrade
+        probes.push(Probe {
+            class: ProbeClass::ProtocolMutation,
+            channel: ProbeChannel::Header,
+            description: "h2c cleartext upgrade probe",
+            payload: "h2c-upgrade-probe".to_string(),
+            headers: vec![
+                ("Upgrade".to_string(), "h2c".to_string()),
+                (
+                    "HTTP2-Settings".to_string(),
+                    "AAMAAABkAAQAAP__".to_string(),
+                ),
+                (
+                    "Connection".to_string(),
+                    "Upgrade, HTTP2-Settings".to_string(),
+                ),
+            ],
+            method: "GET",
+            body: None,
+        });
+        // A-6: WebSocket upgrade
+        probes.push(Probe {
+            class: ProbeClass::ProtocolMutation,
+            channel: ProbeChannel::Header,
+            description: "WebSocket upgrade probe",
+            payload: "ws-upgrade-probe".to_string(),
+            headers: vec![
+                ("Upgrade".to_string(), "websocket".to_string()),
+                ("Connection".to_string(), "Upgrade".to_string()),
+                (
+                    "Sec-WebSocket-Key".to_string(),
+                    "dGhlIHNhbXBsZSBub25jZQ==".to_string(),
+                ),
+                ("Sec-WebSocket-Version".to_string(), "13".to_string()),
+            ],
+            method: "GET",
+            body: None,
+        });
+        // A-7: Null byte in query
+        probes.push(Probe {
+            class: ProbeClass::EncodingBoundary,
+            channel: ProbeChannel::Query,
+            description: "Null byte in query string",
+            payload: "q=%00injected".to_string(),
+            headers: Vec::new(),
+            method: "GET",
+            body: None,
+        });
+        // A-8: Zero-width space in query
+        probes.push(Probe {
+            class: ProbeClass::EncodingBoundary,
+            channel: ProbeChannel::Query,
+            description: "Zero-width space in query token",
+            payload: "q=safe%E2%80%8Bword".to_string(),
             headers: Vec::new(),
             method: "GET",
             body: None,
@@ -310,6 +428,32 @@ mod tests {
         for probe in probes {
             assert!(seen.insert(probe.payload.clone()));
         }
+    }
+
+    #[test]
+    fn tier1_has_xff_spoof_probe() {
+        let probes = probe_catalog_for_tier(1).unwrap();
+        assert!(probes
+            .iter()
+            .any(|p| p.payload == "xff-loopback-spoof"));
+    }
+
+    #[test]
+    fn tier2_has_path_override_probes() {
+        let probes = probe_catalog_for_tier(2).unwrap();
+        assert!(probes
+            .iter()
+            .any(|p| p.payload == "x-original-url-override"));
+        assert!(probes
+            .iter()
+            .any(|p| p.payload == "x-rewrite-url-override"));
+    }
+
+    #[test]
+    fn tier2_has_upgrade_probes() {
+        let probes = probe_catalog_for_tier(2).unwrap();
+        assert!(probes.iter().any(|p| p.payload == "h2c-upgrade-probe"));
+        assert!(probes.iter().any(|p| p.payload == "ws-upgrade-probe"));
     }
 
     #[test]

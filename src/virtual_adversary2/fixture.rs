@@ -261,6 +261,7 @@ mod tests {
             url: "https://example.com/?search=test".to_string(),
             headers: vec![],
             body: None,
+            resolved_ip: None,
         };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -281,6 +282,7 @@ mod tests {
             url: "https://example.com/nonexistent?foo=bar".to_string(),
             headers: vec![],
             body: None,
+            resolved_ip: None,
         };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -301,6 +303,7 @@ mod tests {
             url: "https://example.com/?search=1'+OR+'1'='1".to_string(),
             headers: vec![],
             body: None,
+            resolved_ip: None,
         };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -399,6 +402,7 @@ mod tests {
             url: "https://example.com/?search=test".to_string(),
             headers: vec![],
             body: None,
+            resolved_ip: None,
         };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -422,6 +426,7 @@ mod tests {
                 "application/x-www-form-urlencoded".to_string(),
             )],
             body: Some("search=test".to_string()),
+            resolved_ip: None,
         };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -439,6 +444,7 @@ mod tests {
                 "application/x-www-form-urlencoded".to_string(),
             )],
             body: Some("search=1'+OR+'1'='1".to_string()),
+            resolved_ip: None,
         };
         let resp_attack = rt.block_on(adapter.send(&req_attack)).unwrap();
         assert_eq!(resp_attack.status, 403);
@@ -455,6 +461,7 @@ mod tests {
             url: "https://example.com/?va2=hdr1".to_string(),
             headers: vec![("Referer".to_string(), "https://example.com".to_string())],
             body: None,
+            resolved_ip: None,
         };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -472,6 +479,7 @@ mod tests {
                 "<script>alert(1)</script>".to_string(),
             )],
             body: None,
+            resolved_ip: None,
         };
         let resp_attack = rt.block_on(adapter.send(&req_attack)).unwrap();
         assert_eq!(resp_attack.status, 403);

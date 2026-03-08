@@ -9,9 +9,12 @@ use async_trait::async_trait;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::time::Instant;
 use url::Url;
 
+use crate::active::{guard_target, ResolvedTarget};
+use crate::audit::RunAudit;
 use crate::effectiveness::consent::ConsentManager;
 use crate::http::HttpClient;
 
@@ -91,6 +94,7 @@ pub struct Va2HttpRequest {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+    pub resolved_ip: Option<IpAddr>,
 }
 
 #[derive(Debug, Clone)]
@@ -120,15 +124,27 @@ impl RealVa2HttpAdapter {
 #[async_trait]
 impl Va2HttpAdapter for RealVa2HttpAdapter {
     async fn send(&self, request: &Va2HttpRequest) -> anyhow::Result<Va2HttpResponse> {
-        let response = self
-            .client
-            .request(
-                &request.method,
-                &request.url,
-                &request.headers,
-                request.body.as_deref(),
-            )
-            .await?;
+        let response = if let Some(ip) = request.resolved_ip {
+            self.client
+                .request_pinned(
+                    &request.method,
+                    &request.url,
+                    &request.headers,
+                    request.body.as_deref(),
+                    ip,
+                    None,
+                )
+                .await?
+        } else {
+            self.client
+                .request(
+                    &request.method,
+                    &request.url,
+                    &request.headers,
+                    request.body.as_deref(),
+                )
+                .await?
+        };
         Ok(Va2HttpResponse {
             status: response.status,
             headers: response.headers,
@@ -317,6 +333,8 @@ pub struct Va2RunReport {
     pub channel_coverage: Option<Va2ChannelCoverage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paired_control: Option<PairedControlSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<RunAudit>,
 }
 
 pub struct Va2Runner {
@@ -340,8 +358,16 @@ impl Va2Runner {
     }
 
     pub async fn run_plan(&self, plan: Va2CampaignPlan) -> Result<Va2RunReport> {
+        let target = guard_target(&self.consent_manager, &plan.target_url)?;
+        self.run_plan_with_target(plan, &target).await
+    }
+
+    pub async fn run_plan_with_target(
+        &self,
+        plan: Va2CampaignPlan,
+        target: &ResolvedTarget,
+    ) -> Result<Va2RunReport> {
         let run_started = Instant::now();
-        ensure_va2_consent_and_target(&self.consent_manager, &plan.target_url)?;
 
         let mut results = Vec::with_capacity(plan.steps.len());
         let mut baseline_samples = Vec::new();
@@ -389,7 +415,7 @@ impl Va2Runner {
             if step.delay_ms > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms)).await;
             }
-            let request = build_va2_request(&plan.target_url, step)?;
+            let request = build_va2_request(target, step)?;
             let started = Instant::now();
             let response = self.http.send(&request).await;
             let duration = started.elapsed().as_millis();
@@ -531,27 +557,17 @@ impl Va2Runner {
             differential: differential_results,
             channel_coverage,
             paired_control,
+            audit: None,
         })
     }
 }
 
-fn ensure_va2_consent_and_target(consent_manager: &ConsentManager, target_url: &str) -> Result<()> {
-    if !consent_manager.has_valid_consent()? {
-        return Err(anyhow!(
-            "Consent is required before running behavioral analysis"
-        ));
-    }
-    if !consent_manager.is_target_allowed(target_url)? {
-        return Err(anyhow!(
-            "Target is not authorized for behavioral analysis"
-        ));
-    }
-    Ok(())
-}
-
-fn build_va2_request(target_url: &str, step: &Va2CampaignStep) -> Result<Va2HttpRequest> {
-    let mut url = Url::parse(target_url).map_err(|_| {
-        anyhow!("Could not parse '{}' as a URL. Make sure it starts with https:// and contains a valid domain.", target_url)
+fn build_va2_request(target: &ResolvedTarget, step: &Va2CampaignStep) -> Result<Va2HttpRequest> {
+    let mut url = Url::parse(&target.normalized_url).map_err(|_| {
+        anyhow!(
+            "Could not parse '{}' as a URL. Make sure it starts with https:// and contains a valid domain.",
+            target.normalized_url
+        )
     })?;
     url.set_path(&step.path);
     if let Some(query) = &step.query {
@@ -571,6 +587,7 @@ fn build_va2_request(target_url: &str, step: &Va2CampaignStep) -> Result<Va2Http
         url: url.to_string(),
         headers,
         body: step.body.clone(),
+        resolved_ip: Some(target.pinned_ip),
     })
 }
 
@@ -1042,7 +1059,9 @@ pub fn build_va2_campaign_plan(
         anyhow!("Could not parse '{}' as a URL. Make sure it starts with https:// and contains a valid domain.", target_url)
     })?;
     if parsed.host_str().is_none() {
-        return Err(anyhow!("URL must include a domain name (e.g. https://example.com)."));
+        return Err(anyhow!(
+            "URL must include a domain name (e.g. https://example.com)."
+        ));
     }
     if phases.is_empty() {
         return Err(anyhow!("va2 campaign requires at least one phase"));
@@ -1548,7 +1567,7 @@ mod tests {
             .unwrap();
             let runner = Va2Runner::with_adapter(Box::new(StubAdapter)).unwrap();
             let err = runner.run_plan(plan).await.unwrap_err().to_string();
-            assert!(err.contains("Consent is required"));
+            assert!(err.contains("not registered for active testing"));
         })
         .await;
     }
