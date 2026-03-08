@@ -28,6 +28,9 @@ pub struct EffectivenessReport {
     pub baseline_results: HashMap<String, TestResult>,
     /// Summary statistics
     pub statistics: TestStatistics,
+    /// Parser discrepancy candidate bypass summary
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parser_discrepancy: Option<ParserDiscrepancySummary>,
 }
 
 /// A phase of testing
@@ -70,6 +73,40 @@ pub struct TestStatistics {
     pub false_positive_rate: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ParserDiscrepancySummary {
+    pub executed_pairs: usize,
+    pub candidate_bypasses: usize,
+    pub unique_bypasses: usize,
+    #[serde(default)]
+    pub by_content_type: HashMap<String, usize>,
+    #[serde(default)]
+    pub by_canonical_class: HashMap<String, usize>,
+    #[serde(default)]
+    pub findings: Vec<DiscrepancyFinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscrepancyFinding {
+    pub content_type: String,
+    pub canonical_class: String,
+    pub severity: String,
+    pub confidence: f64,
+    pub suppressed_variants: usize,
+    pub evidence: String,
+    pub control_replay: ReplayRequest,
+    pub variant_replay: ReplayRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReplayRequest {
+    pub method: String,
+    pub url: String,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
+
 impl EffectivenessReport {
     /// Create a new report
     pub fn new(target_url: &str) -> Self {
@@ -92,6 +129,7 @@ impl EffectivenessReport {
                 false_positive_count: 0,
                 false_positive_rate: 0.0,
             },
+            parser_discrepancy: None,
         }
     }
 
@@ -237,6 +275,55 @@ impl EffectivenessReport {
         }
         summary.push('\n');
 
+        if let Some(parser_discrepancy) = &self.parser_discrepancy {
+            summary.push_str("## Parser Discrepancy Testing\n");
+            summary.push_str(&format!(
+                "- Executed Pairs: {}\n",
+                parser_discrepancy.executed_pairs
+            ));
+            summary.push_str(&format!(
+                "- Candidate Bypasses: {}\n",
+                parser_discrepancy.candidate_bypasses
+            ));
+            summary.push_str(&format!(
+                "- Unique Bypasses: {}\n",
+                parser_discrepancy.unique_bypasses
+            ));
+
+            if !parser_discrepancy.by_content_type.is_empty() {
+                let mut content_types: Vec<_> = parser_discrepancy.by_content_type.iter().collect();
+                content_types.sort_by(|(left_name, left_count), (right_name, right_count)| {
+                    right_count
+                        .cmp(left_count)
+                        .then_with(|| left_name.cmp(right_name))
+                });
+                let rendered = content_types
+                    .into_iter()
+                    .map(|(name, count)| format!("{name}: {count}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                summary.push_str(&format!("- By Content-Type: {rendered}\n"));
+            }
+
+            if !parser_discrepancy.by_canonical_class.is_empty() {
+                let mut classes: Vec<_> = parser_discrepancy.by_canonical_class.iter().collect();
+                classes.sort_by(|(left_name, left_count), (right_name, right_count)| {
+                    right_count
+                        .cmp(left_count)
+                        .then_with(|| left_name.cmp(right_name))
+                });
+                let rendered = classes
+                    .into_iter()
+                    .take(5)
+                    .map(|(name, count)| format!("{name}: {count}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                summary.push_str(&format!("- Top Classes: {rendered}\n"));
+            }
+
+            summary.push('\n');
+        }
+
         // Vulnerabilities
         if !self.vulnerabilities.is_empty() {
             summary.push_str("## Vulnerabilities Found\n");
@@ -344,6 +431,24 @@ impl EffectivenessReport {
             ));
         }
         html.push_str("</div>");
+
+        if let Some(parser_discrepancy) = &self.parser_discrepancy {
+            html.push_str("<h2>Parser Discrepancy Testing</h2>");
+            html.push_str("<div>");
+            html.push_str(&format!(
+                r#"<div class="stat">Pairs: <span class="stat-value">{}</span></div>"#,
+                parser_discrepancy.executed_pairs
+            ));
+            html.push_str(&format!(
+                r#"<div class="stat">Candidates: <span class="stat-value">{}</span></div>"#,
+                parser_discrepancy.candidate_bypasses
+            ));
+            html.push_str(&format!(
+                r#"<div class="stat">Unique: <span class="stat-value">{}</span></div>"#,
+                parser_discrepancy.unique_bypasses
+            ));
+            html.push_str("</div>");
+        }
 
         // Vulnerabilities
         if !self.vulnerabilities.is_empty() {
