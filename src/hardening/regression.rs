@@ -424,9 +424,8 @@ fn response_deviates_from_baseline(
     response: &HttpResponse,
     baseline_response: Option<&HttpResponse>,
 ) -> bool {
-    baseline_response.is_none_or(|baseline| {
-        response.status != baseline.status || response.body != baseline.body
-    })
+    baseline_response
+        .is_none_or(|baseline| response.status != baseline.status || response.body != baseline.body)
 }
 
 fn classify_response(

@@ -150,10 +150,7 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
         description: "HTTP/1.0 downgrade via proxy hint",
         payload: "http10-downgrade-via".to_string(),
         headers: vec![
-            (
-                "Via".to_string(),
-                "1.0 proxy.legacy.internal".to_string(),
-            ),
+            ("Via".to_string(), "1.0 proxy.legacy.internal".to_string()),
             ("Pragma".to_string(), "no-cache".to_string()),
         ],
         method: "GET",
@@ -242,10 +239,7 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
             payload: "h2c-upgrade-probe".to_string(),
             headers: vec![
                 ("Upgrade".to_string(), "h2c".to_string()),
-                (
-                    "HTTP2-Settings".to_string(),
-                    "AAMAAABkAAQAAP__".to_string(),
-                ),
+                ("HTTP2-Settings".to_string(), "AAMAAABkAAQAAP__".to_string()),
                 (
                     "Connection".to_string(),
                     "Upgrade, HTTP2-Settings".to_string(),
@@ -433,9 +427,7 @@ mod tests {
     #[test]
     fn tier1_has_xff_spoof_probe() {
         let probes = probe_catalog_for_tier(1).unwrap();
-        assert!(probes
-            .iter()
-            .any(|p| p.payload == "xff-loopback-spoof"));
+        assert!(probes.iter().any(|p| p.payload == "xff-loopback-spoof"));
     }
 
     #[test]
@@ -444,9 +436,7 @@ mod tests {
         assert!(probes
             .iter()
             .any(|p| p.payload == "x-original-url-override"));
-        assert!(probes
-            .iter()
-            .any(|p| p.payload == "x-rewrite-url-override"));
+        assert!(probes.iter().any(|p| p.payload == "x-rewrite-url-override"));
     }
 
     #[test]
