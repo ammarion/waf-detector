@@ -1,6 +1,6 @@
 ---
 name: cli-doctor
-description: Run waf-detect environment health checks and shell completion setup guidance. Use when scans fail early or the user asks for completion installation help.
+description: Use when scans fail early, the environment looks unhealthy, or the user wants shell completions.
 ---
 
 This is a thin Codex wrapper.

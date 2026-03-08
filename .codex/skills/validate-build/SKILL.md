@@ -1,6 +1,6 @@
 ---
 name: validate-build
-description: Run the repo validation pipeline for formatting, linting, tests, and release build verification. Use before merge or push.
+description: Use when the user wants final formatting, lint, test, and build validation before merge or push.
 ---
 
 This is a thin Codex wrapper.

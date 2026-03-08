@@ -1,10 +1,9 @@
 ---
 name: validate-build
-description: Full build validation — compile, test, lint, and verify
-user_invocable: true
+description: Use when the user wants final formatting, lint, test, and build validation before merge or push.
 ---
 
-# Claude wrapper for the shared build validation workflow.
+# Claude wrapper for the shared validate-build workflow.
 
 Source of truth: `agent-skills/validate-build/WORKFLOW.md`
 

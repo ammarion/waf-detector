@@ -1,6 +1,6 @@
 ---
 name: security-audit
-description: Run a structured security audit on the WAF detector codebase. Use for security reviews, pre-release audits, or hardening work.
+description: Use when the user wants a structured security review, hardening pass, or pre-release audit.
 ---
 
 This is a thin Codex wrapper.

@@ -1,6 +1,6 @@
 ---
 name: waf-assess
-description: Run comprehensive WAF security assessments, analyze results, and propose remediation. Use when the user wants an end-to-end assessment workflow rather than a single command.
+description: Use when the user wants an end-to-end WAF assessment workflow instead of a single CLI command.
 ---
 
 This is a thin Codex wrapper.

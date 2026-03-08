@@ -1,10 +1,9 @@
 ---
 name: cli-doctor
-description: Run environment health checks and generate shell completions for waf-detect
-user_invocable: true
+description: Use when scans fail early, the environment looks unhealthy, or the user wants shell completions.
 ---
 
-# Claude wrapper for the shared CLI doctor workflow.
+# Claude wrapper for the shared cli-doctor workflow.
 
 Source of truth: `agent-skills/cli-doctor/WORKFLOW.md`
 
