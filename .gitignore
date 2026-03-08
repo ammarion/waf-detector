@@ -43,7 +43,13 @@ integration_test_report.txt
 *-va2-full.json
 *-posture.json
 *-effectiveness.txt
+waf-effectiveness-*.json
 tokui-*
+
+# Internal / company-specific — never commit to public repo
+**/WAF_ASSESSMENT_*.md
+adobe_urls.txt
+pattern_analysis/
 
 # Captured traffic / live session artifacts
 *.har
