@@ -684,6 +684,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn test_runner_replays_pack_and_counts_failures() {
         let _guard = crate::test_utils::env_lock()
             .lock()

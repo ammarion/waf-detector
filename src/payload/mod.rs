@@ -670,6 +670,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn test_payload_analysis_requires_registered_target_scope() {
         let _guard = crate::test_utils::env_lock()
             .lock()

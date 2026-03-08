@@ -1205,6 +1205,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn test_smoke_test_requires_registered_target_scope() {
         let _guard = crate::test_utils::env_lock()
             .lock()
