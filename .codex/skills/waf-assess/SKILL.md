@@ -3,7 +3,7 @@ name: waf-assess
 description: Use when the user wants an end-to-end WAF assessment workflow instead of a single CLI command.
 ---
 
-# Claude wrapper for the shared waf-assess workflow.
+This is a thin Codex wrapper.
 
 Source of truth: `agent-skills/waf-assess/WORKFLOW.md`
 

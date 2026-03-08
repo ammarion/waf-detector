@@ -3,7 +3,7 @@ name: security-audit
 description: Use when the user wants a structured security review, hardening pass, or pre-release audit.
 ---
 
-# Claude wrapper for the shared security-audit workflow.
+This is a thin Codex wrapper.
 
 Source of truth: `agent-skills/security-audit/WORKFLOW.md`
 

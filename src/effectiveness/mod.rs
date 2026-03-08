@@ -16,6 +16,7 @@ use tokio::time::sleep;
 use tracing::{info, warn};
 
 pub mod consent;
+pub mod parser_discrepancy;
 pub mod patterns;
 pub mod report;
 pub mod static_detection;
@@ -26,6 +27,7 @@ pub mod waffled_techniques;
 mod tests;
 
 use consent::ConsentManager;
+use parser_discrepancy::{execute_campaign, ParserDiscrepancyExecutor};
 use report::{EffectivenessReport, Recommendation, Vulnerability};
 use static_detection::{analyze_static_page, format_static_page_warning};
 use techniques::TestingTechnique;
@@ -51,6 +53,10 @@ pub struct EffectivenessConfig {
     pub reduction_ratio: f64,
     /// Avoid flagging small responses; require meaningful absolute length change
     pub min_length_diff: usize,
+    /// Whether curated parser discrepancy testing is enabled
+    pub parser_discrepancy_enabled: bool,
+    /// Maximum number of curated parser discrepancy pairs to execute
+    pub parser_discrepancy_max_pairs: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -63,6 +69,8 @@ pub struct EffectivenessConfigOverrides {
     pub similarity_threshold: Option<f64>,
     pub reduction_ratio: Option<f64>,
     pub min_length_diff: Option<usize>,
+    pub parser_discrepancy_enabled: Option<bool>,
+    pub parser_discrepancy_max_pairs: Option<usize>,
 }
 
 impl Default for EffectivenessConfig {
@@ -77,6 +85,8 @@ impl Default for EffectivenessConfig {
             similarity_threshold: 0.65,
             reduction_ratio: 0.70,
             min_length_diff: 1200,
+            parser_discrepancy_enabled: true,
+            parser_discrepancy_max_pairs: 18,
         }
     }
 }
@@ -106,6 +116,12 @@ impl EffectivenessConfig {
         }
         if let Some(value) = overrides.min_length_diff {
             self.min_length_diff = value;
+        }
+        if let Some(value) = overrides.parser_discrepancy_enabled {
+            self.parser_discrepancy_enabled = value;
+        }
+        if let Some(value) = overrides.parser_discrepancy_max_pairs {
+            self.parser_discrepancy_max_pairs = value.max(1);
         }
     }
 }
@@ -338,16 +354,18 @@ impl EffectivenessTest {
         self.validate_target(url)?;
 
         // Check if target appears to be serving static content
-        match analyze_static_page(url).await {
+        let parser_discrepancy_static_or_ambiguous = match analyze_static_page(url).await {
             Ok(analysis) => {
                 if analysis.is_likely_static {
                     warn!("{}", format_static_page_warning(&analysis));
                 }
+                analysis.is_likely_static
             }
             Err(e) => {
                 warn!("Could not analyze if target is static: {}", e);
+                true
             }
-        }
+        };
 
         let mut report = EffectivenessReport::new(url);
 
@@ -358,6 +376,16 @@ impl EffectivenessTest {
         // Phase 2: Detection testing (with various techniques)
         report.add_phase("Detection Testing".to_string());
         self.test_detection_capabilities(url, &mut report).await?;
+
+        if self.config.parser_discrepancy_enabled {
+            report.add_phase("Parser Discrepancy Testing".to_string());
+            self.test_parser_discrepancy_techniques(
+                url,
+                &mut report,
+                parser_discrepancy_static_or_ambiguous,
+            )
+            .await?;
+        }
 
         // Phase 3: Evasion testing (if intensity level allows)
         if self.config.intensity_level >= 4 {
@@ -566,6 +594,48 @@ impl EffectivenessTest {
         Ok(())
     }
 
+    async fn test_parser_discrepancy_techniques(
+        &mut self,
+        url: &str,
+        report: &mut EffectivenessReport,
+        static_or_ambiguous: bool,
+    ) -> Result<()> {
+        let run = execute_campaign(
+            self,
+            url,
+            self.config.parser_discrepancy_max_pairs,
+            static_or_ambiguous,
+        )
+        .await?;
+
+        for pair in &run.executed_pairs {
+            report.add_test_result(
+                format!("Parser Discrepancy Control: {}", pair.pair.name),
+                pair.control_result.clone(),
+            );
+            report.add_test_result(
+                format!("Parser Discrepancy Variant: {}", pair.pair.name),
+                pair.variant_result.clone(),
+            );
+        }
+
+        for finding in &run.summary.findings {
+            report.add_vulnerability(Vulnerability {
+                severity: finding.severity.clone(),
+                category: "Parser Discrepancy".to_string(),
+                description: format!(
+                    "Candidate parser discrepancy bypass via {} ({})",
+                    finding.canonical_class, finding.content_type
+                ),
+                evidence: finding.evidence.clone(),
+                remediation: "Normalize request bodies and enforce strict RFC-compliant content-type/body parsing before WAF evaluation.".to_string(),
+            });
+        }
+
+        report.parser_discrepancy = Some(run.summary);
+        Ok(())
+    }
+
     /// Apply a specific testing technique
     async fn apply_technique(
         &mut self,
@@ -700,6 +770,20 @@ impl EffectivenessTest {
         }
     }
 
+    pub(crate) async fn execute_replay_request(
+        &mut self,
+        request: &crate::effectiveness::report::ReplayRequest,
+    ) -> Result<TestResult> {
+        self.rate_limit().await?;
+        self.perform_request(
+            &request.url,
+            &request.method,
+            &request.body,
+            request.headers.clone(),
+        )
+        .await
+    }
+
     /// Enforce rate limiting
     async fn rate_limit(&mut self) -> Result<()> {
         let elapsed = self.start_time.elapsed().as_secs_f64() / 60.0;
@@ -739,6 +823,15 @@ impl EffectivenessTest {
                 description: "Strengthen XSS detection rules".to_string(),
                 implementation: "Enable comprehensive XSS filters including DOM-based patterns"
                     .to_string(),
+            });
+        }
+
+        if vuln_categories.contains(&"Parser Discrepancy".to_string()) {
+            report.add_recommendation(Recommendation {
+                priority: "HIGH".to_string(),
+                category: "Normalization".to_string(),
+                description: "Parser discrepancy candidate bypasses were observed".to_string(),
+                implementation: "Add strict content-type normalization and RFC-compliant request validation ahead of WAF evaluation, especially for multipart, JSON, and XML bodies.".to_string(),
             });
         }
 
@@ -866,4 +959,14 @@ pub struct TestResult {
     pub response_body_sample: String,
     pub response_body_length: usize,
     pub response_headers: HashMap<String, String>,
+}
+
+#[async_trait::async_trait]
+impl ParserDiscrepancyExecutor for EffectivenessTest {
+    async fn execute_replay(
+        &mut self,
+        request: &crate::effectiveness::report::ReplayRequest,
+    ) -> Result<TestResult> {
+        self.execute_replay_request(request).await
+    }
 }
