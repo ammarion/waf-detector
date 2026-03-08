@@ -26,6 +26,12 @@ pub struct CompilerInputs {
 
 pub struct SurfaceMapCompiler;
 
+impl Default for SurfaceMapCompiler {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl SurfaceMapCompiler {
     pub fn new() -> Self {
         Self

@@ -424,7 +424,7 @@ fn response_deviates_from_baseline(
     response: &HttpResponse,
     baseline_response: Option<&HttpResponse>,
 ) -> bool {
-    baseline_response.map_or(true, |baseline| {
+    baseline_response.is_none_or(|baseline| {
         response.status != baseline.status || response.body != baseline.body
     })
 }

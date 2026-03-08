@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+
 use crate::surface::{
     AuthClass, RefinedSurfaceMapStats, RoutePriority, SurfaceEndpoint, SurfaceMap,
 };
@@ -39,7 +41,7 @@ impl RouteAwarePlanner {
         auth_profile_available: bool,
     ) -> anyhow::Result<RouteAwarePlan> {
         let mut candidates = surface_map.endpoints.clone();
-        candidates.sort_by(|left, right| route_score(right).cmp(&route_score(left)));
+        candidates.sort_by_key(|right| Reverse(route_score(right)));
 
         let mut plan = RouteAwarePlan::default();
         plan.stats.verified_endpoints = candidates

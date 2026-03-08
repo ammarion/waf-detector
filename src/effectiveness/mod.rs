@@ -369,18 +369,19 @@ impl EffectivenessTest {
         self.resolved_target = Some(target.clone());
 
         // Check if target appears to be serving static content
-        let parser_discrepancy_static_or_ambiguous = match analyze_static_page(&target.normalized_url).await {
-            Ok(analysis) => {
-                if analysis.is_likely_static {
-                    warn!("{}", format_static_page_warning(&analysis));
+        let parser_discrepancy_static_or_ambiguous =
+            match analyze_static_page(&target.normalized_url).await {
+                Ok(analysis) => {
+                    if analysis.is_likely_static {
+                        warn!("{}", format_static_page_warning(&analysis));
+                    }
+                    analysis.is_likely_static
                 }
-                analysis.is_likely_static
-            }
-            Err(e) => {
-                warn!("Could not analyze if target is static: {}", e);
-                true
-            }
-        };
+                Err(e) => {
+                    warn!("Could not analyze if target is static: {}", e);
+                    true
+                }
+            };
 
         let mut report = EffectivenessReport::new(&target.normalized_url);
 
