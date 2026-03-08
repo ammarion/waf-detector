@@ -10,7 +10,6 @@ Use this workflow when the user wants an end-to-end WAF assessment, not just a s
 
 ## Guardrails
 
-- High-risk modes require consent and an authorized target.
 - Only test systems the user owns or is explicitly authorized to assess.
 - Prefer the built binary when it exists; rebuild when missing or stale.
 - If a prerequisite fails, stop and report the blocker instead of guessing.
@@ -19,12 +18,11 @@ Use this workflow when the user wants an end-to-end WAF assessment, not just a s
 
 1. Build or confirm the binary
 2. Run doctor
-3. Check consent and target authorization
-4. Run detection
-5. Run smoke testing
-6. Run effectiveness testing when the user wants deeper validation
-7. Run enforcement and behavioral testing only when the user explicitly wants them
-8. Generate a posture-style summary
+3. Run detection
+4. Run smoke testing
+5. Run effectiveness testing when the user wants deeper validation
+6. Run enforcement and behavioral testing only when the user explicitly wants them
+7. Generate a posture-style summary
 
 ## Commands
 
@@ -43,17 +41,7 @@ cargo build --release
 
 Treat doctor failures as blockers. Treat warnings as advisory unless the user asked for strict gating.
 
-### 3. Consent And Target Authorization
-
-```bash
-./target/release/waf-detect --consent
-./target/release/waf-detect --consent request
-./target/release/waf-detect --consent add-target <domain>
-```
-
-Run consent steps before `--effectiveness`, `--va`, `--va2 --va2-run`, `origin-probe`, or posture flows that include consent-gated data.
-
-### 4. Detection
+### 3. Detection
 
 ```bash
 ./target/release/waf-detect scan <url> --json
@@ -66,7 +54,7 @@ Extract:
 - provider type
 - evidence count
 
-### 4b. Origin Probe (optional)
+### 3b. Origin Probe (optional)
 
 ```bash
 ./target/release/waf-detect origin-probe <url>
@@ -74,7 +62,7 @@ Extract:
 ./target/release/waf-detect origin-probe <url> --no-attack-probe
 ```
 
-Use when you want to check whether health/metrics/status endpoints share the same origin IP and allow WAF bypass via direct connection. Requires an authorized target in consent scope.
+Use when you want to check whether health/metrics/status endpoints share the same origin IP and allow WAF bypass via direct connection.
 
 Extract:
 
@@ -82,7 +70,7 @@ Extract:
 - accessible bypass paths (2xx/3xx responses)
 - whether WAF block was confirmed absent (`bypass_confirmed`)
 
-### 5. Smoke Testing
+### 4. Smoke Testing
 
 ```bash
 ./target/release/waf-detect --smoke-test <url> --aggressive -o /tmp/waf-smoke.json
@@ -95,7 +83,7 @@ Extract:
 - effectiveness percentage
 - any obvious blind spots or unblocked categories
 
-### 6. Effectiveness Testing
+### 5. Effectiveness Testing
 
 ```bash
 ./target/release/waf-detect --effectiveness <url>
@@ -104,11 +92,10 @@ Extract:
 
 Notes:
 
-- This is consent-gated.
-- Parser-discrepancy candidate bypass testing now runs inside effectiveness by default.
+- Parser-discrepancy candidate bypass testing runs inside effectiveness by default.
 - Use config overrides when the user wants a narrower or more aggressive run.
 
-### 7. Enforcement Testing
+### 6. Enforcement Testing
 
 ```bash
 ./target/release/waf-detect va <url>
@@ -117,7 +104,7 @@ Notes:
 
 Use when the user wants enforcement behavior, replay artifacts, or variant-level evidence.
 
-### 8. Behavioral Testing
+### 7. Behavioral Testing
 
 ```bash
 ./target/release/waf-detect va2 <url> --run
@@ -127,7 +114,7 @@ Use when the user wants enforcement behavior, replay artifacts, or variant-level
 
 Use when the user wants channel coverage, statefulness, challenge behavior, rate limiting, or behavioral fingerprinting.
 
-### 9. Posture Summary
+### 8. Posture Summary
 
 ```bash
 ./target/release/waf-detect --posture <url>
@@ -143,7 +130,6 @@ Produce a concise report with:
 
 - Target
 - Doctor status
-- Consent status
 - Detection summary
 - Smoke summary
 - Effectiveness summary

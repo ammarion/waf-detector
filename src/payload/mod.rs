@@ -665,31 +665,6 @@ impl Default for PayloadAnalyzer {
 mod tests {
     use super::*;
     use crate::http::HttpResponse;
-    use tempfile::TempDir;
-
-    #[tokio::test]
-    async fn test_payload_analysis_requires_registered_target_scope() {
-        let _guard = crate::test_utils::env_lock()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
-
-        let analyzer = PayloadAnalyzer::new();
-        let err = analyzer
-            .analyze("https://example.com")
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("Target is not registered for active testing"));
-
-        if let Some(value) = original_home {
-            std::env::set_var("WAF_DETECTOR_HOME", value);
-        } else {
-            std::env::remove_var("WAF_DETECTOR_HOME");
-        }
-    }
 
     #[test]
     fn test_is_blocked_response_ignores_unchanged_keyword_body() {

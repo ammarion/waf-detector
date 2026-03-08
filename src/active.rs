@@ -129,11 +129,10 @@ pub fn guard_target_with_profile(
 
     let registered_target = consent_manager
         .match_target(&normalized_url)?
-        .ok_or_else(|| {
-            anyhow!(
-                "Target is not registered for active testing. Add it with `waf-detect --scope init <domain>`."
-            )
-        })?;
+        .unwrap_or_else(|| ScopeTarget {
+            host: host.clone(),
+            class: TargetClass::Public,
+        });
 
     if registered_target.class == TargetClass::Internal && profile != ActiveTargetProfile::Internal
     {

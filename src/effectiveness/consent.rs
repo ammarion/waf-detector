@@ -136,18 +136,18 @@ impl ConsentManager {
         }
 
         let consent = self.load_consent()?;
-        let authorized_targets = consent
-            .targets
+        let targets = consent.effective_targets();
+        let authorized_targets = targets
             .iter()
             .map(|target| target.host.clone())
             .collect::<Vec<_>>();
 
         Ok(ConsentStatus {
-            has_consent: !consent.targets.is_empty(),
+            has_consent: !targets.is_empty(),
             terms_version: consent.terms_version,
             expires_in_days: None,
             authorized_targets,
-            targets: consent.targets,
+            targets,
             consent_timestamp: Some(consent.timestamp),
         })
     }

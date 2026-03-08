@@ -43,12 +43,20 @@ integration_test_report.txt
 *-va2-full.json
 *-posture.json
 *-effectiveness.txt
+waf-effectiveness-*.json
 tokui-*
+
+# WAF assessment reports (waf-assess workflow)
+**/WAF_ASSESSMENT_*.md
 
 # Captured traffic / live session artifacts
 *.har
 tests/fixtures/tokenizer_ui_mock*
 
-# Personal files
+# Personal files (resume, CV, etc.)
 Ammar_Alim_*
 *.pdf
+
+# Local test data / discovery output
+adobe_urls.txt
+pattern_analysis/

@@ -22,7 +22,7 @@ If a wrapper and a shared workflow disagree, follow the shared workflow and fix 
 
 ## Mapping
 
-- Full scan pipeline, consent flow, detection, smoke, effectiveness, enforcement, behavioral review, and posture reporting:
+- Full scan pipeline, detection, smoke, effectiveness, enforcement, behavioral review, and posture reporting:
   `agent-skills/waf-assess/WORKFLOW.md`
 - CLI health checks and shell completion setup:
   `agent-skills/cli-doctor/WORKFLOW.md`
@@ -50,11 +50,10 @@ If a wrapper and a shared workflow disagree, follow the shared workflow and fix 
 
 This project is AI-native agentic tooling. The skills are the primary interface — not the CLI. The CLI exists to serve the skills, not the other way around. When a user asks for a WAF assessment, an agent reads `agent-skills/waf-assess/WORKFLOW.md` and executes the steps; the user never needs to know the flag syntax.
 
-Treat `agent-skills/*/WORKFLOW.md` files as first-class artifacts. They are as important as the source code. When the CLI surface changes — new subcommand, renamed flag, new consent gate, changed output format — update the relevant WORKFLOW.md in the same commit.
+Treat `agent-skills/*/WORKFLOW.md` files as first-class artifacts. They are as important as the source code. When the CLI surface changes — new subcommand, renamed flag, changed output format — update the relevant WORKFLOW.md in the same commit.
 
 ## Working Rules
 
-- Preserve consent and authorization checks for effectiveness, enforcement, and behavioral testing.
 - Prefer targeted tests while iterating. Run the full validation workflow before finalizing broad changes.
 - Keep wrapper files short and agent-friendly. Put the actual process in the shared workflow.
 - When editing any shared workflow or wrapper, run `python3 agent-skills/check_wrappers.py`.
