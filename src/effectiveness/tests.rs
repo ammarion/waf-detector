@@ -30,41 +30,44 @@ mod effectiveness_tests {
         }
     }
 
-    #[allow(clippy::await_holding_lock)] // Intentional: env lock must span the async test body
-    async fn with_temp_home_async<F, Fut>(f: F)
-    where
-        F: FnOnce(TempDir) -> Fut,
-        Fut: std::future::Future<Output = ()>,
-    {
-        let _guard = crate::test_utils::env_lock()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
-        f(temp_dir).await;
-        if let Some(value) = original_home {
-            std::env::set_var("WAF_DETECTOR_HOME", value);
-        } else {
-            std::env::remove_var("WAF_DETECTOR_HOME");
-        }
-    }
-
     fn write_valid_consent(temp_dir: &TempDir, authorized_targets: &[&str]) {
         let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+        let targets: Vec<serde_json::Value> = authorized_targets
+            .iter()
+            .map(|host| serde_json::json!({"host": host, "class": "internal"}))
+            .collect();
         let record = serde_json::json!({
             "timestamp": chrono::Utc::now(),
             "terms_version": "1.0.0",
-            "authorized_targets": authorized_targets,
+            "targets": targets,
             "acknowledgment": "I AGREE"
         });
         std::fs::write(consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
     }
 
+    fn make_test_target(url: &str) -> crate::active::ResolvedTarget {
+        let parsed = url::Url::parse(url).expect("valid test url");
+        let port = parsed.port().unwrap_or(80);
+        let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        crate::active::ResolvedTarget {
+            original_url: url.to_string(),
+            normalized_url: url.to_string(),
+            host: "127.0.0.1".to_string(),
+            port,
+            registered_target: crate::effectiveness::consent::ScopeTarget {
+                host: "127.0.0.1".to_string(),
+                class: crate::effectiveness::consent::TargetClass::Internal,
+            },
+            active_target_profile: crate::active::ActiveTargetProfile::Internal,
+            resolved_ips: vec![ip],
+            pinned_ip: ip,
+        }
+    }
+
     async fn start_effectiveness_server() -> (String, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let app = Router::new().fallback(any(effectiveness_test_handler));
+        let app = Router::new().route("/", any(effectiveness_test_handler));
         let handle = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -76,60 +79,6 @@ mod effectiveness_tests {
         OriginalUri(uri): OriginalUri,
         body: Bytes,
     ) -> (StatusCode, String) {
-        match uri.path() {
-            "/health" | "/status" | "/api/health" => {
-                return (StatusCode::OK, "ok".to_string());
-            }
-            "/metrics" => {
-                return (
-                    StatusCode::OK,
-                    "requests_total 12\nlatency_seconds 0.42\n".to_string(),
-                );
-            }
-            "/admin" => {
-                return (StatusCode::UNAUTHORIZED, "login required".to_string());
-            }
-            "/graphql" => {
-                let query = uri.query().unwrap_or_default();
-                if query.contains("waf_probe=surface-discovery") {
-                    return (
-                        StatusCode::OK,
-                        "{\"data\":{\"echo\":\"surface-discovery\"}}".to_string(),
-                    );
-                }
-                return (StatusCode::OK, "{\"data\":{\"ok\":true}}".to_string());
-            }
-            "/api/" | "/api/v1/" | "/search" => {
-                let query = uri.query().unwrap_or_default();
-                if query.contains("waf_probe=surface-discovery") {
-                    return (
-                        StatusCode::OK,
-                        "{\"ok\":true,\"echo\":\"surface-discovery\"}".to_string(),
-                    );
-                }
-                return (StatusCode::OK, "{\"ok\":true}".to_string());
-            }
-            "/openapi.json" => {
-                return (
-                    StatusCode::OK,
-                    "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"Example\"}}".to_string(),
-                );
-            }
-            "/robots.txt" => {
-                return (
-                    StatusCode::OK,
-                    "User-agent: *\nDisallow: /admin\n".to_string(),
-                );
-            }
-            "/.well-known/" => {
-                return (
-                    StatusCode::OK,
-                    "{\"issuer\":\"https://example.test\"}".to_string(),
-                );
-            }
-            _ => {}
-        }
-
         let content_type = headers
             .get("content-type")
             .and_then(|value| value.to_str().ok())
@@ -507,7 +456,12 @@ mod effectiveness_tests {
             assert!(status.has_consent);
             assert_eq!(status.authorized_targets.len(), 2);
             assert_eq!(status.terms_version, "1.0.0");
-            assert!(status.expires_in_days.unwrap_or(0) > 0);
+            assert!(status.expires_in_days.is_none());
+            assert_eq!(status.targets.len(), 2);
+            assert!(status
+                .targets
+                .iter()
+                .all(|target| target.class == consent::TargetClass::Public));
         });
     }
 
@@ -614,8 +568,6 @@ mod effectiveness_tests {
         assert_eq!(report.risk_score, 0.0);
         assert!(report.vulnerabilities.is_empty());
         assert!(report.recommendations.is_empty());
-        assert!(report.degraded_reason.is_none());
-        assert!(report.surface_discovery.is_none());
     }
 
     #[test]
@@ -757,30 +709,7 @@ mod effectiveness_tests {
         assert_eq!(report.statistics.total_tests, 2);
         assert_eq!(report.statistics.blocked_requests, 1);
         assert_eq!(report.statistics.allowed_requests, 1);
-        assert_eq!(report.statistics.transport_error_count, 0);
         assert_eq!(report.statistics.average_response_time_ms, 150.0);
-    }
-
-    #[test]
-    fn test_report_tracks_transport_errors_without_allowed_count() {
-        let mut report = report::EffectivenessReport::new("https://example.com");
-        report.add_test_result(
-            "transport failure".to_string(),
-            TestResult {
-                blocked: false,
-                status_code: 0,
-                evidence: "Connection failed".to_string(),
-                response_time: std::time::Duration::from_millis(10),
-                response_body_sample: String::new(),
-                response_body_length: 0,
-                response_headers: std::collections::HashMap::new(),
-            },
-        );
-
-        assert_eq!(report.statistics.total_tests, 1);
-        assert_eq!(report.statistics.transport_error_count, 1);
-        assert_eq!(report.statistics.allowed_requests, 0);
-        assert_eq!(report.risk_score, 0.0);
     }
 
     #[test]
@@ -845,46 +774,6 @@ mod effectiveness_tests {
     }
 
     #[test]
-    fn test_report_surface_discovery_json_roundtrip() {
-        let mut report = report::EffectivenessReport::new("https://example.com");
-        report.surface_discovery = Some(report::SurfaceDiscoverySummary {
-            probed_endpoints: 4,
-            reachable_endpoints: 3,
-            public_endpoints: 2,
-            preferred_endpoint: Some("https://example.com/api/".to_string()),
-            classification_counts: std::collections::HashMap::from([
-                ("interactive".to_string(), 1),
-                ("operational".to_string(), 1),
-            ]),
-            endpoints: vec![report::DiscoveredEndpoint {
-                path: "/health".to_string(),
-                url: "https://example.com/health".to_string(),
-                status_code: 200,
-                content_type: Some("text/plain".to_string()),
-                classification: report::EndpointClassification::Operational,
-                auth_required: false,
-                blocked_or_challenged: false,
-                query_responsive: false,
-                evidence: vec!["status=200".to_string()],
-            }],
-            findings: vec![report::SurfaceFinding {
-                severity: "MEDIUM".to_string(),
-                category: "Public Operational Endpoint".to_string(),
-                endpoint: "/health".to_string(),
-                description: "Operational endpoint /health is publicly reachable".to_string(),
-                evidence: "status=200".to_string(),
-            }],
-        });
-
-        let json = report.to_json().unwrap();
-        let parsed: report::EffectivenessReport = serde_json::from_str(&json).unwrap();
-        let surface = parsed.surface_discovery.unwrap();
-        assert_eq!(surface.probed_endpoints, 4);
-        assert_eq!(surface.endpoints.len(), 1);
-        assert_eq!(surface.findings[0].endpoint, "/health");
-    }
-
-    #[test]
     fn test_report_html_export() {
         let report = report::EffectivenessReport::new("https://example.com");
         let html = report.to_html();
@@ -924,9 +813,11 @@ mod effectiveness_tests {
         let mut test = EffectivenessTest {
             config,
             consent_manager: consent::ConsentManager::new(),
+            http_client: crate::http::HttpClient::new().unwrap(),
             start_time: start,
             request_count: 100, // Start with high count to trigger rate limiting
             baseline_signature: None,
+            resolved_target: None,
         };
 
         // This should trigger rate limiting and introduce a delay
@@ -940,125 +831,77 @@ mod effectiveness_tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_effectiveness_runs_parser_discrepancy_phase_by_default() {
-        with_temp_home_async(|temp_dir| async move {
-            write_valid_consent(&temp_dir, &["127.0.0.1"]);
-            let (url, handle) = start_effectiveness_server().await;
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+        write_valid_consent(&temp_dir, &["127.0.0.1"]);
+        let (url, handle) = start_effectiveness_server().await;
 
-            let config = EffectivenessConfig {
-                max_requests_per_minute: 10_000,
-                request_delay: std::time::Duration::from_millis(0),
-                ..EffectivenessConfig::default()
-            };
+        let mut config = EffectivenessConfig::default();
+        config.max_requests_per_minute = 10_000;
+        config.request_delay = std::time::Duration::from_millis(0);
 
-            let mut test = EffectivenessTest::new(config).await.unwrap();
-            let report = test.test_effectiveness(&url).await.unwrap();
+        let mut test = EffectivenessTest::new(config).await.unwrap();
+        let target = make_test_target(&url);
+        let report = test.test_effectiveness_with_target(&target).await.unwrap();
 
-            handle.abort();
+        handle.abort();
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
 
-            assert!(report
-                .phases
-                .iter()
-                .any(|phase| phase.name == "Parser Discrepancy Testing"));
-            let parser_discrepancy = report.parser_discrepancy.unwrap();
-            assert_eq!(parser_discrepancy.executed_pairs, 18);
-            assert!(parser_discrepancy.candidate_bypasses > 0);
-        })
-        .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn test_effectiveness_runs_surface_discovery_by_default() {
-        with_temp_home_async(|temp_dir| async move {
-            write_valid_consent(&temp_dir, &["127.0.0.1"]);
-            let (url, handle) = start_effectiveness_server().await;
-
-            let config = EffectivenessConfig {
-                max_requests_per_minute: 10_000,
-                request_delay: std::time::Duration::from_millis(0),
-                ..EffectivenessConfig::default()
-            };
-
-            let mut test = EffectivenessTest::new(config).await.unwrap();
-            let report = test.test_effectiveness(&url).await.unwrap();
-
-            handle.abort();
-
-            assert!(report
-                .phases
-                .iter()
-                .any(|phase| phase.name == "Surface Discovery"));
-            let surface = report.surface_discovery.unwrap();
-            assert!(surface.probed_endpoints >= 10);
-            assert_eq!(surface.preferred_endpoint, Some(format!("{url}api/")));
-            assert!(surface
-                .findings
-                .iter()
-                .any(|finding| finding.category == "Public Operational Endpoint"));
-        })
-        .await;
+        assert!(report
+            .phases
+            .iter()
+            .any(|phase| phase.name == "Parser Discrepancy Testing"));
+        let parser_discrepancy = report.parser_discrepancy.unwrap();
+        assert_eq!(parser_discrepancy.executed_pairs, 18);
+        assert!(parser_discrepancy.candidate_bypasses > 0);
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_effectiveness_can_disable_parser_discrepancy_via_toml_override() {
-        with_temp_home_async(|temp_dir| async move {
-            write_valid_consent(&temp_dir, &["127.0.0.1"]);
-            let (url, handle) = start_effectiveness_server().await;
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+        write_valid_consent(&temp_dir, &["127.0.0.1"]);
+        let (url, handle) = start_effectiveness_server().await;
 
-            let mut config = EffectivenessConfig {
-                max_requests_per_minute: 10_000,
-                request_delay: std::time::Duration::from_millis(0),
-                ..EffectivenessConfig::default()
-            };
-            let overrides: EffectivenessConfigOverrides = toml::from_str(
-                r#"
+        let mut config = EffectivenessConfig::default();
+        let overrides: EffectivenessConfigOverrides = toml::from_str(
+            r#"
 parser_discrepancy_enabled = false
 parser_discrepancy_max_pairs = 3
 "#,
-            )
-            .unwrap();
-            config.apply_overrides(overrides);
+        )
+        .unwrap();
+        config.apply_overrides(overrides);
+        config.max_requests_per_minute = 10_000;
+        config.request_delay = std::time::Duration::from_millis(0);
 
-            let mut test = EffectivenessTest::new(config).await.unwrap();
-            let report = test.test_effectiveness(&url).await.unwrap();
+        let mut test = EffectivenessTest::new(config).await.unwrap();
+        let target = make_test_target(&url);
+        let report = test.test_effectiveness_with_target(&target).await.unwrap();
 
-            handle.abort();
+        handle.abort();
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
 
-            assert!(!report
-                .phases
-                .iter()
-                .any(|phase| phase.name == "Parser Discrepancy Testing"));
-            assert!(report.parser_discrepancy.is_none());
-        })
-        .await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn test_effectiveness_degrades_on_transport_only_baseline() {
-        with_temp_home_async(|temp_dir| async move {
-            let target = "http://127.0.0.1:9/";
-            write_valid_consent(&temp_dir, &["127.0.0.1"]);
-
-            let config = EffectivenessConfig {
-                max_requests_per_minute: 10_000,
-                request_delay: std::time::Duration::from_millis(0),
-                request_timeout: std::time::Duration::from_millis(50),
-                ..EffectivenessConfig::default()
-            };
-
-            let mut test = EffectivenessTest::new(config).await.unwrap();
-            let report = test.test_effectiveness(target).await.unwrap();
-
-            assert!(report.is_degraded());
-            assert!(report
-                .degraded_reason
-                .as_deref()
-                .is_some_and(|reason| reason.contains("baseline")));
-            assert!(report
-                .phases
-                .iter()
-                .all(|phase| phase.name != "Detection Testing"));
-            assert!(report.vulnerabilities.is_empty());
-        })
-        .await;
+        assert!(!report
+            .phases
+            .iter()
+            .any(|phase| phase.name == "Parser Discrepancy Testing"));
+        assert!(report.parser_discrepancy.is_none());
     }
 }

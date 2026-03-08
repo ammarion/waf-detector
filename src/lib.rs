@@ -2,13 +2,18 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub mod active;
+pub mod audit;
 pub mod cli;
 pub mod confidence;
 pub mod engine;
+pub mod hardening;
 pub mod http;
 pub mod providers;
 pub mod registry;
+#[cfg(feature = "legacy-script-executor")]
 pub mod script_executor;
+pub mod surface;
 pub mod utils;
 
 #[cfg(test)]
@@ -25,6 +30,7 @@ pub mod tls;
 
 // NEW: WAF Effectiveness Testing module
 pub mod effectiveness;
+pub mod origin_probe;
 pub mod posture;
 pub mod virtual_adversary;
 pub mod virtual_adversary2;
@@ -189,9 +195,9 @@ pub struct SecurityPosture {
     pub cors_policy_detail: String,
     /// Whether API token authentication is enabled
     pub api_auth_enabled: bool,
-    /// List of authorized consent targets active during run
-    #[serde(default)]
-    pub consent_scope: Vec<String>,
+    /// List of authorized targets active during run
+    #[serde(default, alias = "consent_scope")]
+    pub target_scope: Vec<String>,
 }
 
 impl SecurityPosture {
@@ -213,7 +219,7 @@ impl SecurityPosture {
                     "public: any origin, sensitive: localhost, active: localhost".to_string(),
                 )
             };
-        let consent_scope = crate::effectiveness::consent::ConsentManager::new()
+        let target_scope = crate::effectiveness::consent::ConsentManager::new()
             .status()
             .map(|s| s.authorized_targets)
             .unwrap_or_default();
@@ -223,7 +229,7 @@ impl SecurityPosture {
             cors_mode,
             cors_policy_detail,
             api_auth_enabled,
-            consent_scope,
+            target_scope,
         }
     }
 }

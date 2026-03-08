@@ -1,3 +1,5 @@
+use std::fs;
+
 use waf_detector::cli::{build_simple_cli, SimpleCliApp};
 
 #[test]
@@ -109,6 +111,46 @@ fn test_va_replay_run_parses() {
     let cmd = build_simple_cli();
     let result = cmd.try_get_matches_from(["waf-detect", "--va-replay-run", "report.json"]);
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_active_target_profile_parses_on_subcommand() {
+    let matches = build_simple_cli()
+        .try_get_matches_from([
+            "waf-detect",
+            "va",
+            "example.com",
+            "--active-target-profile",
+            "internal",
+            "--operator-id",
+            "sec-team",
+        ])
+        .expect("va subcommand should parse global active-testing flags");
+
+    assert_eq!(
+        matches
+            .get_one::<String>("active-target-profile")
+            .map(String::as_str),
+        Some("internal")
+    );
+    assert_eq!(
+        matches.get_one::<String>("operator-id").map(String::as_str),
+        Some("sec-team")
+    );
+}
+
+#[test]
+fn test_scope_internal_flag_parses() {
+    let matches = build_simple_cli()
+        .try_get_matches_from([
+            "waf-detect",
+            "--scope",
+            "init",
+            "internal.example.com",
+            "--internal",
+        ])
+        .expect("scope internal flag should parse");
+    assert!(matches.get_flag("scope-internal"));
 }
 
 #[test]
@@ -248,6 +290,32 @@ async fn test_scan_only_flags_rejected_in_special_modes() {
 }
 
 #[tokio::test]
+async fn test_payload_analysis_requires_registered_scope() {
+    let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+    let temp_dir = tempfile::TempDir::new().expect("temp dir should be created");
+    std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+
+    let app = SimpleCliApp::new().await.expect("app should initialize");
+    let matches = build_simple_cli()
+        .try_get_matches_from(["waf-detect", "example.com", "--payload-analysis"])
+        .expect("arguments should parse");
+
+    let err = app
+        .run_with_matches(matches)
+        .await
+        .expect_err("payload analysis should fail without registered scope");
+    assert!(err
+        .to_string()
+        .contains("not allowed for active payload analysis"));
+
+    if let Some(value) = original_home {
+        std::env::set_var("WAF_DETECTOR_HOME", value);
+    } else {
+        std::env::remove_var("WAF_DETECTOR_HOME");
+    }
+}
+
+#[tokio::test]
 async fn test_va2_accepts_domain_without_scheme() {
     let app = SimpleCliApp::new().await.expect("app should initialize");
     let matches = build_simple_cli()
@@ -257,6 +325,34 @@ async fn test_va2_accepts_domain_without_scheme() {
     app.run_with_matches(matches)
         .await
         .expect("va2 dry run should accept bare domains");
+}
+
+#[tokio::test]
+async fn test_va_replay_rejects_legacy_report_without_flag() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir should be created");
+    let report_path = temp_dir.path().join("legacy-report.json");
+    let report = waf_detector::virtual_adversary::VaRunReport::new(
+        "https://example.com",
+        0,
+        waf_detector::virtual_adversary::VirtualAdversaryConfig::default(),
+    );
+    fs::write(&report_path, serde_json::to_string_pretty(&report).unwrap())
+        .expect("report should be written");
+
+    let app = SimpleCliApp::new().await.expect("app should initialize");
+    let matches = build_simple_cli()
+        .try_get_matches_from([
+            "waf-detect",
+            "--va-replay-run",
+            report_path.to_str().unwrap(),
+        ])
+        .expect("arguments should parse");
+
+    let err = app
+        .run_with_matches(matches)
+        .await
+        .expect_err("legacy replay should be rejected before execution");
+    assert!(err.to_string().contains("--allow-legacy-replay"));
 }
 
 #[tokio::test]

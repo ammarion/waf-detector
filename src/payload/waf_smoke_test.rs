@@ -4,6 +4,9 @@
 //! payloads and analysis techniques. It replaces the bash script with better detection,
 //! colorful output, and structured results for both CLI and UI consumption.
 
+use crate::active::{guard_target, ResolvedTarget};
+use crate::audit::RunAudit;
+use crate::effectiveness::consent::ConsentManager;
 use crate::effectiveness::static_detection::calculate_similarity;
 use crate::engine::waf_mode_detector::{PayloadType, WafMode};
 use crate::http::HttpClient;
@@ -114,6 +117,8 @@ pub struct SmokeTestResult {
     pub total_time_ms: u64,
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub is_smoke_test: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<RunAudit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -367,22 +372,31 @@ impl WafSmokeTest {
 
     /// Run comprehensive WAF smoke test
     pub async fn run_test(&self, url: &str) -> Result<SmokeTestResult, anyhow::Error> {
+        let scope = ConsentManager::new();
+        let target = guard_target(&scope, url)?;
+        self.run_test_with_target(&target).await
+    }
+
+    pub async fn run_test_with_target(
+        &self,
+        target: &ResolvedTarget,
+    ) -> Result<SmokeTestResult, anyhow::Error> {
         let start_time = Instant::now();
         let mut test_results = Vec::new();
 
         if !self.config.quiet {
             println!("🔍 Starting Advanced WAF Effectiveness Test");
-            println!("🎯 Target: {url}");
+            println!("🎯 Target: {}", target.normalized_url);
             println!("═══════════════════════════════════════════════════════════════");
         }
 
-        let endpoint_context = self.analyze_endpoint_context(url).await.ok();
+        let endpoint_context = self.analyze_endpoint_context(target).await.ok();
 
         // Test each payload type
         for (payload_type, payloads) in &self.payloads {
             for payload in payloads {
                 let result = self
-                    .test_single_payload(url, payload_type.clone(), payload)
+                    .test_single_payload(target, payload_type.clone(), payload)
                     .await?;
                 test_results.push(result);
 
@@ -405,7 +419,7 @@ impl WafSmokeTest {
         );
 
         let result = SmokeTestResult {
-            url: url.to_string(),
+            url: target.normalized_url.clone(),
             test_results,
             summary,
             waf_mode,
@@ -416,6 +430,7 @@ impl WafSmokeTest {
             total_time_ms: total_time.as_millis() as u64,
             timestamp: chrono::Utc::now(),
             is_smoke_test: true,
+            audit: None,
         };
 
         Ok(result)
@@ -424,11 +439,11 @@ impl WafSmokeTest {
     /// Test a single payload against the target
     async fn test_single_payload(
         &self,
-        url: &str,
+        target: &ResolvedTarget,
         payload_type: PayloadType,
         payload: &str,
     ) -> Result<PayloadTestResult, anyhow::Error> {
-        let test_url = self.build_test_url(url, payload)?;
+        let test_url = self.build_test_url(&target.normalized_url, payload)?;
         let start_time = Instant::now();
 
         // For scanner detection, use realistic User-Agent headers instead of query params
@@ -449,7 +464,14 @@ impl WafSmokeTest {
 
             match self
                 .http_client
-                .get_with_headers(url, &[("User-Agent", scanner_user_agent)])
+                .request_pinned(
+                    "GET",
+                    &target.normalized_url,
+                    &[("User-Agent".to_string(), scanner_user_agent.to_string())],
+                    None,
+                    target.pinned_ip,
+                    None,
+                )
                 .await
             {
                 Ok(resp) => resp,
@@ -468,7 +490,11 @@ impl WafSmokeTest {
             }
         } else {
             // Regular payload testing via query parameters
-            match self.http_client.get(&test_url).await {
+            match self
+                .http_client
+                .request_pinned("GET", &test_url, &[], None, target.pinned_ip, None)
+                .await
+            {
                 Ok(resp) => resp,
                 Err(e) => {
                     return Ok(PayloadTestResult {
@@ -698,14 +724,30 @@ impl WafSmokeTest {
             .map(|(vendor, _)| *vendor)
     }
 
-    async fn analyze_endpoint_context(&self, url: &str) -> Result<EndpointContext, anyhow::Error> {
-        let baseline = self.http_client.get(url).await?;
-        let probe_url = if url.contains('?') {
-            format!("{url}&waf_probe=1")
+    async fn analyze_endpoint_context(
+        &self,
+        target: &ResolvedTarget,
+    ) -> Result<EndpointContext, anyhow::Error> {
+        let baseline = self
+            .http_client
+            .request_pinned(
+                "GET",
+                &target.normalized_url,
+                &[],
+                None,
+                target.pinned_ip,
+                None,
+            )
+            .await?;
+        let probe_url = if target.normalized_url.contains('?') {
+            format!("{}&waf_probe=1", target.normalized_url)
         } else {
-            format!("{url}?waf_probe=1")
+            format!("{}?waf_probe=1", target.normalized_url)
         };
-        let probe = self.http_client.get(&probe_url).await?;
+        let probe = self
+            .http_client
+            .request_pinned("GET", &probe_url, &[], None, target.pinned_ip, None)
+            .await?;
 
         let similarity = calculate_similarity(&baseline.body, &probe.body);
         let status_match = baseline.status == probe.status;
@@ -1070,6 +1112,7 @@ impl Default for WafSmokeTest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_payload_classification() {
@@ -1159,5 +1202,33 @@ mod tests {
         assert_eq!(summary.blocked_count, 1);
         assert_eq!(summary.allowed_count, 1);
         assert_eq!(summary.effectiveness_percentage, 50.0);
+    }
+
+    #[tokio::test]
+    async fn test_smoke_test_requires_registered_target_scope() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+
+        let smoke_test = WafSmokeTest::new(SmokeTestConfig {
+            quiet: true,
+            ..SmokeTestConfig::default()
+        })
+        .unwrap();
+        let err = smoke_test
+            .run_test("https://example.com")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Target is not registered for active testing"));
+
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
     }
 }

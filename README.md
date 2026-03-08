@@ -13,6 +13,7 @@ A high-performance tool for detecting, testing, and profiling Web Application Fi
 | **Enforcement Test** | Sends categorized attack probes, measures block/challenge/allow | `--va <url>` |
 | **Behavioral Analysis** | Paired probes testing WAF sophistication across 5 channels | `--va2 <url> --va2-run` |
 | **Posture Report** | Unified grade (A-F) combining all test results | `--posture <url>` |
+| **TUI** | Interactive terminal dashboard with live scan results | `--tui <url>` |
 
 ## Quick Start
 
@@ -24,13 +25,14 @@ cargo build --release
 ./target/release/waf-detect example.com
 
 # Run smoke test
+./target/release/waf-detect --scope init example.com
 ./target/release/waf-detect --smoke-test example.com
 
 # Full posture report (detection + behavioral analysis)
-./target/release/waf-detect --consent request
-./target/release/waf-detect --consent add-target example.com
 ./target/release/waf-detect --posture example.com --posture-va2 --posture-json
 
+# Interactive TUI
+./target/release/waf-detect --tui example.com
 ```
 
 ## Detection
@@ -58,7 +60,7 @@ Identifies WAF and CDN providers using HTTP headers, response bodies, DNS record
 
 ## Smoke Test
 
-Sends known attack payloads and measures what the WAF blocks, challenges, or allows through.
+Sends known attack payloads and measures what the WAF blocks, challenges, or allows through. Active smoke testing only runs against registered owned targets.
 
 ```bash
 ./target/release/waf-detect --smoke-test example.com
@@ -80,12 +82,11 @@ Sends known attack payloads and measures what the WAF blocks, challenges, or all
 
 ## Enforcement Test
 
-Sends categorized attack probes and measures block/challenge/allow rates with confidence scoring. Requires consent.
+Sends categorized attack probes and measures block/challenge/allow rates with confidence scoring. Requires registered target scope.
 
 ```bash
-# Setup consent
-./target/release/waf-detect --consent request
-./target/release/waf-detect --consent add-target example.com
+# Register owned targets once
+./target/release/waf-detect --scope init example.com
 
 # Run enforcement test
 ./target/release/waf-detect --va https://example.com
@@ -114,7 +115,7 @@ Tests WAF sophistication by sending paired probes — one benign, one malicious 
 # Dry run (shows plan without executing)
 ./target/release/waf-detect --va2 https://example.com
 
-# Run behavioral analysis (consent required)
+# Run behavioral analysis
 ./target/release/waf-detect --va2 https://example.com --va2-run
 
 # Full 5-phase analysis
@@ -165,25 +166,46 @@ Generates a unified security grade (A-F) and risk score (0-100) combining detect
 - **D** (61-80) — Weak protection, significant gaps
 - **F** (81-100) — Minimal or no effective protection
 
-## Consent Management
+## TUI (Terminal Dashboard)
 
-Enforcement test, behavioral analysis, and effectiveness testing require explicit consent. Consent expires after 30 days.
+Interactive terminal interface with live scan results, signal bars, findings, and keyboard navigation.
 
 ```bash
-# Check consent status
-./target/release/waf-detect --consent
+# Launch with target
+./target/release/waf-detect --tui example.com
 
-# Request consent
-./target/release/waf-detect --consent request
+# Launch in review mode (load last saved report)
+./target/release/waf-detect --tui
+```
+
+**Keyboard shortcuts:**
+- `1-7` — Switch views (Dashboard, Detection, Smoke, Enforce, Behav., Findings, Log)
+- `r` — Run full scan
+- `j/k` — Navigate items
+- `Enter` — Expand selected item
+- `e` — Export report to JSON
+- `?` — Toggle info tooltip
+- `q` — Quit
+
+## Target Scope
+
+Smoke test, payload analysis, enforcement, behavioral analysis, and effectiveness testing require registered owned targets.
+
+```bash
+# Check target scope
+./target/release/waf-detect --scope
+
+# Initialize target scope
+./target/release/waf-detect --scope init example.com api.example.com
 
 # Add authorized target
-./target/release/waf-detect --consent add-target api.example.com
+./target/release/waf-detect --scope add-target admin.example.com
 
 # Remove target
-./target/release/waf-detect --consent remove-target api.example.com
+./target/release/waf-detect --scope remove-target api.example.com
 
-# Revoke all consent
-./target/release/waf-detect --consent revoke
+# Clear target scope
+./target/release/waf-detect --scope clear
 ```
 
 ## Interpreting Results

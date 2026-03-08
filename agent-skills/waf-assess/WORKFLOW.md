@@ -51,7 +51,7 @@ Treat doctor failures as blockers. Treat warnings as advisory unless the user as
 ./target/release/waf-detect --consent add-target <domain>
 ```
 
-Run consent steps before `--effectiveness`, `--va`, `--va2 --va2-run`, or posture flows that include consent-gated data.
+Run consent steps before `--effectiveness`, `--va`, `--va2 --va2-run`, `origin-probe`, or posture flows that include consent-gated data.
 
 ### 4. Detection
 
@@ -65,6 +65,22 @@ Extract:
 - confidence
 - provider type
 - evidence count
+
+### 4b. Origin Probe (optional)
+
+```bash
+./target/release/waf-detect origin-probe <url>
+./target/release/waf-detect origin-probe <url> --json
+./target/release/waf-detect origin-probe <url> --no-attack-probe
+```
+
+Use when you want to check whether health/metrics/status endpoints share the same origin IP and allow WAF bypass via direct connection. Requires an authorized target in consent scope.
+
+Extract:
+
+- origin IP
+- accessible bypass paths (2xx/3xx responses)
+- whether WAF block was confirmed absent (`bypass_confirmed`)
 
 ### 5. Smoke Testing
 

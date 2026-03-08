@@ -7,13 +7,16 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 use url::Url;
 
+use crate::active::{guard_target, ResolvedTarget};
+use crate::audit::RunAudit;
 use crate::effectiveness::consent::ConsentManager;
 use crate::http::HttpClient;
 use crate::virtual_adversary::dae::{probe_catalog_for_tier, Probe};
+use sha2::{Digest, Sha256};
 
 pub mod dae;
 pub mod report_store;
@@ -101,17 +104,7 @@ impl VirtualAdversaryConfig {
 }
 
 pub fn ensure_consent_and_target(consent_manager: &ConsentManager, target_url: &str) -> Result<()> {
-    if !consent_manager.has_valid_consent()? {
-        return Err(anyhow!(
-            "Consent is required before running enforcement tests"
-        ));
-    }
-
-    if !consent_manager.is_target_allowed(target_url)? {
-        return Err(anyhow!("Target is not authorized for enforcement testing"));
-    }
-
-    Ok(())
+    guard_target(consent_manager, target_url).map(|_| ())
 }
 
 #[derive(Debug, Default)]
@@ -222,6 +215,7 @@ pub struct ResponseDiff {
     pub status_changed: bool,
     pub length_delta: usize,
     pub significant_length_change: bool,
+    pub body_sample_changed: bool,
     pub header_differences: Vec<String>,
 }
 
@@ -235,6 +229,12 @@ impl ResponseDiff {
         let status_changed = status_code != baseline.status_code;
         let length_delta = baseline.body_length.abs_diff(body.len());
         let significant_length_change = length_delta >= (baseline.body_length / 2).max(200);
+        let body_sample = if body.len() <= BASELINE_SAMPLE_LIMIT {
+            body.to_string()
+        } else {
+            body.chars().take(BASELINE_SAMPLE_LIMIT).collect()
+        };
+        let body_sample_changed = body_sample != baseline.body_sample;
 
         let mut header_differences = Vec::new();
         for (name, value) in headers {
@@ -251,6 +251,7 @@ impl ResponseDiff {
             status_changed,
             length_delta,
             significant_length_change,
+            body_sample_changed,
             header_differences,
         }
     }
@@ -293,6 +294,10 @@ pub struct VaProbeEvaluation {
 pub struct VaEvidenceTally {
     pub kind: VaEvidenceKind,
     pub count: usize,
+}
+
+fn has_meaningful_body_deviation(diff: &ResponseDiff) -> bool {
+    diff.status_changed || diff.significant_length_change || diff.body_sample_changed
 }
 
 pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> VaProbeEvaluation {
@@ -357,9 +362,10 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> Va
     }
 
     let body_lc = body.to_lowercase();
-    if body_lc.contains("access denied")
-        || body_lc.contains("request blocked")
-        || body_lc.contains("forbidden")
+    if has_meaningful_body_deviation(diff)
+        && (body_lc.contains("access denied")
+            || body_lc.contains("request blocked")
+            || body_lc.contains("forbidden"))
     {
         evidence.push(VaEvidence {
             kind: VaEvidenceKind::BlockedKeyword,
@@ -372,7 +378,11 @@ pub fn classify_outcome(status_code: u16, diff: &ResponseDiff, body: &str) -> Va
         };
     }
 
-    if body_lc.contains("captcha") || body_lc.contains("challenge") || body_lc.contains("verify") {
+    if has_meaningful_body_deviation(diff)
+        && (body_lc.contains("captcha")
+            || body_lc.contains("challenge")
+            || body_lc.contains("verify"))
+    {
         evidence.push(VaEvidence {
             kind: VaEvidenceKind::ChallengeKeyword,
             detail: "challenge-keyword".to_string(),
@@ -551,7 +561,7 @@ pub struct VaRunReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_bundle: Option<VaReplayBundle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub degraded_reason: Option<String>,
+    pub audit: Option<RunAudit>,
 }
 
 fn default_instant() -> std::time::Instant {
@@ -573,16 +583,12 @@ impl VaRunReport {
             started_at: std::time::Instant::now(),
             finished_at: None,
             replay_bundle: None,
-            degraded_reason: None,
+            audit: None,
         }
     }
 
     pub fn finish(&mut self) {
         self.finished_at = Some(std::time::Instant::now());
-    }
-
-    pub fn is_degraded(&self) -> bool {
-        self.degraded_reason.is_some()
     }
 }
 
@@ -627,12 +633,18 @@ pub struct VaReplayPlanItem {
 /// an exact VA run. Includes a SHA-256 integrity hash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaReplayBundle {
+    /// Schema version for replay bundle verification
+    #[serde(default = "va_replay_bundle_schema_version")]
+    pub schema_version: String,
     /// The replay plan items
     pub plan: Vec<VaReplayPlanItem>,
     /// Target URL
     pub target_url: String,
     /// Configuration used for this run
     pub config_fingerprint: String,
+    /// Integrity algorithm name
+    #[serde(default = "va_replay_bundle_integrity_algorithm")]
+    pub integrity_algorithm: String,
     /// SHA-256 hash of the bundle content for integrity verification
     pub integrity_hash: String,
     /// Timestamp when bundle was created
@@ -651,33 +663,78 @@ impl VaReplayBundle {
             report.config.request_delay.as_millis(),
         );
 
-        // Compute integrity hash over plan + config
-        // Use a simple hash of the serialized plan + config
-        let content_to_hash = serde_json::to_string(&report.replay_plan).unwrap_or_default()
-            + &config_fingerprint
-            + &report.target_url;
-        let digest = md5::compute(content_to_hash.as_bytes());
-        let integrity_hash = format!("{:x}", digest);
+        let created_at = Utc::now();
+        let schema_version = va_replay_bundle_schema_version();
+        let integrity_algorithm = va_replay_bundle_integrity_algorithm();
+        let content_to_hash = replay_bundle_content(
+            &schema_version,
+            &report.replay_plan,
+            &report.target_url,
+            &config_fingerprint,
+            &created_at,
+        );
+        let integrity_hash = sha256_hex(&content_to_hash);
 
         Self {
+            schema_version,
             plan: report.replay_plan.clone(),
             target_url: report.target_url.clone(),
             config_fingerprint,
+            integrity_algorithm,
             integrity_hash,
-            created_at: Utc::now(),
+            created_at,
         }
     }
 
     /// Verify the integrity of the bundle.
     pub fn verify_integrity(&self) -> bool {
-        let config_fingerprint = &self.config_fingerprint;
-        let content_to_hash = serde_json::to_string(&self.plan).unwrap_or_default()
-            + config_fingerprint
-            + &self.target_url;
-        let digest = md5::compute(content_to_hash.as_bytes());
-        let expected_hash = format!("{:x}", digest);
-        self.integrity_hash == expected_hash
+        if self.schema_version != va_replay_bundle_schema_version() {
+            return false;
+        }
+        if self.integrity_algorithm != va_replay_bundle_integrity_algorithm() {
+            return false;
+        }
+        let content_to_hash = replay_bundle_content(
+            &self.schema_version,
+            &self.plan,
+            &self.target_url,
+            &self.config_fingerprint,
+            &self.created_at,
+        );
+        self.integrity_hash == sha256_hex(&content_to_hash)
     }
+}
+
+fn va_replay_bundle_schema_version() -> String {
+    "va-replay-bundle/v2".to_string()
+}
+
+fn va_replay_bundle_integrity_algorithm() -> String {
+    "sha256".to_string()
+}
+
+fn replay_bundle_content(
+    schema_version: &str,
+    plan: &[VaReplayPlanItem],
+    target_url: &str,
+    config_fingerprint: &str,
+    created_at: &DateTime<Utc>,
+) -> String {
+    serde_json::json!({
+        "schema_version": schema_version,
+        "plan": plan,
+        "target_url": target_url,
+        "config_fingerprint": config_fingerprint,
+        "created_at": created_at,
+    })
+    .to_string()
+}
+
+fn sha256_hex(value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(value.as_bytes());
+    let digest = hasher.finalize();
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -757,68 +814,30 @@ impl VaHttpAdapter for RealVaHttpAdapter {
     }
 
     fn send(&self, request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse> {
-        // When a resolved_ip is pinned, build a one-off reqwest client that pins
-        // DNS to the pre-validated IP, preventing TOCTOU rebinding attacks.
-        if let Some(ip) = request.resolved_ip {
-            let parsed = Url::parse(&request.url)
-                .or_else(|_| Url::parse(&format!("https://{}", &request.url)))?;
-            let hostname = parsed
-                .host_str()
-                .ok_or_else(|| anyhow::anyhow!("URL missing host"))?
-                .to_string();
-            let port = parsed.port_or_known_default().unwrap_or(443);
-            let socket_addr = std::net::SocketAddr::new(ip, port);
-
-            let mut builder = reqwest::Client::builder()
-                .resolve(&hostname, socket_addr)
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(std::time::Duration::from_secs(15))
-                .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-
-            if std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test) {
-                builder = builder.no_proxy();
-            }
-            if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
-                builder = builder.danger_accept_invalid_certs(true);
-            }
-
-            let pinned_client = builder.build()?;
-            let method = reqwest::Method::from_bytes(request.method.as_bytes())?;
-            let mut req = pinned_client.request(method, &request.url);
-            for (name, value) in &request.headers {
-                req = req.header(name, value);
-            }
-            if let Some(body) = &request.body {
-                req = req.body(body.clone());
-            }
-            let resp = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(req.send())
-            })?;
-            let status = resp.status().as_u16();
-            let mut headers = std::collections::HashMap::new();
-            for (name, value) in resp.headers() {
-                if let Ok(v) = value.to_str() {
-                    headers.insert(name.to_string().to_lowercase(), v.to_string());
-                }
-            }
-            let body = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(resp.text())
-            })
-            .unwrap_or_default();
-            return Ok(VaHttpResponse {
-                status,
-                headers,
-                body,
-            });
-        }
-
         let response = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.client.request(
-                request.method,
-                &request.url,
-                &request.headers,
-                request.body.as_deref(),
-            ))
+            tokio::runtime::Handle::current().block_on(async {
+                if let Some(ip) = request.resolved_ip {
+                    self.client
+                        .request_pinned(
+                            request.method,
+                            &request.url,
+                            &request.headers,
+                            request.body.as_deref(),
+                            ip,
+                            None,
+                        )
+                        .await
+                } else {
+                    self.client
+                        .request(
+                            request.method,
+                            &request.url,
+                            &request.headers,
+                            request.body.as_deref(),
+                        )
+                        .await
+                }
+            })
         })?;
         Ok(VaHttpResponse {
             status: response.status,
@@ -1026,8 +1045,6 @@ impl VirtualAdversaryRunner {
                 "replay url host mismatch: expected {target_host}, got {host}"
             ));
         }
-        let port = parsed.port_or_known_default().unwrap_or(443);
-        validate_replay_host_public(host, port)?;
 
         let class = parse_probe_class(&item.class)?;
         let channel = parse_probe_channel(&item.channel)?;
@@ -1060,8 +1077,18 @@ impl VirtualAdversaryRunner {
         })
     }
 
-    fn collect_baseline(&self, target_url: &str) -> Result<BaselineRecord> {
-        let response = self.http.get(target_url)?;
+    fn collect_baseline(&self, target: &ResolvedTarget) -> Result<BaselineRecord> {
+        let response = if self.config.skip_dns_validation {
+            self.http.get(&target.normalized_url)?
+        } else {
+            self.http.send(&VaHttpRequest {
+                method: "GET",
+                url: target.normalized_url.clone(),
+                headers: Vec::new(),
+                body: None,
+                resolved_ip: Some(target.pinned_ip),
+            })?
+        };
         Ok(BaselineRecord::from_response(
             response.status,
             response.headers,
@@ -1073,13 +1100,11 @@ impl VirtualAdversaryRunner {
         &self,
         baseline: &BaselineRecord,
         item: &VaProbePlanItem,
+        target: &ResolvedTarget,
     ) -> Result<VaProbeEvaluation> {
-        // DNS TOCTOU guard: resolve once, validate all IPs are public, pin the
-        // resolved IP so the HTTP adapter connects to the same address we checked.
         let mut pinned_request = item.request.clone();
         if !self.config.skip_dns_validation {
-            let resolved_ip = resolve_and_validate(&item.request.url)?;
-            pinned_request.resolved_ip = Some(resolved_ip);
+            pinned_request.resolved_ip = Some(target.pinned_ip);
         }
 
         let response = self.http.send(&pinned_request)?;
@@ -1100,46 +1125,35 @@ impl VirtualAdversaryRunner {
         target_url: &str,
         replay_plan: Vec<VaReplayPlanItem>,
     ) -> Result<VaRunReport> {
+        let target = guard_target(&self.consent_manager, target_url)?;
+        self.run_replay_plan_with_target(&target, replay_plan)
+    }
+
+    pub fn run_replay_plan_with_target(
+        &mut self,
+        target: &ResolvedTarget,
+        replay_plan: Vec<VaReplayPlanItem>,
+    ) -> Result<VaRunReport> {
         let started = Instant::now();
-        ensure_consent_and_target(&self.consent_manager, target_url)?;
         if replay_plan.is_empty() {
             return Err(anyhow!("replay plan is empty"));
         }
-        let base =
-            Url::parse(target_url).or_else(|_| Url::parse(&format!("https://{target_url}")))?;
+        let base = Url::parse(&target.normalized_url)?;
         let target_host = base
             .host_str()
             .ok_or_else(|| anyhow!("target url missing host"))?;
 
         let required = 1 + replay_plan.len() as u32;
         self.budget.consume(required)?;
+
+        let baseline = self.collect_baseline(target)?;
         let total = replay_plan.len();
-        let mut report = VaRunReport::new(target_url, total, self.config.clone());
+        let mut report = VaRunReport::new(&target.normalized_url, total, self.config.clone());
         report.replay_plan = replay_plan.clone();
-        let baseline = match self.collect_baseline(target_url) {
-            Ok(baseline) => baseline,
-            Err(err) => {
-                report.degraded_reason = Some(format!("baseline collection failed: {}", err));
-                report.finish();
-                return Ok(report);
-            }
-        };
-        if baseline.status_code >= 500 {
-            report.degraded_reason = Some(format!("baseline returned {}", baseline.status_code));
-            report.finish();
-            return Ok(report);
-        }
 
         for item in replay_plan.into_iter() {
             let plan_item = Self::build_replay_item(target_host, &item)?;
-            let evaluation = match self.evaluate_probe(&baseline, &plan_item) {
-                Ok(evaluation) => evaluation,
-                Err(err) => VaProbeEvaluation {
-                    outcome: VaOutcome::Error,
-                    reason: format!("transport error: {err}"),
-                    evidence: Vec::new(),
-                },
-            };
+            let evaluation = self.evaluate_probe(&baseline, &plan_item, target)?;
             report.summary.record(evaluation.outcome);
             report.results.push(VaResultRecord {
                 payload: plan_item.display,
@@ -1150,12 +1164,6 @@ impl VirtualAdversaryRunner {
             });
         }
 
-        if report.summary.total > 0 && report.summary.error == report.summary.total {
-            report.degraded_reason = Some("all replay probes failed".to_string());
-        }
-        report.evidence_score = compute_evidence_score(&report.results);
-        report.evidence_summary = summarize_evidence(&report.results);
-        report.enforcement = classify_enforcement(&report.summary, report.evidence_score);
         report.finish();
         report.replay_bundle = Some(VaReplayBundle::from_report(&report));
         crate::perf::record(
@@ -1168,6 +1176,20 @@ impl VirtualAdversaryRunner {
     pub fn run_with_events<F, G>(
         &mut self,
         target_url: &str,
+        on_progress: F,
+        on_event: G,
+    ) -> Result<VaRunReport>
+    where
+        F: FnMut(usize, usize),
+        G: FnMut(VaPayloadEvent),
+    {
+        let target = guard_target(&self.consent_manager, target_url)?;
+        self.run_with_events_for_target(&target, on_progress, on_event)
+    }
+
+    pub fn run_with_events_for_target<F, G>(
+        &mut self,
+        target: &ResolvedTarget,
         mut on_progress: F,
         mut on_event: G,
     ) -> Result<VaRunReport>
@@ -1176,7 +1198,6 @@ impl VirtualAdversaryRunner {
         G: FnMut(VaPayloadEvent),
     {
         let started = Instant::now();
-        ensure_consent_and_target(&self.consent_manager, target_url)?;
 
         let _tier = self.config.tier;
         // Reserve a minimal budget for baseline + one adversarial pass.
@@ -1184,35 +1205,16 @@ impl VirtualAdversaryRunner {
         let _baseline_wait = self.rate_limiter.record_request();
         let _attack_wait = self.rate_limiter.record_request();
 
-        let plan = self.plan(target_url);
+        let baseline = self.collect_baseline(target)?;
+        let plan = self.plan(&target.normalized_url);
         let total = plan.len();
         on_progress(0, total);
-        let mut report = VaRunReport::new(target_url, plan.len(), self.config.clone());
+        let mut report = VaRunReport::new(&target.normalized_url, plan.len(), self.config.clone());
         report.replay_plan = Self::build_replay_plan(&plan);
-        let baseline = match self.collect_baseline(target_url) {
-            Ok(baseline) => baseline,
-            Err(err) => {
-                report.degraded_reason = Some(format!("baseline collection failed: {}", err));
-                report.finish();
-                return Ok(report);
-            }
-        };
-        if baseline.status_code >= 500 {
-            report.degraded_reason = Some(format!("baseline returned {}", baseline.status_code));
-            report.finish();
-            return Ok(report);
-        }
         for (idx, item) in plan.into_iter().enumerate() {
             let payload_value = item.display.clone();
             let category = VaPayloadCategory::from(item.probe.class);
-            let evaluation = match self.evaluate_probe(&baseline, &item) {
-                Ok(evaluation) => evaluation,
-                Err(err) => VaProbeEvaluation {
-                    outcome: VaOutcome::Error,
-                    reason: format!("transport error: {err}"),
-                    evidence: Vec::new(),
-                },
-            };
+            let evaluation = self.evaluate_probe(&baseline, &item, target)?;
             report.summary.record(evaluation.outcome);
             report.results.push(VaResultRecord {
                 payload: payload_value.clone(),
@@ -1231,9 +1233,6 @@ impl VirtualAdversaryRunner {
                 evidence: evaluation.evidence,
             });
             on_progress(idx + 1, total);
-        }
-        if report.summary.total > 0 && report.summary.error == report.summary.total {
-            report.degraded_reason = Some("all adversary probes failed".to_string());
         }
         report.evidence_score = compute_evidence_score(&report.results);
         report.evidence_summary = summarize_evidence(&report.results);
@@ -1260,43 +1259,7 @@ impl VirtualAdversaryRunner {
     }
 }
 
-fn validate_replay_host_public(host: &str, port: u16) -> Result<()> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if is_private_ip(&ip) {
-            return Err(anyhow!("replay host resolves to private or loopback IP"));
-        }
-        return Ok(());
-    }
-
-    let addrs = (host, port)
-        .to_socket_addrs()
-        .map_err(|err| anyhow!("failed to resolve replay host: {err}"))?;
-    let mut found = false;
-    for addr in addrs {
-        found = true;
-        if is_private_ip(&addr.ip()) {
-            return Err(anyhow!("replay host resolves to private or loopback IP"));
-        }
-    }
-    if !found {
-        return Err(anyhow!("replay host resolution returned no addresses"));
-    }
-    Ok(())
-}
-
-fn is_private_ip(ip: &IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
-        IpAddr::V6(v6) => {
-            v6.is_loopback()
-                || v6.is_unique_local()
-                || v6.is_unicast_link_local()
-                || v6.is_multicast()
-                || v6.is_unspecified()
-        }
-    }
-}
-
+#[cfg(test)]
 fn is_ip_public(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(ipv4) => {
@@ -1320,7 +1283,10 @@ fn is_ip_public(ip: &IpAddr) -> bool {
 
 /// Resolve DNS once and validate all IPs are public, returning a pinned IP.
 /// This prevents TOCTOU attacks where DNS changes between validation and connection.
+#[cfg(test)]
 fn resolve_and_validate(url: &str) -> Result<IpAddr> {
+    use std::net::ToSocketAddrs;
+
     let parsed = Url::parse(url).or_else(|_| Url::parse(&format!("https://{url}")))?;
     let host = parsed
         .host_str()
@@ -1394,7 +1360,6 @@ fn build_probe_request(probe: &Probe, target_url: &str) -> Result<VaHttpRequest>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::anyhow;
     use chrono::{DateTime, Utc};
     use serde::Serialize;
     use std::fs;
@@ -1420,12 +1385,6 @@ mod tests {
 
     #[derive(Default)]
     struct StubHttpAdapter;
-
-    #[derive(Default)]
-    struct FailingHttpAdapter;
-
-    #[derive(Default)]
-    struct EdgeErrorHttpAdapter;
 
     impl VaHttpAdapter for StubHttpAdapter {
         fn get(&self, _url: &str) -> anyhow::Result<VaHttpResponse> {
@@ -1454,46 +1413,6 @@ mod tests {
                 headers: HashMap::new(),
                 body: "blocked".to_string(),
             })
-        }
-    }
-
-    impl VaHttpAdapter for FailingHttpAdapter {
-        fn get(&self, _url: &str) -> anyhow::Result<VaHttpResponse> {
-            Err(anyhow!("dns failure"))
-        }
-
-        fn get_with_payload(
-            &self,
-            _url: &str,
-            _payload: &VaPayloadVariant,
-        ) -> anyhow::Result<VaHttpResponse> {
-            Err(anyhow!("dns failure"))
-        }
-
-        fn send(&self, _request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse> {
-            Err(anyhow!("dns failure"))
-        }
-    }
-
-    impl VaHttpAdapter for EdgeErrorHttpAdapter {
-        fn get(&self, _url: &str) -> anyhow::Result<VaHttpResponse> {
-            Ok(VaHttpResponse {
-                status: 503,
-                headers: HashMap::new(),
-                body: "service unavailable".to_string(),
-            })
-        }
-
-        fn get_with_payload(
-            &self,
-            _url: &str,
-            _payload: &VaPayloadVariant,
-        ) -> anyhow::Result<VaHttpResponse> {
-            self.get("")
-        }
-
-        fn send(&self, _request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse> {
-            self.get("")
         }
     }
 
@@ -1763,6 +1682,13 @@ mod tests {
     }
 
     #[test]
+    fn test_response_diff_tracks_body_sample_changes() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
+        let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "no");
+        assert!(diff.body_sample_changed);
+    }
+
+    #[test]
     fn test_classify_outcome_blocked_by_status() {
         let baseline = BaselineRecord::from_response(200, HashMap::new(), "ok");
         let diff = ResponseDiff::compare(&baseline, 403, &HashMap::new(), "blocked");
@@ -1830,6 +1756,22 @@ mod tests {
             .evidence
             .iter()
             .any(|e| e.kind == VaEvidenceKind::BlockedKeyword));
+    }
+
+    #[test]
+    fn test_classify_outcome_ignores_block_keywords_on_unchanged_body() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "Access Denied");
+        let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "Access Denied");
+        let evaluation = classify_outcome(200, &diff, "Access Denied");
+        assert_eq!(evaluation.outcome, VaOutcome::Allowed);
+    }
+
+    #[test]
+    fn test_classify_outcome_ignores_challenge_keywords_on_unchanged_body() {
+        let baseline = BaselineRecord::from_response(200, HashMap::new(), "verify account");
+        let diff = ResponseDiff::compare(&baseline, 200, &HashMap::new(), "verify account");
+        let evaluation = classify_outcome(200, &diff, "verify account");
+        assert_eq!(evaluation.outcome, VaOutcome::Allowed);
     }
 
     #[test]
@@ -2044,7 +1986,7 @@ mod tests {
                 .with_http_adapter(Box::new(StubHttpAdapter));
 
             let result = runner.run("https://example.com").unwrap();
-            assert_eq!(result.target_url, "https://example.com");
+            assert_eq!(result.target_url, "https://example.com/");
         });
     }
 
@@ -2058,55 +2000,23 @@ mod tests {
         let runner = VirtualAdversaryRunner::new(config)
             .unwrap()
             .with_http_adapter(Box::new(StubHttpAdapter));
+        let target = crate::active::ResolvedTarget {
+            original_url: "https://example.com".to_string(),
+            normalized_url: "https://example.com/".to_string(),
+            host: "example.com".to_string(),
+            port: 443,
+            registered_target: crate::effectiveness::consent::ScopeTarget {
+                host: "example.com".to_string(),
+                class: crate::effectiveness::consent::TargetClass::Public,
+            },
+            active_target_profile: crate::active::ActiveTargetProfile::Public,
+            resolved_ips: vec!["93.184.216.34".parse().unwrap()],
+            pinned_ip: "93.184.216.34".parse().unwrap(),
+        };
 
-        let baseline = runner.collect_baseline("https://example.com").unwrap();
+        let baseline = runner.collect_baseline(&target).unwrap();
         assert_eq!(baseline.status_code, 200);
         assert_eq!(baseline.body_sample, "ok");
-    }
-
-    #[test]
-    fn test_runner_degrades_when_baseline_collection_fails() {
-        with_temp_home(|temp_dir| {
-            write_test_consent(temp_dir, vec!["example.com".to_string()]);
-
-            let config = VirtualAdversaryConfig {
-                request_budget: 2,
-                skip_dns_validation: true,
-                ..Default::default()
-            };
-            let mut runner = VirtualAdversaryRunner::new(config)
-                .unwrap()
-                .with_http_adapter(Box::new(FailingHttpAdapter));
-
-            let report = runner.run("https://example.com").unwrap();
-            assert!(report.is_degraded());
-            assert!(report.summary.total == 0);
-            assert_eq!(report.enforcement, VaEnforcement::Inconclusive);
-        });
-    }
-
-    #[test]
-    fn test_runner_degrades_when_baseline_returns_5xx() {
-        with_temp_home(|temp_dir| {
-            write_test_consent(temp_dir, vec!["example.com".to_string()]);
-
-            let config = VirtualAdversaryConfig {
-                request_budget: 2,
-                skip_dns_validation: true,
-                ..Default::default()
-            };
-            let mut runner = VirtualAdversaryRunner::new(config)
-                .unwrap()
-                .with_http_adapter(Box::new(EdgeErrorHttpAdapter));
-
-            let report = runner.run("https://example.com").unwrap();
-            assert!(report.is_degraded());
-            assert!(report
-                .degraded_reason
-                .as_deref()
-                .is_some_and(|reason| reason.contains("503")));
-            assert_eq!(report.summary.total, 0);
-        });
     }
 
     #[test]
@@ -2136,8 +2046,21 @@ mod tests {
             request,
             display: "SemanticDrift::Query probe".to_string(),
         };
+        let target = crate::active::ResolvedTarget {
+            original_url: "https://example.com".to_string(),
+            normalized_url: "https://example.com/".to_string(),
+            host: "example.com".to_string(),
+            port: 443,
+            registered_target: crate::effectiveness::consent::ScopeTarget {
+                host: "example.com".to_string(),
+                class: crate::effectiveness::consent::TargetClass::Public,
+            },
+            active_target_profile: crate::active::ActiveTargetProfile::Public,
+            resolved_ips: vec!["93.184.216.34".parse().unwrap()],
+            pinned_ip: "93.184.216.34".parse().unwrap(),
+        };
 
-        let evaluation = runner.evaluate_probe(&baseline, &item).unwrap();
+        let evaluation = runner.evaluate_probe(&baseline, &item, &target).unwrap();
         assert_eq!(evaluation.outcome, VaOutcome::Blocked);
     }
 

@@ -68,8 +68,6 @@ pub struct PostureReport {
     pub behavioral: Option<BehavioralPosture>,
     pub enforcement: Option<EnforcementPosture>,
     pub summary: String,
-    #[serde(default)]
-    pub caveats: Vec<String>,
 }
 
 pub struct PostureBuilder {
@@ -81,7 +79,6 @@ pub struct PostureBuilder {
     channel_coverage_score: f64,
     enforcement: Option<EnforcementPosture>,
     enforcement_score: f64,
-    caveats: Vec<String>,
 }
 
 pub fn compose_posture_summary(
@@ -95,11 +92,7 @@ pub fn compose_posture_summary(
     let detection_confidence = detection.and_then(|d| d.waf_confidence()).unwrap_or(0.0);
 
     let (differential_score, challenge_score, pair_count, coverage_score) = va2
-        .and_then(|report| {
-            if let Some(reason) = &report.degraded_reason {
-                caveats.push(format!("Behavioral analysis degraded: {reason}"));
-                return None;
-            }
+        .map(|report| {
             if let Some(coverage) = &report.channel_coverage {
                 for (channel, score) in &coverage.channels {
                     coverage_by_vector.insert(channel.to_string(), *score);
@@ -110,7 +103,7 @@ pub fn compose_posture_summary(
                 .as_ref()
                 .map(|p| p.executed_pairs)
                 .unwrap_or(report.differential.len());
-            Some((
+            (
                 report.wbf.differential_score,
                 report.wbf.challenge_score,
                 pairs,
@@ -119,21 +112,17 @@ pub fn compose_posture_summary(
                     .as_ref()
                     .map(|c| c.coverage_score)
                     .unwrap_or(0.0),
-            ))
+            )
         })
         .unwrap_or((0.0, 0.0, 0, 0.0));
 
     let blocked_ratio = va1
-        .and_then(|report| {
-            if let Some(reason) = &report.degraded_reason {
-                caveats.push(format!("Enforcement analysis degraded: {reason}"));
-                return None;
-            }
+        .map(|report| {
             let total = report.summary.total as f64;
             if total > 0.0 {
-                Some(report.summary.blocked as f64 / total)
+                report.summary.blocked as f64 / total
             } else {
-                None
+                0.0
             }
         })
         .unwrap_or(0.0);
@@ -192,7 +181,6 @@ impl PostureBuilder {
             channel_coverage_score: 0.0,
             enforcement: None,
             enforcement_score: 0.0,
-            caveats: Vec::new(),
         }
     }
 
@@ -210,12 +198,6 @@ impl PostureBuilder {
     }
 
     pub fn with_va2(mut self, report: &Va2RunReport) -> Self {
-        if let Some(reason) = &report.degraded_reason {
-            self.caveats
-                .push(format!("Behavioral analysis degraded: {reason}"));
-            return self;
-        }
-
         let pmi_normalized = report.pmi.score / 100.0;
         let (blind_spot_count, cov_score) = report
             .channel_coverage
@@ -236,12 +218,6 @@ impl PostureBuilder {
     }
 
     pub fn with_va1(mut self, report: &VaRunReport) -> Self {
-        if let Some(reason) = &report.degraded_reason {
-            self.caveats
-                .push(format!("Enforcement analysis degraded: {reason}"));
-            return self;
-        }
-
         let confidence = report.summary.confidence_score();
         self.enforcement = Some(EnforcementPosture {
             enforcement: format!("{:?}", report.enforcement),
@@ -322,17 +298,9 @@ impl PostureBuilder {
         };
 
         let summary = if parts.is_empty() {
-            let mut rendered = "No protection signals detected.".to_string();
-            if !self.caveats.is_empty() {
-                rendered.push_str(&format!(" Caveats: {}", self.caveats.join("; ")));
-            }
-            rendered
+            "No protection signals detected.".to_string()
         } else {
-            let mut rendered = format!("Grade {grade}: {}", parts.join(", "));
-            if !self.caveats.is_empty() {
-                rendered.push_str(&format!(" | Caveats: {}", self.caveats.join("; ")));
-            }
-            rendered
+            format!("Grade {grade}: {}", parts.join(", "))
         };
 
         PostureReport {
@@ -344,7 +312,6 @@ impl PostureBuilder {
             behavioral: self.behavioral,
             enforcement: self.enforcement,
             summary,
-            caveats: self.caveats,
         }
     }
 }
@@ -395,8 +362,6 @@ mod tests {
                 steps: vec![],
             },
             results: vec![],
-            transport_error_count: 0,
-            degraded_reason: None,
             baseline: Va2BaselineSummary::default(),
             normalization: None,
             statefulness: None,
@@ -418,6 +383,7 @@ mod tests {
             differential: vec![],
             channel_coverage: None,
             paired_control: None,
+            audit: None,
         }
     }
 
@@ -503,7 +469,7 @@ mod tests {
             started_at: std::time::Instant::now(),
             finished_at: None,
             replay_bundle: None,
-            degraded_reason: None,
+            audit: None,
         };
         let report = PostureBuilder::new("https://example.com")
             .with_detection(&det)
@@ -587,20 +553,5 @@ mod tests {
         assert!(summary.coverage_by_vector.contains_key("header"));
         assert!(summary.confidence > 0.5);
         assert!(summary.overall_posture_score > 40.0);
-    }
-
-    #[test]
-    fn test_posture_ignores_degraded_va2() {
-        let det = mock_detection_result(0.95);
-        let mut va2 = mock_va2_report(80.0, 0.8);
-        va2.degraded_reason = Some("baseline requests failed".to_string());
-        let report = PostureBuilder::new("https://example.com")
-            .with_detection(&det)
-            .with_va2(&va2)
-            .compute();
-
-        assert!(report.behavioral.is_none());
-        assert!(!report.caveats.is_empty());
-        assert!(report.summary.contains("Behavioral analysis degraded"));
     }
 }
