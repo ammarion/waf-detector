@@ -258,3 +258,38 @@ impl Default for SucuriProvider {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_sucuri_x_sucuri_id_header() {
+        let provider = SucuriProvider::new();
+        let response = mock_response(200, [("x-sucuri-id", "abc123")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence.is_empty());
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "sucuri-id-header"));
+    }
+
+    #[tokio::test]
+    async fn detects_sucuri_server_header() {
+        let provider = SucuriProvider::new();
+        let response = mock_response(200, [("server", "Sucuri/CloudProxy")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "sucuri-server-header"));
+    }
+
+    #[tokio::test]
+    async fn no_evidence_without_sucuri_headers() {
+        let provider = SucuriProvider::new();
+        let response = mock_response(200, [("server", "nginx")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.is_empty());
+    }
+}

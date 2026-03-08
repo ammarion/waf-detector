@@ -488,26 +488,6 @@ impl DetectionResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum OutputFormat {
-    Json,
-    Pretty,
-    Table,
-}
-
-impl std::str::FromStr for OutputFormat {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "json" => Ok(OutputFormat::Json),
-            "pretty" => Ok(OutputFormat::Pretty),
-            "table" => Ok(OutputFormat::Table),
-            _ => Err(format!("Unknown output format: {s}")),
-        }
-    }
-}
-
 /// Deployment mode for the WAF detector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeploymentMode {

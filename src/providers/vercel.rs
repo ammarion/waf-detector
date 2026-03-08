@@ -221,3 +221,38 @@ impl Default for VercelProvider {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_vercel_id_header() {
+        let provider = VercelProvider::new();
+        let response = mock_response(
+            200,
+            [("x-vercel-id", "iad1::sfo1-12345-abc123def456")],
+            "",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence.is_empty());
+        assert!(evidence.iter().any(|e| e.signature_matched == "x-vercel-id-header"));
+    }
+
+    #[tokio::test]
+    async fn detects_vercel_server_header() {
+        let provider = VercelProvider::new();
+        let response = mock_response(200, [("server", "vercel")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.iter().any(|e| e.signature_matched == "vercel-server-header"));
+    }
+
+    #[tokio::test]
+    async fn no_evidence_without_vercel_headers() {
+        let provider = VercelProvider::new();
+        let response = mock_response(200, [("server", "nginx")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.is_empty());
+    }
+}

@@ -35,6 +35,20 @@ SKILLS = {
             "validation before merge or push."
         ),
     },
+    "codebase-explore": {
+        "workflow": "agent-skills/codebase-explore/WORKFLOW.md",
+        "description": (
+            "Use when the user wants to understand the codebase, find "
+            "streamlining opportunities, explore architecture, or map module "
+            "dependencies."
+        ),
+    },
+    "provider-dev": {
+        "workflow": "agent-skills/provider-dev/WORKFLOW.md",
+        "description": (
+            "Use when adding a new WAF/CDN provider or extending detection logic."
+        ),
+    },
 }
 
 

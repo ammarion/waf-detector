@@ -6,9 +6,8 @@
 pub mod loader;
 pub mod waf_smoke_test;
 
-use crate::active::{guard_target, ResolvedTarget};
+use crate::active::{resolve_authorized_target, ResolvedTarget};
 use crate::audit::{AuditSession, RunAudit};
-use crate::effectiveness::consent::ConsentManager;
 use crate::http::HttpClient;
 use crate::{Evidence, MethodType};
 use serde::{Deserialize, Serialize};
@@ -130,8 +129,7 @@ impl PayloadAnalyzer {
 
     /// Analyze URL using payload-based probing
     pub async fn analyze(&self, url: &str) -> Result<PayloadAnalysisResult, anyhow::Error> {
-        let scope = ConsentManager::new();
-        let target = guard_target(&scope, url)?;
+        let target = resolve_authorized_target(url)?;
         self.analyze_with_target(&target).await
     }
 

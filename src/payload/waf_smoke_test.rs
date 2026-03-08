@@ -4,9 +4,8 @@
 //! payloads and analysis techniques. It replaces the bash script with better detection,
 //! colorful output, and structured results for both CLI and UI consumption.
 
-use crate::active::{guard_target, ResolvedTarget};
+use crate::active::{resolve_authorized_target, ResolvedTarget};
 use crate::audit::RunAudit;
-use crate::effectiveness::consent::ConsentManager;
 use crate::effectiveness::static_detection::calculate_similarity;
 use crate::engine::waf_mode_detector::{PayloadType, WafMode};
 use crate::http::HttpClient;
@@ -372,8 +371,7 @@ impl WafSmokeTest {
 
     /// Run comprehensive WAF smoke test
     pub async fn run_test(&self, url: &str) -> Result<SmokeTestResult, anyhow::Error> {
-        let scope = ConsentManager::new();
-        let target = guard_target(&scope, url)?;
+        let target = resolve_authorized_target(url)?;
         self.run_test_with_target(&target).await
     }
 

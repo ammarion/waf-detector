@@ -671,3 +671,45 @@ impl Default for AwsProvider {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_cloudfront_x_amz_cf_id() {
+        let provider = AwsProvider::new();
+        let response = mock_response(
+            200,
+            [
+                ("x-amz-cf-id", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
+                ("x-amz-cf-pop", "LAX1-C1"),
+            ],
+            "",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence.is_empty());
+        assert!(evidence.iter().any(|e| e.signature_matched == "x-amz-cf-id-header"));
+    }
+
+    #[tokio::test]
+    async fn detects_aws_request_id() {
+        let provider = AwsProvider::new();
+        let response = mock_response(
+            200,
+            [("x-amzn-requestid", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")],
+            "",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.iter().any(|e| e.signature_matched == "aws-request-id-pattern"));
+    }
+
+    #[tokio::test]
+    async fn no_evidence_without_aws_headers() {
+        let provider = AwsProvider::new();
+        let response = mock_response(200, [("server", "nginx")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.is_empty());
+    }
+}
