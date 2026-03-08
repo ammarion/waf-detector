@@ -56,7 +56,7 @@ Run consent steps before `--effectiveness`, `--va`, `--va2 --va2-run`, `origin-p
 ### 4. Detection
 
 ```bash
-./target/release/waf-detect <url> --json
+./target/release/waf-detect scan <url> --json
 ```
 
 Extract:
@@ -111,9 +111,8 @@ Notes:
 ### 7. Enforcement Testing
 
 ```bash
-./target/release/waf-detect --va <url>
-./target/release/waf-detect --va <url> --va-json
-./target/release/waf-detect --va <url> --va-output <file>
+./target/release/waf-detect va <url>
+./target/release/waf-detect va <url> --json
 ```
 
 Use when the user wants enforcement behavior, replay artifacts, or variant-level evidence.
@@ -121,9 +120,9 @@ Use when the user wants enforcement behavior, replay artifacts, or variant-level
 ### 8. Behavioral Testing
 
 ```bash
-./target/release/waf-detect --va2 <url> --va2-run
-./target/release/waf-detect --va2 <url> --va2-run --va2-json
-./target/release/waf-detect --va2 <url> --va2-run --va2-output <file>
+./target/release/waf-detect va2 <url> --run
+./target/release/waf-detect va2 <url> --run --json
+./target/release/waf-detect va2 <url> --run --output <file>
 ```
 
 Use when the user wants channel coverage, statefulness, challenge behavior, rate limiting, or behavioral fingerprinting.

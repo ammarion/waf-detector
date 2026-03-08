@@ -34,6 +34,8 @@ If `cargo-audit` is missing, install it only if the user wants that dependency a
 - `src/http/mod.rs`
 - effectiveness consent and authorization logic
 - enforcement and behavioral testing entry points
+- `src/virtual_adversary/dae.rs` — probe payload catalog; verify `validate_zero_overlap` gates all probes
+- `src/effectiveness/waffled_techniques.rs` — waffled pair catalog; verify control/variant bodies don't contain live attack strings outside the intended payload constants
 
 4. Review test coverage gaps on the above paths
 
