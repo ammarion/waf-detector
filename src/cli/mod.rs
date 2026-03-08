@@ -113,7 +113,15 @@ fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
 }
 
 fn completion_subcommands() -> &'static [&'static str] {
-    &["scan", "va", "va2", "benchmark", "providers", "doctor", "completions"]
+    &[
+        "scan",
+        "va",
+        "va2",
+        "benchmark",
+        "providers",
+        "doctor",
+        "completions",
+    ]
 }
 
 fn completion_global_options() -> &'static [&'static str] {
@@ -488,17 +496,6 @@ impl SimpleCliApp {
             .set_payload_analysis_enabled(payload_analysis_enabled);
         let engine = DetectionEngine::new(self.registry.clone())?.with_waf_mode_detection();
 
-        // Handle TUI mode (before other modes)
-        if matches.get_flag("tui") {
-            let url = matches
-                .get_many::<String>("targets")
-                .and_then(|mut t| t.next().cloned())
-                .map(|u| self.normalize_url(&u))
-                .transpose()?;
-            return crate::tui::TuiApp::run(engine, url).await;
-        }
-
-
         if matches.get_flag("list") {
             return self.list_providers(&engine).await;
         }
@@ -783,7 +780,7 @@ impl SimpleCliApp {
                 let json = serde_json::to_string_pretty(&report)?;
                 std::fs::write(output, json)?;
                 let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
-                let summary = format!(
+                let mut summary = format!(
                     "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
                     report.target_url,
                     report.summary.confidence_score(),
@@ -793,6 +790,9 @@ impl SimpleCliApp {
                     report.summary.allowed,
                     report.summary.error
                 );
+                if let Some(reason) = &report.degraded_reason {
+                    summary.push_str(&format!("degraded_reason={reason}\n"));
+                }
                 std::fs::write(&summary_path, summary)?;
                 println!("📄 Enforcement replay report saved to: {output}");
                 println!("📄 Enforcement replay summary saved to: {summary_path}");
@@ -812,6 +812,9 @@ impl SimpleCliApp {
                 report.enforcement,
                 report.evidence_score
             );
+            if let Some(reason) = &report.degraded_reason {
+                println!("   Caveat: degraded run ({reason})");
+            }
             let max_results = *matches.get_one::<u8>("va-top").unwrap_or(&3) as usize;
             if !report.results.is_empty() {
                 println!("   Top Results:");
@@ -904,7 +907,7 @@ impl SimpleCliApp {
                 let json = serde_json::to_string_pretty(&report)?;
                 std::fs::write(output, json)?;
                 let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
-                let summary = format!(
+                let mut summary = format!(
                     "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
                     report.target_url,
                     report.summary.confidence_score(),
@@ -914,6 +917,9 @@ impl SimpleCliApp {
                     report.summary.allowed,
                     report.summary.error
                 );
+                if let Some(reason) = &report.degraded_reason {
+                    summary.push_str(&format!("degraded_reason={reason}\n"));
+                }
                 std::fs::write(&summary_path, summary)?;
                 println!("📄 Enforcement report saved to: {output}");
                 println!("📄 Enforcement summary saved to: {summary_path}");
@@ -933,6 +939,9 @@ impl SimpleCliApp {
                 report.enforcement,
                 report.evidence_score
             );
+            if let Some(reason) = &report.degraded_reason {
+                println!("   Caveat: degraded run ({reason})");
+            }
             println!(
                 "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",
                 report.config.tier,
@@ -2804,13 +2813,6 @@ The tool automatically adds https:// for bare domains where supported.
                     "Enable active payload-based probing during detection (authorized targets only)",
                 )
                 .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("tui")
-                .long("tui")
-                .help("Launch interactive TUI with navigable scan results")
-                .action(clap::ArgAction::SetTrue)
-                .conflicts_with_all(["json", "yaml"]),
         )
         .arg(
             Arg::new("list")

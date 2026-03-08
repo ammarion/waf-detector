@@ -79,10 +79,6 @@ x509-parser = "0.16"
 md5 = "0.7"
 h2 = "0.4"
 
-# TUI
-ratatui = "0.28"
-crossterm = "0.28"
-
 [dev-dependencies]
 tokio-test = "0.4"
 mockito = "1.2"

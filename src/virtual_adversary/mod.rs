@@ -108,9 +108,7 @@ pub fn ensure_consent_and_target(consent_manager: &ConsentManager, target_url: &
     }
 
     if !consent_manager.is_target_allowed(target_url)? {
-        return Err(anyhow!(
-            "Target is not authorized for enforcement testing"
-        ));
+        return Err(anyhow!("Target is not authorized for enforcement testing"));
     }
 
     Ok(())
@@ -552,6 +550,8 @@ pub struct VaRunReport {
     pub finished_at: Option<std::time::Instant>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_bundle: Option<VaReplayBundle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }
 
 fn default_instant() -> std::time::Instant {
@@ -573,11 +573,16 @@ impl VaRunReport {
             started_at: std::time::Instant::now(),
             finished_at: None,
             replay_bundle: None,
+            degraded_reason: None,
         }
     }
 
     pub fn finish(&mut self) {
         self.finished_at = Some(std::time::Instant::now());
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        self.degraded_reason.is_some()
     }
 }
 
@@ -1108,15 +1113,33 @@ impl VirtualAdversaryRunner {
 
         let required = 1 + replay_plan.len() as u32;
         self.budget.consume(required)?;
-
-        let baseline = self.collect_baseline(target_url)?;
         let total = replay_plan.len();
         let mut report = VaRunReport::new(target_url, total, self.config.clone());
         report.replay_plan = replay_plan.clone();
+        let baseline = match self.collect_baseline(target_url) {
+            Ok(baseline) => baseline,
+            Err(err) => {
+                report.degraded_reason = Some(format!("baseline collection failed: {}", err));
+                report.finish();
+                return Ok(report);
+            }
+        };
+        if baseline.status_code >= 500 {
+            report.degraded_reason = Some(format!("baseline returned {}", baseline.status_code));
+            report.finish();
+            return Ok(report);
+        }
 
         for item in replay_plan.into_iter() {
             let plan_item = Self::build_replay_item(target_host, &item)?;
-            let evaluation = self.evaluate_probe(&baseline, &plan_item)?;
+            let evaluation = match self.evaluate_probe(&baseline, &plan_item) {
+                Ok(evaluation) => evaluation,
+                Err(err) => VaProbeEvaluation {
+                    outcome: VaOutcome::Error,
+                    reason: format!("transport error: {err}"),
+                    evidence: Vec::new(),
+                },
+            };
             report.summary.record(evaluation.outcome);
             report.results.push(VaResultRecord {
                 payload: plan_item.display,
@@ -1127,6 +1150,13 @@ impl VirtualAdversaryRunner {
             });
         }
 
+        if report.summary.total > 0 && report.summary.error == report.summary.total {
+            report.degraded_reason = Some("all replay probes failed".to_string());
+        }
+        report.evidence_score = compute_evidence_score(&report.results);
+        report.evidence_summary = summarize_evidence(&report.results);
+        report.enforcement = classify_enforcement(&report.summary, report.evidence_score);
+        report.finish();
         report.replay_bundle = Some(VaReplayBundle::from_report(&report));
         crate::perf::record(
             crate::perf::PerfKind::Va,
@@ -1154,16 +1184,35 @@ impl VirtualAdversaryRunner {
         let _baseline_wait = self.rate_limiter.record_request();
         let _attack_wait = self.rate_limiter.record_request();
 
-        let baseline = self.collect_baseline(target_url)?;
         let plan = self.plan(target_url);
         let total = plan.len();
         on_progress(0, total);
         let mut report = VaRunReport::new(target_url, plan.len(), self.config.clone());
         report.replay_plan = Self::build_replay_plan(&plan);
+        let baseline = match self.collect_baseline(target_url) {
+            Ok(baseline) => baseline,
+            Err(err) => {
+                report.degraded_reason = Some(format!("baseline collection failed: {}", err));
+                report.finish();
+                return Ok(report);
+            }
+        };
+        if baseline.status_code >= 500 {
+            report.degraded_reason = Some(format!("baseline returned {}", baseline.status_code));
+            report.finish();
+            return Ok(report);
+        }
         for (idx, item) in plan.into_iter().enumerate() {
             let payload_value = item.display.clone();
             let category = VaPayloadCategory::from(item.probe.class);
-            let evaluation = self.evaluate_probe(&baseline, &item)?;
+            let evaluation = match self.evaluate_probe(&baseline, &item) {
+                Ok(evaluation) => evaluation,
+                Err(err) => VaProbeEvaluation {
+                    outcome: VaOutcome::Error,
+                    reason: format!("transport error: {err}"),
+                    evidence: Vec::new(),
+                },
+            };
             report.summary.record(evaluation.outcome);
             report.results.push(VaResultRecord {
                 payload: payload_value.clone(),
@@ -1182,6 +1231,9 @@ impl VirtualAdversaryRunner {
                 evidence: evaluation.evidence,
             });
             on_progress(idx + 1, total);
+        }
+        if report.summary.total > 0 && report.summary.error == report.summary.total {
+            report.degraded_reason = Some("all adversary probes failed".to_string());
         }
         report.evidence_score = compute_evidence_score(&report.results);
         report.evidence_summary = summarize_evidence(&report.results);
@@ -1342,6 +1394,7 @@ fn build_probe_request(probe: &Probe, target_url: &str) -> Result<VaHttpRequest>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::anyhow;
     use chrono::{DateTime, Utc};
     use serde::Serialize;
     use std::fs;
@@ -1367,6 +1420,12 @@ mod tests {
 
     #[derive(Default)]
     struct StubHttpAdapter;
+
+    #[derive(Default)]
+    struct FailingHttpAdapter;
+
+    #[derive(Default)]
+    struct EdgeErrorHttpAdapter;
 
     impl VaHttpAdapter for StubHttpAdapter {
         fn get(&self, _url: &str) -> anyhow::Result<VaHttpResponse> {
@@ -1395,6 +1454,46 @@ mod tests {
                 headers: HashMap::new(),
                 body: "blocked".to_string(),
             })
+        }
+    }
+
+    impl VaHttpAdapter for FailingHttpAdapter {
+        fn get(&self, _url: &str) -> anyhow::Result<VaHttpResponse> {
+            Err(anyhow!("dns failure"))
+        }
+
+        fn get_with_payload(
+            &self,
+            _url: &str,
+            _payload: &VaPayloadVariant,
+        ) -> anyhow::Result<VaHttpResponse> {
+            Err(anyhow!("dns failure"))
+        }
+
+        fn send(&self, _request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse> {
+            Err(anyhow!("dns failure"))
+        }
+    }
+
+    impl VaHttpAdapter for EdgeErrorHttpAdapter {
+        fn get(&self, _url: &str) -> anyhow::Result<VaHttpResponse> {
+            Ok(VaHttpResponse {
+                status: 503,
+                headers: HashMap::new(),
+                body: "service unavailable".to_string(),
+            })
+        }
+
+        fn get_with_payload(
+            &self,
+            _url: &str,
+            _payload: &VaPayloadVariant,
+        ) -> anyhow::Result<VaHttpResponse> {
+            self.get("")
+        }
+
+        fn send(&self, _request: &VaHttpRequest) -> anyhow::Result<VaHttpResponse> {
+            self.get("")
         }
     }
 
@@ -1963,6 +2062,51 @@ mod tests {
         let baseline = runner.collect_baseline("https://example.com").unwrap();
         assert_eq!(baseline.status_code, 200);
         assert_eq!(baseline.body_sample, "ok");
+    }
+
+    #[test]
+    fn test_runner_degrades_when_baseline_collection_fails() {
+        with_temp_home(|temp_dir| {
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
+
+            let config = VirtualAdversaryConfig {
+                request_budget: 2,
+                skip_dns_validation: true,
+                ..Default::default()
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(FailingHttpAdapter));
+
+            let report = runner.run("https://example.com").unwrap();
+            assert!(report.is_degraded());
+            assert!(report.summary.total == 0);
+            assert_eq!(report.enforcement, VaEnforcement::Inconclusive);
+        });
+    }
+
+    #[test]
+    fn test_runner_degrades_when_baseline_returns_5xx() {
+        with_temp_home(|temp_dir| {
+            write_test_consent(temp_dir, vec!["example.com".to_string()]);
+
+            let config = VirtualAdversaryConfig {
+                request_budget: 2,
+                skip_dns_validation: true,
+                ..Default::default()
+            };
+            let mut runner = VirtualAdversaryRunner::new(config)
+                .unwrap()
+                .with_http_adapter(Box::new(EdgeErrorHttpAdapter));
+
+            let report = runner.run("https://example.com").unwrap();
+            assert!(report.is_degraded());
+            assert!(report
+                .degraded_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("503")));
+            assert_eq!(report.summary.total, 0);
+        });
     }
 
     #[test]

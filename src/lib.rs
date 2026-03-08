@@ -26,7 +26,6 @@ pub mod tls;
 // NEW: WAF Effectiveness Testing module
 pub mod effectiveness;
 pub mod posture;
-pub mod tui;
 pub mod virtual_adversary;
 pub mod virtual_adversary2;
 

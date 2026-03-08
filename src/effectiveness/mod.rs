@@ -20,6 +20,7 @@ pub mod parser_discrepancy;
 pub mod patterns;
 pub mod report;
 pub mod static_detection;
+pub mod surface_discovery;
 pub mod techniques;
 pub mod waffled_techniques;
 
@@ -29,7 +30,8 @@ mod tests;
 use consent::ConsentManager;
 use parser_discrepancy::{execute_campaign, ParserDiscrepancyExecutor};
 use report::{EffectivenessReport, Recommendation, Vulnerability};
-use static_detection::{analyze_static_page, format_static_page_warning};
+use static_detection::{analyze_static_page, format_static_page_warning, StaticPageAnalysis};
+use surface_discovery::{build_candidate_paths, classify_endpoint, summarize_discovery};
 use techniques::TestingTechnique;
 
 /// Configuration for WAF effectiveness testing
@@ -354,24 +356,52 @@ impl EffectivenessTest {
         self.validate_target(url)?;
 
         // Check if target appears to be serving static content
-        let parser_discrepancy_static_or_ambiguous = match analyze_static_page(url).await {
+        let static_analysis = match analyze_static_page(url).await {
             Ok(analysis) => {
                 if analysis.is_likely_static {
                     warn!("{}", format_static_page_warning(&analysis));
                 }
-                analysis.is_likely_static
+                Some(analysis)
             }
             Err(e) => {
                 warn!("Could not analyze if target is static: {}", e);
-                true
+                None
             }
         };
+        let parser_discrepancy_static_or_ambiguous = static_analysis
+            .as_ref()
+            .map(|analysis| analysis.is_likely_static)
+            .unwrap_or(true);
 
         let mut report = EffectivenessReport::new(url);
+
+        report.add_phase("Surface Discovery".to_string());
+        self.run_surface_discovery(url, &mut report, static_analysis.as_ref())
+            .await?;
 
         // Phase 1: Baseline testing (benign requests)
         report.add_phase("Baseline Testing".to_string());
         self.test_baseline(url, &mut report).await?;
+
+        if let Some(reason) = self.baseline_failure_reason(&report) {
+            warn!("Effectiveness run degraded: {reason}");
+            report.mark_degraded(reason.clone());
+            report.add_recommendation(Recommendation {
+                priority: "WARNING".to_string(),
+                category: "Transport / Availability".to_string(),
+                description: "Baseline collection was degraded by transport or edge failures"
+                    .to_string(),
+                implementation: format!(
+                    "Retry the assessment when the target is healthy and reachable. Current issue: {reason}"
+                ),
+            });
+
+            if self.config.audit_logging {
+                self.log_test_completion(&report)?;
+            }
+
+            return Ok(report);
+        }
 
         // Phase 2: Detection testing (with various techniques)
         report.add_phase("Detection Testing".to_string());
@@ -417,6 +447,102 @@ impl EffectivenessTest {
         Ok(())
     }
 
+    async fn run_surface_discovery(
+        &mut self,
+        target_url: &str,
+        report: &mut EffectivenessReport,
+        static_analysis: Option<&StaticPageAnalysis>,
+    ) -> Result<()> {
+        info!("Discovering public-facing endpoints");
+
+        let candidate_paths = build_candidate_paths(target_url, static_analysis)?;
+        let mut parsed_target =
+            if target_url.starts_with("http://") || target_url.starts_with("https://") {
+                url::Url::parse(target_url)?
+            } else {
+                url::Url::parse(&format!("https://{target_url}"))?
+            };
+        parsed_target.set_query(None);
+        parsed_target.set_fragment(None);
+
+        let mut endpoints = Vec::new();
+
+        for path in candidate_paths {
+            self.rate_limit().await?;
+            parsed_target.set_path(&path);
+            let endpoint_url = parsed_target.to_string();
+            let baseline = self
+                .perform_request(&endpoint_url, "GET", "", HashMap::new())
+                .await?;
+
+            let probe = if baseline.status_code != 0 {
+                self.rate_limit().await?;
+                let mut probe_url = parsed_target.clone();
+                probe_url
+                    .query_pairs_mut()
+                    .append_pair("waf_probe", "surface-discovery");
+                Some(
+                    self.perform_request(probe_url.as_ref(), "GET", "", HashMap::new())
+                        .await?,
+                )
+            } else {
+                None
+            };
+
+            endpoints.push(classify_endpoint(
+                &path,
+                &endpoint_url,
+                &baseline,
+                probe.as_ref(),
+            ));
+        }
+
+        let root_static = static_analysis
+            .map(|analysis| analysis.is_likely_static)
+            .unwrap_or(false);
+        let summary = summarize_discovery(target_url, endpoints, root_static);
+
+        if let Some(preferred_endpoint) = &summary.preferred_endpoint {
+            if preferred_endpoint != target_url {
+                report.add_recommendation(Recommendation {
+                    priority: "MEDIUM".to_string(),
+                    category: "Endpoint Targeting".to_string(),
+                    description:
+                        "A more promising public-facing endpoint was discovered during inventory"
+                            .to_string(),
+                    implementation: format!(
+                        "Re-run smoke or effectiveness testing against {preferred_endpoint} to measure path-scoped protection instead of relying only on the original URL."
+                    ),
+                });
+            }
+        }
+
+        for finding in &summary.findings {
+            if finding.severity == "HIGH" || finding.severity == "MEDIUM" {
+                report.add_vulnerability(Vulnerability {
+                    severity: finding.severity.clone(),
+                    category: finding.category.clone(),
+                    description: finding.description.clone(),
+                    evidence: finding.evidence.clone(),
+                    remediation: match finding.category.as_str() {
+                        "Administrative Surface" => {
+                            "Restrict administrative endpoints with authentication, network policy, and explicit edge protection.".to_string()
+                        }
+                        "Public Operational Endpoint" => {
+                            "Review whether this operational endpoint needs public exposure. If not, gate it behind authentication, IP policy, or internal-only routing.".to_string()
+                        }
+                        _ => {
+                            "Review the discovered public surface and ensure edge protections are consistently applied.".to_string()
+                        }
+                    },
+                });
+            }
+        }
+
+        report.surface_discovery = Some(summary);
+        Ok(())
+    }
+
     /// Test baseline behavior with benign requests
     async fn test_baseline(&mut self, url: &str, report: &mut EffectivenessReport) -> Result<()> {
         info!("Testing baseline behavior");
@@ -450,7 +576,9 @@ impl EffectivenessTest {
             let result = self.perform_request(url, method, body, headers).await?;
 
             // Store response for similarity check
-            response_bodies.push(result.response_body_sample.clone());
+            if result.is_reliable() {
+                response_bodies.push(result.response_body_sample.clone());
+            }
             baseline_results.push(result.clone());
 
             report.add_baseline_result(test_name, result);
@@ -501,7 +629,7 @@ impl EffectivenessTest {
             let result = self.apply_technique(url, &technique).await?;
 
             // Record vulnerability if WAF failed to block
-            if !result.blocked {
+            if !result.blocked && !result.is_transport_error() {
                 report.add_vulnerability(Vulnerability {
                     severity: technique.severity,
                     category: technique.category.clone(),
@@ -575,7 +703,7 @@ impl EffectivenessTest {
 
             let result = self.apply_technique(url, &technique).await?;
 
-            if !result.blocked {
+            if !result.blocked && !result.is_transport_error() {
                 report.add_vulnerability(Vulnerability {
                     severity: "HIGH".to_string(),
                     category: "Evasion".to_string(),
@@ -797,8 +925,43 @@ impl EffectivenessTest {
         Ok(())
     }
 
+    fn baseline_failure_reason(&self, report: &EffectivenessReport) -> Option<String> {
+        let baseline_results: Vec<_> = report.baseline_results.values().collect();
+        if baseline_results.is_empty() {
+            return Some("no baseline requests completed".to_string());
+        }
+
+        let reliable_count = baseline_results
+            .iter()
+            .filter(|result| result.is_reliable())
+            .count();
+        if reliable_count == 0 {
+            let transport_count = baseline_results
+                .iter()
+                .filter(|result| result.is_transport_error())
+                .count();
+            let edge_error_count = baseline_results
+                .iter()
+                .filter(|result| result.status_code >= 500)
+                .count();
+            if transport_count == baseline_results.len() {
+                return Some("all baseline requests failed at the transport layer".to_string());
+            }
+            if edge_error_count == baseline_results.len() {
+                return Some("all baseline requests returned 5xx responses".to_string());
+            }
+            return Some("baseline requests did not yield any reliable responses".to_string());
+        }
+
+        None
+    }
+
     /// Generate recommendations based on test results
     fn generate_recommendations(&self, report: &mut EffectivenessReport) {
+        if report.is_degraded() {
+            return;
+        }
+
         // Analyze vulnerabilities and generate recommendations
         let vuln_categories: Vec<String> = report
             .vulnerabilities
@@ -845,7 +1008,11 @@ impl EffectivenessTest {
         }
 
         // Specific check for "Monitoring Mode" (WAF present but not blocking)
-        if report.statistics.blocked_requests == 0 && report.statistics.total_tests > 0 {
+        let evaluated_tests = report
+            .statistics
+            .blocked_requests
+            .saturating_add(report.statistics.allowed_requests);
+        if report.statistics.blocked_requests == 0 && evaluated_tests > 0 {
             report.add_recommendation(Recommendation {
                 priority: "CRITICAL".to_string(),
                 category: "WAF Mode".to_string(),
@@ -896,12 +1063,17 @@ impl EffectivenessTest {
     }
 
     fn build_baseline_signature(baseline_results: &[TestResult]) -> Option<BaselineSignature> {
+        let baseline_results: Vec<_> = baseline_results
+            .iter()
+            .filter(|result| result.is_reliable())
+            .collect();
+
         if baseline_results.is_empty() {
             return None;
         }
 
         let mut status_counts: HashMap<u16, usize> = HashMap::new();
-        for result in baseline_results {
+        for result in &baseline_results {
             *status_counts.entry(result.status_code).or_insert(0) += 1;
         }
 
@@ -959,6 +1131,16 @@ pub struct TestResult {
     pub response_body_sample: String,
     pub response_body_length: usize,
     pub response_headers: HashMap<String, String>,
+}
+
+impl TestResult {
+    pub fn is_transport_error(&self) -> bool {
+        self.status_code == 0
+    }
+
+    pub fn is_reliable(&self) -> bool {
+        self.status_code > 0 && self.status_code < 500
+    }
 }
 
 #[async_trait::async_trait]

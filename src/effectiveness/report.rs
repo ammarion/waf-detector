@@ -28,6 +28,12 @@ pub struct EffectivenessReport {
     pub baseline_results: HashMap<String, TestResult>,
     /// Summary statistics
     pub statistics: TestStatistics,
+    /// Why this run should be treated as degraded or inconclusive
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
+    /// Public-facing surface discovery summary
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_discovery: Option<SurfaceDiscoverySummary>,
     /// Parser discrepancy candidate bypass summary
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parser_discrepancy: Option<ParserDiscrepancySummary>,
@@ -67,10 +73,74 @@ pub struct TestStatistics {
     pub blocked_requests: usize,
     pub allowed_requests: usize,
     pub error_responses: usize,
+    pub transport_error_count: usize,
     pub average_response_time_ms: f64,
     pub benign_tests_count: usize,
     pub false_positive_count: usize,
     pub false_positive_rate: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SurfaceDiscoverySummary {
+    pub probed_endpoints: usize,
+    pub reachable_endpoints: usize,
+    pub public_endpoints: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred_endpoint: Option<String>,
+    #[serde(default)]
+    pub classification_counts: HashMap<String, usize>,
+    #[serde(default)]
+    pub endpoints: Vec<DiscoveredEndpoint>,
+    #[serde(default)]
+    pub findings: Vec<SurfaceFinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveredEndpoint {
+    pub path: String,
+    pub url: String,
+    pub status_code: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    pub classification: EndpointClassification,
+    pub auth_required: bool,
+    pub blocked_or_challenged: bool,
+    pub query_responsive: bool,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointClassification {
+    Static,
+    Operational,
+    Interactive,
+    Authenticated,
+    Protected,
+    Unknown,
+}
+
+impl std::fmt::Display for EndpointClassification {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EndpointClassification::Static => write!(f, "static"),
+            EndpointClassification::Operational => write!(f, "operational"),
+            EndpointClassification::Interactive => write!(f, "interactive"),
+            EndpointClassification::Authenticated => write!(f, "authenticated"),
+            EndpointClassification::Protected => write!(f, "protected"),
+            EndpointClassification::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SurfaceFinding {
+    pub severity: String,
+    pub category: String,
+    pub endpoint: String,
+    pub description: String,
+    pub evidence: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -124,11 +194,14 @@ impl EffectivenessReport {
                 blocked_requests: 0,
                 allowed_requests: 0,
                 error_responses: 0,
+                transport_error_count: 0,
                 average_response_time_ms: 0.0,
                 benign_tests_count: 0,
                 false_positive_count: 0,
                 false_positive_rate: 0.0,
             },
+            degraded_reason: None,
+            surface_discovery: None,
             parser_discrepancy: None,
         }
     }
@@ -165,6 +238,7 @@ impl EffectivenessReport {
         self.statistics.total_tests += 1;
 
         if result.status_code == 0 {
+            self.statistics.transport_error_count += 1;
             self.statistics.error_responses += 1;
         } else {
             if result.blocked {
@@ -183,6 +257,15 @@ impl EffectivenessReport {
         self.recalculate_risk_score();
     }
 
+    pub fn mark_degraded(&mut self, reason: impl Into<String>) {
+        self.degraded_reason = Some(reason.into());
+        self.recalculate_risk_score();
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        self.degraded_reason.is_some()
+    }
+
     /// Add a baseline result
     pub fn add_baseline_result(&mut self, name: &str, result: TestResult) {
         self.baseline_results.insert(name.to_string(), result);
@@ -191,14 +274,22 @@ impl EffectivenessReport {
     /// Recalculate risk score based on vulnerabilities and block rate
     fn recalculate_risk_score(&mut self) {
         // Base risk score calculation based on block rate
-        let block_rate = if self.statistics.total_tests > 0 {
-            self.statistics.blocked_requests as f64 / self.statistics.total_tests as f64
+        let evaluated_tests = self
+            .statistics
+            .blocked_requests
+            .saturating_add(self.statistics.allowed_requests);
+        let block_rate = if evaluated_tests > 0 {
+            self.statistics.blocked_requests as f64 / evaluated_tests as f64
         } else {
             0.0
         };
 
         // Base risk score: inverse of block rate (100% blocked = 0 risk, 0% blocked = 100 risk)
-        let base_risk = (1.0 - block_rate) * 100.0;
+        let base_risk = if evaluated_tests > 0 {
+            (1.0 - block_rate) * 100.0
+        } else {
+            0.0
+        };
 
         // Add penalties for vulnerabilities
         let mut penalty: f64 = 0.0;
@@ -243,19 +334,44 @@ impl EffectivenessReport {
         ));
         summary.push_str(&format!("**Risk Score:** {:.1}/100\n\n", self.risk_score));
 
+        if let Some(reason) = &self.degraded_reason {
+            summary.push_str(&format!(
+                "> Run degraded: {reason}. Security findings may be incomplete.\n\n"
+            ));
+        }
+
         // Statistics
+        let evaluated_tests = self
+            .statistics
+            .blocked_requests
+            .saturating_add(self.statistics.allowed_requests);
+        let blocked_pct = if evaluated_tests > 0 {
+            (self.statistics.blocked_requests as f64 / evaluated_tests as f64) * 100.0
+        } else {
+            0.0
+        };
+        let allowed_pct = if evaluated_tests > 0 {
+            (self.statistics.allowed_requests as f64 / evaluated_tests as f64) * 100.0
+        } else {
+            0.0
+        };
         summary.push_str("## Statistics\n");
         summary.push_str(&format!("- Total Tests: {}\n", self.statistics.total_tests));
+        summary.push_str(&format!("- Evaluated Tests: {}\n", evaluated_tests));
         summary.push_str(&format!(
             "- Blocked: {} ({:.1}%)\n",
-            self.statistics.blocked_requests,
-            (self.statistics.blocked_requests as f64 / self.statistics.total_tests as f64) * 100.0
+            self.statistics.blocked_requests, blocked_pct
         ));
         summary.push_str(&format!(
             "- Allowed: {} ({:.1}%)\n",
-            self.statistics.allowed_requests,
-            (self.statistics.allowed_requests as f64 / self.statistics.total_tests as f64) * 100.0
+            self.statistics.allowed_requests, allowed_pct
         ));
+        if self.statistics.transport_error_count > 0 {
+            summary.push_str(&format!(
+                "- Transport Errors: {}\n",
+                self.statistics.transport_error_count
+            ));
+        }
         summary.push_str(&format!(
             "- Avg Response Time: {:.0}ms\n",
             self.statistics.average_response_time_ms
@@ -274,6 +390,58 @@ impl EffectivenessReport {
             ));
         }
         summary.push('\n');
+
+        if let Some(surface_discovery) = &self.surface_discovery {
+            summary.push_str("## Surface Discovery\n");
+            summary.push_str(&format!(
+                "- Probed Endpoints: {}\n",
+                surface_discovery.probed_endpoints
+            ));
+            summary.push_str(&format!(
+                "- Reachable Endpoints: {}\n",
+                surface_discovery.reachable_endpoints
+            ));
+            summary.push_str(&format!(
+                "- Public Endpoints: {}\n",
+                surface_discovery.public_endpoints
+            ));
+            if let Some(preferred_endpoint) = &surface_discovery.preferred_endpoint {
+                summary.push_str(&format!("- Preferred Endpoint: {preferred_endpoint}\n"));
+            }
+
+            if !surface_discovery.classification_counts.is_empty() {
+                let mut counts: Vec<_> = surface_discovery.classification_counts.iter().collect();
+                counts.sort_by(|(left_name, left_count), (right_name, right_count)| {
+                    right_count
+                        .cmp(left_count)
+                        .then_with(|| left_name.cmp(right_name))
+                });
+                let rendered = counts
+                    .into_iter()
+                    .map(|(name, count)| format!("{name}: {count}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                summary.push_str(&format!("- By Classification: {rendered}\n"));
+            }
+
+            if !surface_discovery.findings.is_empty() {
+                let rendered = surface_discovery
+                    .findings
+                    .iter()
+                    .take(5)
+                    .map(|finding| {
+                        format!(
+                            "{} {} ({})",
+                            finding.endpoint, finding.category, finding.severity
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                summary.push_str(&format!("- Notable Findings: {rendered}\n"));
+            }
+
+            summary.push('\n');
+        }
 
         if let Some(parser_discrepancy) = &self.parser_discrepancy {
             summary.push_str("## Parser Discrepancy Testing\n");
@@ -407,13 +575,26 @@ impl EffectivenessReport {
             r#"<p>Risk Score: <span class="risk-score {}">{:.1}</span>/100</p>"#,
             risk_class, self.risk_score
         ));
+        if let Some(reason) = &self.degraded_reason {
+            html.push_str(&format!(
+                r#"<p><strong>Run degraded:</strong> {reason}. Security findings may be incomplete.</p>"#
+            ));
+        }
 
         // Statistics
+        let evaluated_tests = self
+            .statistics
+            .blocked_requests
+            .saturating_add(self.statistics.allowed_requests);
         html.push_str("<h2>Statistics</h2>");
         html.push_str("<div>");
         html.push_str(&format!(
             r#"<div class="stat">Total Tests: <span class="stat-value">{}</span></div>"#,
             self.statistics.total_tests
+        ));
+        html.push_str(&format!(
+            r#"<div class="stat">Evaluated: <span class="stat-value">{}</span></div>"#,
+            evaluated_tests
         ));
         html.push_str(&format!(
             r#"<div class="stat">Blocked: <span class="stat-value">{}</span></div>"#,
@@ -423,6 +604,12 @@ impl EffectivenessReport {
             r#"<div class="stat">Allowed: <span class="stat-value">{}</span></div>"#,
             self.statistics.allowed_requests
         ));
+        if self.statistics.transport_error_count > 0 {
+            html.push_str(&format!(
+                r#"<div class="stat">Transport Errors: <span class="stat-value">{}</span></div>"#,
+                self.statistics.transport_error_count
+            ));
+        }
         if self.statistics.benign_tests_count > 0 {
             html.push_str(&format!(
                 r#"<div class="stat">False Positives: <span class="stat-value">{}</span> ({:.1}%)</div>"#,
@@ -431,6 +618,24 @@ impl EffectivenessReport {
             ));
         }
         html.push_str("</div>");
+
+        if let Some(surface_discovery) = &self.surface_discovery {
+            html.push_str("<h2>Surface Discovery</h2>");
+            html.push_str("<div>");
+            html.push_str(&format!(
+                r#"<div class="stat">Probed: <span class="stat-value">{}</span></div>"#,
+                surface_discovery.probed_endpoints
+            ));
+            html.push_str(&format!(
+                r#"<div class="stat">Reachable: <span class="stat-value">{}</span></div>"#,
+                surface_discovery.reachable_endpoints
+            ));
+            html.push_str(&format!(
+                r#"<div class="stat">Public: <span class="stat-value">{}</span></div>"#,
+                surface_discovery.public_endpoints
+            ));
+            html.push_str("</div>");
+        }
 
         if let Some(parser_discrepancy) = &self.parser_discrepancy {
             html.push_str("<h2>Parser Discrepancy Testing</h2>");
