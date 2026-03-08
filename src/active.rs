@@ -103,6 +103,13 @@ pub fn current_operator_id() -> String {
         .unwrap_or_else(|| "unknown-operator".to_string())
 }
 
+/// Resolve and authorize a target URL in one step. Creates a ConsentManager,
+/// checks consent, and returns the resolved target. Use for single-target flows.
+pub fn resolve_authorized_target(url: &str) -> Result<ResolvedTarget> {
+    let consent = ConsentManager::new();
+    guard_target(&consent, url)
+}
+
 pub fn guard_target(consent_manager: &ConsentManager, target_url: &str) -> Result<ResolvedTarget> {
     guard_target_with_profile(consent_manager, target_url, ActiveTargetProfile::from_env())
 }

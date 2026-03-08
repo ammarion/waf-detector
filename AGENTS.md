@@ -10,6 +10,8 @@ Shared agent workflows live under `agent-skills/`. These files contain the real 
 - `agent-skills/cli-doctor/WORKFLOW.md`
 - `agent-skills/security-audit/WORKFLOW.md`
 - `agent-skills/validate-build/WORKFLOW.md`
+- `agent-skills/codebase-explore/WORKFLOW.md`
+- `agent-skills/provider-dev/WORKFLOW.md`
 
 Agent-specific wrappers must stay thin:
 
@@ -28,6 +30,21 @@ If a wrapper and a shared workflow disagree, follow the shared workflow and fix 
   `agent-skills/security-audit/WORKFLOW.md`
 - Build, lint, test, and release validation:
   `agent-skills/validate-build/WORKFLOW.md`
+- Codebase exploration, architecture review, streamlining opportunities:
+  `agent-skills/codebase-explore/WORKFLOW.md`
+- Adding a new WAF/CDN provider:
+  `agent-skills/provider-dev/WORKFLOW.md`
+
+## When to Use Which Skill
+
+| User says… | Skill |
+|------------|-------|
+| "Assess this WAF" / "Full scan" / "Run detection" | waf-assess |
+| "Scans failing" / "Environment unhealthy" / "Shell completions" | cli-doctor |
+| "Security audit" / "Pre-release review" | security-audit |
+| "Validate before merge" / "Run tests" | validate-build |
+| "Streamline" / "Understand codebase" / "Find duplication" | codebase-explore |
+| "Add new provider" / "Implement detection for X" | provider-dev |
 
 ## Mental Model
 

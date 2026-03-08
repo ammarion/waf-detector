@@ -1,6 +1,5 @@
-use crate::active::{guard_target, ResolvedTarget};
+use crate::active::{resolve_authorized_target, ResolvedTarget};
 use crate::audit::AuditSession;
-use crate::effectiveness::consent::ConsentManager;
 use crate::effectiveness::static_detection::analyze_static_page;
 use crate::effectiveness::EffectivenessConfig;
 use crate::engine::DetectionEngine;
@@ -77,8 +76,7 @@ impl HardeningOrchestrator {
     }
 
     pub async fn run(&self, target_url: &str) -> Result<HardeningExecution> {
-        let scope = ConsentManager::new();
-        let target = guard_target(&scope, target_url)?;
+        let target = resolve_authorized_target(target_url)?;
         let mut audit = AuditSession::new(
             "hardening",
             &target,

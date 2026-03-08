@@ -288,3 +288,38 @@ impl Default for CloudFlareProvider {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_cf_ray_header() {
+        let provider = CloudFlareProvider::new();
+        let response = mock_response(
+            200,
+            [("cf-ray", "8a1b2c3d4e5f-SFO"), ("cf-cache-status", "HIT")],
+            "",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence.is_empty());
+        assert!(evidence.iter().any(|e| e.signature_matched == "cf-ray-header"));
+    }
+
+    #[tokio::test]
+    async fn detects_cf_cache_status() {
+        let provider = CloudFlareProvider::new();
+        let response = mock_response(200, [("cf-cache-status", "MISS")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.iter().any(|e| e.signature_matched == "cf-cache-status-header"));
+    }
+
+    #[tokio::test]
+    async fn no_evidence_without_cf_headers() {
+        let provider = CloudFlareProvider::new();
+        let response = mock_response(200, [("server", "nginx")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.is_empty());
+    }
+}

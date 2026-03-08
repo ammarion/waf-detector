@@ -1,1 +1,0 @@
-// Signature-based provider foundation - stub for now 

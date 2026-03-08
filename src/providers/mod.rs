@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod test_utils;
+
 pub mod akamai;
 pub mod aws;
 pub mod azure;

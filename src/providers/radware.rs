@@ -182,3 +182,42 @@ impl Default for RadwareProvider {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_radware_x_sl_compstate_header() {
+        let provider = RadwareProvider::new();
+        let response = mock_response(200, [("x-sl-compstate", "1")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence.is_empty());
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "radware-compstate-header"));
+    }
+
+    #[tokio::test]
+    async fn detects_radware_cookie() {
+        let provider = RadwareProvider::new();
+        let response = mock_response(
+            200,
+            [("set-cookie", "rdwl_SID=abc123; path=/")],
+            "",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "radware-cookie"));
+    }
+
+    #[tokio::test]
+    async fn no_evidence_without_radware_indicators() {
+        let provider = RadwareProvider::new();
+        let response = mock_response(200, [("server", "nginx")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.is_empty());
+    }
+}
