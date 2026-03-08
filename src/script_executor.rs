@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use tempfile::NamedTempFile;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScriptResult {
@@ -71,13 +73,15 @@ impl ScriptExecutor {
 
     pub async fn execute_test(&self, url: &str) -> Result<ScriptResult> {
         let start_time = std::time::Instant::now();
+        let output_file = NamedTempFile::new()?;
+        let output_path = output_file.path().to_path_buf();
 
         // Execute the bash script
         let output = Command::new("bash")
             .arg(&self.script_path)
             .arg(url)
             .arg("-o")
-            .arg("/tmp/waf_test_output.json") // Use JSON output for parsing
+            .arg(&output_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -90,7 +94,21 @@ impl ScriptExecutor {
             return Err(anyhow!("Script execution failed: {}", stderr));
         }
 
-        // Parse the script output
+        if let Ok(json_output) = fs::read_to_string(&output_path) {
+            let trimmed = json_output.trim();
+            if !trimmed.is_empty() {
+                let mut result: ScriptResult = serde_json::from_str(trimmed).map_err(|err| {
+                    anyhow!(
+                        "Script wrote invalid JSON report to {}: {}",
+                        output_path.display(),
+                        err
+                    )
+                })?;
+                result.execution_time_ms = execution_time;
+                return Ok(result);
+            }
+        }
+
         let stdout = String::from_utf8_lossy(&output.stdout);
         self.parse_script_output(&stdout, execution_time)
     }
@@ -185,36 +203,11 @@ impl ScriptExecutor {
             }
         }
 
-        // If we couldn't parse any results, fall back to mock data
+        // Fail closed when the script output cannot be parsed.
         if test_results.is_empty() {
-            println!("Warning: Could not parse test results from script output, using mock data");
-
-            // Generate mock data
-            for (i, category) in categories.iter().enumerate() {
-                let status = if i % 3 == 0 {
-                    "BLOCKED"
-                } else if i % 3 == 1 {
-                    "ALLOWED"
-                } else {
-                    "ERROR"
-                };
-
-                match status {
-                    "BLOCKED" => blocked_count += 1,
-                    "ALLOWED" => allowed_count += 1,
-                    "ERROR" => error_count += 1,
-                    _ => {}
-                }
-
-                test_results.push(PayloadResult {
-                    category: category.to_string(),
-                    payload: format!("test-payload-{i}"),
-                    status: status.to_string(),
-                    response_code: if status == "BLOCKED" { 403 } else { 200 },
-                    response_time_ms: 150 + (i * 50) as u64,
-                    detection_method: "HTTP Status Code".to_string(),
-                });
-            }
+            return Err(anyhow!(
+                "Could not parse test results from legacy script output"
+            ));
         }
 
         let total_tests = test_results.len() as u32;
@@ -339,16 +332,5 @@ impl ScriptExecutor {
             recommendations,
             total_time_ms,
         }
-    }
-}
-
-impl Default for ScriptExecutor {
-    fn default() -> Self {
-        Self::new().unwrap_or_else(|e| {
-            println!("Warning: Failed to initialize script executor: {e}");
-            Self {
-                script_path: "scripts/waf-smoke-test.sh".to_string(),
-            }
-        })
     }
 }

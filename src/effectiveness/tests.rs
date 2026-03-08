@@ -32,13 +32,36 @@ mod effectiveness_tests {
 
     fn write_valid_consent(temp_dir: &TempDir, authorized_targets: &[&str]) {
         let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+        let targets: Vec<serde_json::Value> = authorized_targets
+            .iter()
+            .map(|host| serde_json::json!({"host": host, "class": "internal"}))
+            .collect();
         let record = serde_json::json!({
             "timestamp": chrono::Utc::now(),
             "terms_version": "1.0.0",
-            "authorized_targets": authorized_targets,
+            "targets": targets,
             "acknowledgment": "I AGREE"
         });
         std::fs::write(consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+    }
+
+    fn make_test_target(url: &str) -> crate::active::ResolvedTarget {
+        let parsed = url::Url::parse(url).expect("valid test url");
+        let port = parsed.port().unwrap_or(80);
+        let ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        crate::active::ResolvedTarget {
+            original_url: url.to_string(),
+            normalized_url: url.to_string(),
+            host: "127.0.0.1".to_string(),
+            port,
+            registered_target: crate::effectiveness::consent::ScopeTarget {
+                host: "127.0.0.1".to_string(),
+                class: crate::effectiveness::consent::TargetClass::Internal,
+            },
+            active_target_profile: crate::active::ActiveTargetProfile::Internal,
+            resolved_ips: vec![ip],
+            pinned_ip: ip,
+        }
     }
 
     async fn start_effectiveness_server() -> (String, tokio::task::JoinHandle<()>) {
@@ -433,7 +456,12 @@ mod effectiveness_tests {
             assert!(status.has_consent);
             assert_eq!(status.authorized_targets.len(), 2);
             assert_eq!(status.terms_version, "1.0.0");
-            assert!(status.expires_in_days.unwrap_or(0) > 0);
+            assert!(status.expires_in_days.is_none());
+            assert_eq!(status.targets.len(), 2);
+            assert!(status
+                .targets
+                .iter()
+                .all(|target| target.class == consent::TargetClass::Public));
         });
     }
 
@@ -785,9 +813,11 @@ mod effectiveness_tests {
         let mut test = EffectivenessTest {
             config,
             consent_manager: consent::ConsentManager::new(),
+            http_client: crate::http::HttpClient::new().unwrap(),
             start_time: start,
             request_count: 100, // Start with high count to trigger rate limiting
             baseline_signature: None,
+            resolved_target: None,
         };
 
         // This should trigger rate limiting and introduce a delay
@@ -815,7 +845,8 @@ mod effectiveness_tests {
         config.request_delay = std::time::Duration::from_millis(0);
 
         let mut test = EffectivenessTest::new(config).await.unwrap();
-        let report = test.test_effectiveness(&url).await.unwrap();
+        let target = make_test_target(&url);
+        let report = test.test_effectiveness_with_target(&target).await.unwrap();
 
         handle.abort();
         if let Some(value) = original_home {
@@ -857,7 +888,8 @@ parser_discrepancy_max_pairs = 3
         config.request_delay = std::time::Duration::from_millis(0);
 
         let mut test = EffectivenessTest::new(config).await.unwrap();
-        let report = test.test_effectiveness(&url).await.unwrap();
+        let target = make_test_target(&url);
+        let report = test.test_effectiveness_with_target(&target).await.unwrap();
 
         handle.abort();
         if let Some(value) = original_home {

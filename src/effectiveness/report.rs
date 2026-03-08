@@ -2,6 +2,7 @@
 //!
 //! This module handles the generation of comprehensive reports from effectiveness testing.
 
+use crate::audit::RunAudit;
 use crate::effectiveness::TestResult;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,8 @@ pub struct EffectivenessReport {
     /// Parser discrepancy candidate bypass summary
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parser_discrepancy: Option<ParserDiscrepancySummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<RunAudit>,
 }
 
 /// A phase of testing
@@ -130,6 +133,7 @@ impl EffectivenessReport {
                 false_positive_rate: 0.0,
             },
             parser_discrepancy: None,
+            audit: None,
         }
     }
 

@@ -25,11 +25,10 @@ cargo build --release
 ./target/release/waf-detect example.com
 
 # Run smoke test
+./target/release/waf-detect --scope init example.com
 ./target/release/waf-detect --smoke-test example.com
 
 # Full posture report (detection + behavioral analysis)
-./target/release/waf-detect --consent request
-./target/release/waf-detect --consent add-target example.com
 ./target/release/waf-detect --posture example.com --posture-va2 --posture-json
 
 # Interactive TUI
@@ -61,7 +60,7 @@ Identifies WAF and CDN providers using HTTP headers, response bodies, DNS record
 
 ## Smoke Test
 
-Sends known attack payloads and measures what the WAF blocks, challenges, or allows through.
+Sends known attack payloads and measures what the WAF blocks, challenges, or allows through. Active smoke testing only runs against registered owned targets.
 
 ```bash
 ./target/release/waf-detect --smoke-test example.com
@@ -83,12 +82,11 @@ Sends known attack payloads and measures what the WAF blocks, challenges, or all
 
 ## Enforcement Test
 
-Sends categorized attack probes and measures block/challenge/allow rates with confidence scoring. Requires consent.
+Sends categorized attack probes and measures block/challenge/allow rates with confidence scoring. Requires registered target scope.
 
 ```bash
-# Setup consent
-./target/release/waf-detect --consent request
-./target/release/waf-detect --consent add-target example.com
+# Register owned targets once
+./target/release/waf-detect --scope init example.com
 
 # Run enforcement test
 ./target/release/waf-detect --va https://example.com
@@ -117,7 +115,7 @@ Tests WAF sophistication by sending paired probes — one benign, one malicious 
 # Dry run (shows plan without executing)
 ./target/release/waf-detect --va2 https://example.com
 
-# Run behavioral analysis (consent required)
+# Run behavioral analysis
 ./target/release/waf-detect --va2 https://example.com --va2-run
 
 # Full 5-phase analysis
@@ -189,25 +187,25 @@ Interactive terminal interface with live scan results, signal bars, findings, an
 - `?` — Toggle info tooltip
 - `q` — Quit
 
-## Consent Management
+## Target Scope
 
-Enforcement test, behavioral analysis, and effectiveness testing require explicit consent. Consent expires after 30 days.
+Smoke test, payload analysis, enforcement, behavioral analysis, and effectiveness testing require registered owned targets.
 
 ```bash
-# Check consent status
-./target/release/waf-detect --consent
+# Check target scope
+./target/release/waf-detect --scope
 
-# Request consent
-./target/release/waf-detect --consent request
+# Initialize target scope
+./target/release/waf-detect --scope init example.com api.example.com
 
 # Add authorized target
-./target/release/waf-detect --consent add-target api.example.com
+./target/release/waf-detect --scope add-target admin.example.com
 
 # Remove target
-./target/release/waf-detect --consent remove-target api.example.com
+./target/release/waf-detect --scope remove-target api.example.com
 
-# Revoke all consent
-./target/release/waf-detect --consent revoke
+# Clear target scope
+./target/release/waf-detect --scope clear
 ```
 
 ## Interpreting Results

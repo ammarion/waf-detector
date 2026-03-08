@@ -6,11 +6,12 @@
 //!
 //! ⚠️ WARNING: Only use this module against systems you own or have explicit permission to test.
 
+use crate::active::{guard_target, ResolvedTarget};
+use crate::http::HttpClient;
 use anyhow::{anyhow, Result};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -130,9 +131,11 @@ impl EffectivenessConfig {
 pub struct EffectivenessTest {
     config: EffectivenessConfig,
     consent_manager: ConsentManager,
+    http_client: HttpClient,
     start_time: Instant,
     request_count: u32,
     baseline_signature: Option<BaselineSignature>,
+    resolved_target: Option<ResolvedTarget>,
 }
 
 #[derive(Debug, Clone)]
@@ -333,28 +336,40 @@ impl EffectivenessTest {
         let consent_manager = ConsentManager::new();
         if !consent_manager.has_valid_consent()? {
             return Err(anyhow!(
-                "User must acknowledge responsible use before using effectiveness testing features"
+                "An active target scope is required before using effectiveness testing features"
             ));
         }
 
         Ok(Self {
             config,
             consent_manager,
+            http_client: HttpClient::new()?,
             start_time: Instant::now(),
             request_count: 0,
             baseline_signature: None,
+            resolved_target: None,
         })
     }
 
     /// Test WAF effectiveness against a target URL
     pub async fn test_effectiveness(&mut self, url: &str) -> Result<EffectivenessReport> {
-        info!("Starting WAF effectiveness test for: {}", url);
+        let target = guard_target(&self.consent_manager, url)?;
+        self.test_effectiveness_with_target(&target).await
+    }
 
-        // Validate URL and permissions
-        self.validate_target(url)?;
+    pub async fn test_effectiveness_with_target(
+        &mut self,
+        target: &ResolvedTarget,
+    ) -> Result<EffectivenessReport> {
+        info!(
+            "Starting WAF effectiveness test for: {}",
+            target.normalized_url
+        );
+
+        self.resolved_target = Some(target.clone());
 
         // Check if target appears to be serving static content
-        let parser_discrepancy_static_or_ambiguous = match analyze_static_page(url).await {
+        let parser_discrepancy_static_or_ambiguous = match analyze_static_page(&target.normalized_url).await {
             Ok(analysis) => {
                 if analysis.is_likely_static {
                     warn!("{}", format_static_page_warning(&analysis));
@@ -367,20 +382,22 @@ impl EffectivenessTest {
             }
         };
 
-        let mut report = EffectivenessReport::new(url);
+        let mut report = EffectivenessReport::new(&target.normalized_url);
 
         // Phase 1: Baseline testing (benign requests)
         report.add_phase("Baseline Testing".to_string());
-        self.test_baseline(url, &mut report).await?;
+        self.test_baseline(&target.normalized_url, &mut report)
+            .await?;
 
         // Phase 2: Detection testing (with various techniques)
         report.add_phase("Detection Testing".to_string());
-        self.test_detection_capabilities(url, &mut report).await?;
+        self.test_detection_capabilities(&target.normalized_url, &mut report)
+            .await?;
 
         if self.config.parser_discrepancy_enabled {
             report.add_phase("Parser Discrepancy Testing".to_string());
             self.test_parser_discrepancy_techniques(
-                url,
+                &target.normalized_url,
                 &mut report,
                 parser_discrepancy_static_or_ambiguous,
             )
@@ -390,7 +407,8 @@ impl EffectivenessTest {
         // Phase 3: Evasion testing (if intensity level allows)
         if self.config.intensity_level >= 4 {
             report.add_phase("Advanced Evasion Testing".to_string());
-            self.test_evasion_techniques(url, &mut report).await?;
+            self.test_evasion_techniques(&target.normalized_url, &mut report)
+                .await?;
         }
 
         // Generate recommendations based on findings
@@ -402,19 +420,6 @@ impl EffectivenessTest {
         }
 
         Ok(report)
-    }
-
-    /// Validate that we have permission to test this target
-    fn validate_target(&self, url: &str) -> Result<()> {
-        // Check if URL is in the allowed targets list
-        if !self.consent_manager.is_target_allowed(url)? {
-            return Err(anyhow!(
-                "Target URL is not in the list of authorized targets. \
-                Please add it to the authorized targets list first."
-            ));
-        }
-
-        Ok(())
     }
 
     /// Test baseline behavior with benign requests
@@ -666,37 +671,6 @@ impl EffectivenessTest {
         // Add request delay for stealth
         sleep(self.config.request_delay).await;
 
-        // Build client with timeout
-        let disable_proxy = std::env::var("WAF_DETECTOR_NO_PROXY").is_ok() || cfg!(test);
-        let make_builder = |force_no_proxy: bool| {
-            let mut client_builder =
-                reqwest::Client::builder().timeout(self.config.request_timeout);
-            if disable_proxy || force_no_proxy {
-                client_builder = client_builder.no_proxy();
-            }
-            if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
-                client_builder = client_builder.danger_accept_invalid_certs(true);
-                crate::http::warn_insecure_tls();
-            }
-            client_builder
-        };
-        let client = match catch_unwind(AssertUnwindSafe(|| make_builder(false).build())) {
-            Ok(Ok(client)) => client,
-            Ok(Err(err)) => return Err(err.into()),
-            Err(_) => {
-                eprintln!(
-                    "⚠️  Effectiveness HTTP client init panicked; retrying without system proxy."
-                );
-                make_builder(true).build()?
-            }
-        };
-
-        let mut request_builder = match method {
-            "POST" => client.post(url).body(body.to_string()),
-            "PUT" => client.put(url).body(body.to_string()),
-            _ => client.get(url), // Default to GET
-        };
-
         let mut headers = headers;
         let has_valid_user_agent = headers
             .iter()
@@ -708,30 +682,48 @@ impl EffectivenessTest {
                 .choose(&mut rng)
                 .copied()
                 .unwrap_or("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            request_builder = request_builder.header("User-Agent", ua);
+            headers.insert("User-Agent".to_string(), ua.to_string());
             let fingerprint = techniques::random_browser_fingerprint();
             techniques::apply_browser_fingerprint_headers(&mut headers, fingerprint);
         }
 
-        // Add headers
-        for (key, value) in &headers {
-            request_builder = request_builder.header(key, value);
-        }
+        let header_list = headers.into_iter().collect::<Vec<_>>();
 
         let start = Instant::now();
-        let response_result = request_builder.send().await;
+        let response_result = if let Some(target) = &self.resolved_target {
+            self.http_client
+                .request_pinned(
+                    method,
+                    url,
+                    &header_list,
+                    match method {
+                        "POST" | "PUT" | "PATCH" | "DELETE" => Some(body),
+                        _ => None,
+                    },
+                    target.pinned_ip,
+                    Some(self.config.request_timeout),
+                )
+                .await
+        } else {
+            self.http_client
+                .request(
+                    method,
+                    url,
+                    &header_list,
+                    match method {
+                        "POST" | "PUT" | "PATCH" | "DELETE" => Some(body),
+                        _ => None,
+                    },
+                )
+                .await
+        };
         let duration = start.elapsed();
 
         match response_result {
             Ok(response) => {
-                let status_code = response.status().as_u16();
-                let mut headers = HashMap::new();
-                for (name, value) in response.headers() {
-                    if let Ok(value_str) = value.to_str() {
-                        headers.insert(name.to_string().to_lowercase(), value_str.to_string());
-                    }
-                }
-                let response_text = response.text().await.unwrap_or_default();
+                let status_code = response.status;
+                let headers = response.headers.clone();
+                let response_text = response.body.clone();
                 let (blocked, reasons) = Self::is_blocked(
                     status_code,
                     &response_text,
@@ -884,7 +876,8 @@ impl EffectivenessTest {
 
     /// Log test completion for audit trail
     fn log_test_completion(&self, report: &EffectivenessReport) -> Result<()> {
-        // In a real implementation, this would write to a secure audit log
+        // Append-only audit persistence is handled by the caller. This remains
+        // as a normal tracing event for local observability.
         info!(
             "WAF effectiveness test completed. Target: {}, Vulnerabilities found: {}, Duration: {:?}",
             report.target_url,

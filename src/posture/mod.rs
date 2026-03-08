@@ -383,6 +383,7 @@ mod tests {
             differential: vec![],
             channel_coverage: None,
             paired_control: None,
+            audit: None,
         }
     }
 
@@ -468,6 +469,7 @@ mod tests {
             started_at: std::time::Instant::now(),
             finished_at: None,
             replay_bundle: None,
+            audit: None,
         };
         let report = PostureBuilder::new("https://example.com")
             .with_detection(&det)

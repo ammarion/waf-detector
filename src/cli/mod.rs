@@ -1,6 +1,14 @@
 //! Simple CLI Interface - Modern and intuitive WAF detection
 
+use crate::active::{
+    guard_target, ActiveTargetProfile, ACTIVE_TARGET_PROFILE_ENV, OPERATOR_ID_ENV,
+};
+use crate::audit::AuditSession;
+use crate::effectiveness::consent::{ConsentManager, TargetClass};
 use crate::engine::DetectionEngine;
+use crate::hardening::{
+    CiGateMode, HardeningConfig, HardeningOrchestrator, RegressionRunner, VendorMode,
+};
 use crate::payload::waf_smoke_test::{SmokeTestConfig, WafSmokeTest};
 use crate::posture::PostureBuilder;
 use crate::providers::{
@@ -10,6 +18,8 @@ use crate::providers::{
     vercel::VercelProvider, Provider,
 };
 use crate::registry::ProviderRegistry;
+use crate::surface::{CompilerInputs, SurfaceMap, SurfaceMapCompiler, AUTH_PROFILE_ENV};
+use crate::origin_probe::{OriginProbeConfig, OriginProber};
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner};
 use crate::DetectionResult;
@@ -97,6 +107,55 @@ fn parse_benchmark_mode(raw: &str) -> Result<BenchmarkMode> {
     }
 }
 
+struct RuntimeEnvGuard {
+    active_target_profile: Option<String>,
+    operator_id: Option<String>,
+    auth_profile: Option<String>,
+}
+
+impl RuntimeEnvGuard {
+    fn apply(matches: &ArgMatches) -> Result<Self> {
+        let guard = Self {
+            active_target_profile: std::env::var(ACTIVE_TARGET_PROFILE_ENV).ok(),
+            operator_id: std::env::var(OPERATOR_ID_ENV).ok(),
+            auth_profile: std::env::var(AUTH_PROFILE_ENV).ok(),
+        };
+
+        if let Some(profile) = matches.get_one::<String>("active-target-profile") {
+            ActiveTargetProfile::parse(profile)?;
+            std::env::set_var(ACTIVE_TARGET_PROFILE_ENV, profile);
+        }
+        if let Some(operator_id) = matches.get_one::<String>("operator-id") {
+            std::env::set_var(OPERATOR_ID_ENV, operator_id);
+        }
+        if let Some(auth_profile) = matches.get_one::<String>("auth-profile") {
+            std::env::set_var(AUTH_PROFILE_ENV, auth_profile);
+        }
+
+        Ok(guard)
+    }
+}
+
+impl Drop for RuntimeEnvGuard {
+    fn drop(&mut self) {
+        if let Some(value) = &self.active_target_profile {
+            std::env::set_var(ACTIVE_TARGET_PROFILE_ENV, value);
+        } else {
+            std::env::remove_var(ACTIVE_TARGET_PROFILE_ENV);
+        }
+        if let Some(value) = &self.operator_id {
+            std::env::set_var(OPERATOR_ID_ENV, value);
+        } else {
+            std::env::remove_var(OPERATOR_ID_ENV);
+        }
+        if let Some(value) = &self.auth_profile {
+            std::env::set_var(AUTH_PROFILE_ENV, value);
+        } else {
+            std::env::remove_var(AUTH_PROFILE_ENV);
+        }
+    }
+}
+
 fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
         return value.to_string();
@@ -113,7 +172,19 @@ fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
 }
 
 fn completion_subcommands() -> &'static [&'static str] {
-    &["scan", "va", "va2", "benchmark", "providers", "doctor", "completions"]
+    &[
+        "scan",
+        "hardening",
+        "regression",
+        "surface-map",
+        "va",
+        "va2",
+        "benchmark",
+        "providers",
+        "doctor",
+        "completions",
+        "origin-probe",
+    ]
 }
 
 fn completion_global_options() -> &'static [&'static str] {
@@ -123,6 +194,10 @@ fn completion_global_options() -> &'static [&'static str] {
         "-V",
         "--version",
         "--perf-report",
+        "--active-target-profile",
+        "--operator-id",
+        "--auth-profile",
+        "--allow-legacy-replay",
         // Legacy root-mode compatibility flags
         "--stdin",
         "--json",
@@ -148,7 +223,9 @@ fn completion_global_options() -> &'static [&'static str] {
         "--benchmark-workers",
         "--benchmark-mode",
         "--benchmark-fixtures",
+        "--scope",
         "--consent",
+        "--internal",
         "--effectiveness",
         "--effectiveness-config",
         "--effectiveness-similarity-threshold",
@@ -188,6 +265,8 @@ fn completion_global_options() -> &'static [&'static str] {
 
 fn completion_scan_options() -> &'static [&'static str] {
     &[
+        "--active-target-profile",
+        "--operator-id",
         "--stdin",
         "--json",
         "--ndjson",
@@ -206,8 +285,62 @@ fn completion_scan_options() -> &'static [&'static str] {
     ]
 }
 
+fn completion_hardening_options() -> &'static [&'static str] {
+    &[
+        "--active-target-profile",
+        "--operator-id",
+        "--auth-profile",
+        "--json",
+        "--output",
+        "--regression-pack",
+        "--surface-map",
+        "--repo",
+        "--spec",
+        "--har",
+        "--manifest",
+        "--surface-map-output",
+        "--ci-gate",
+        "--vendor",
+        "--perf-report",
+        "-h",
+        "--help",
+    ]
+}
+
+fn completion_regression_options() -> &'static [&'static str] {
+    &[
+        "--active-target-profile",
+        "--operator-id",
+        "--auth-profile",
+        "--target",
+        "--json",
+        "--output",
+        "--perf-report",
+        "-h",
+        "--help",
+    ]
+}
+
+fn completion_surface_map_options() -> &'static [&'static str] {
+    &[
+        "--active-target-profile",
+        "--operator-id",
+        "--auth-profile",
+        "--repo",
+        "--spec",
+        "--har",
+        "--manifest",
+        "--output",
+        "--perf-report",
+        "-h",
+        "--help",
+    ]
+}
+
 fn completion_va_options() -> &'static [&'static str] {
     &[
+        "--active-target-profile",
+        "--operator-id",
         "--dry-run",
         "--json",
         "--replay",
@@ -229,6 +362,8 @@ fn completion_va_options() -> &'static [&'static str] {
 
 fn completion_va2_options() -> &'static [&'static str] {
     &[
+        "--active-target-profile",
+        "--operator-id",
         "--run",
         "--json",
         "--output",
@@ -261,15 +396,32 @@ fn completion_completions_options() -> &'static [&'static str] {
     &["--output", "--perf-report", "-h", "--help"]
 }
 
+fn completion_origin_probe_options() -> &'static [&'static str] {
+    &[
+        "--json",
+        "--no-attack-probe",
+        "--timeout",
+        "--delay",
+        "--max-paths",
+        "--perf-report",
+        "-h",
+        "--help",
+    ]
+}
+
 fn render_bash_completion() -> String {
     let subs = completion_subcommands().join(" ");
     let globals = completion_global_options().join(" ");
     let scan_opts = completion_scan_options().join(" ");
+    let hardening_opts = completion_hardening_options().join(" ");
+    let regression_opts = completion_regression_options().join(" ");
+    let surface_map_opts = completion_surface_map_options().join(" ");
     let va_opts = completion_va_options().join(" ");
     let va2_opts = completion_va2_options().join(" ");
     let benchmark_opts = completion_benchmark_options().join(" ");
     let doctor_opts = completion_doctor_options().join(" ");
     let completions_opts = completion_completions_options().join(" ");
+    let origin_probe_opts = completion_origin_probe_options().join(" ");
 
     format!(
         r#"_waf_detect_complete() {{
@@ -290,12 +442,16 @@ fn render_bash_completion() -> String {
   local opts=""
     case "$cmd" in
       scan) opts="{scan_opts}" ;;
+      hardening) opts="{hardening_opts}" ;;
+      regression) opts="{regression_opts}" ;;
+      surface-map) opts="{surface_map_opts}" ;;
       va) opts="{va_opts}" ;;
       va2) opts="{va2_opts}" ;;
       benchmark) opts="{benchmark_opts}" ;;
       providers) opts="--perf-report -h --help" ;;
       doctor) opts="{doctor_opts}" ;;
     completions) opts="{completions_opts}" ;;
+    origin-probe) opts="{origin_probe_opts}" ;;
     *) opts="$global_opts" ;;
   esac
 
@@ -309,11 +465,15 @@ complete -F _waf_detect_complete waf-detect
 fn render_zsh_completion() -> String {
     let subs = completion_subcommands().join(" ");
     let scan_opts = completion_scan_options().join(" ");
+    let hardening_opts = completion_hardening_options().join(" ");
+    let regression_opts = completion_regression_options().join(" ");
+    let surface_map_opts = completion_surface_map_options().join(" ");
     let va_opts = completion_va_options().join(" ");
     let va2_opts = completion_va2_options().join(" ");
     let benchmark_opts = completion_benchmark_options().join(" ");
     let doctor_opts = completion_doctor_options().join(" ");
     let completions_opts = completion_completions_options().join(" ");
+    let origin_probe_opts = completion_origin_probe_options().join(" ");
     let global_opts = completion_global_options().join(" ");
 
     format!(
@@ -333,12 +493,16 @@ _waf_detect() {{
   local -a opts
     case "$cmd" in
       scan) opts=({scan_opts}) ;;
+      hardening) opts=({hardening_opts}) ;;
+      regression) opts=({regression_opts}) ;;
+      surface-map) opts=({surface_map_opts}) ;;
       va) opts=({va_opts}) ;;
       va2) opts=({va2_opts}) ;;
       benchmark) opts=({benchmark_opts}) ;;
       providers) opts=(--perf-report -h --help) ;;
       doctor) opts=({doctor_opts}) ;;
     completions) opts=({completions_opts}) ;;
+    origin-probe) opts=({origin_probe_opts}) ;;
     *) opts=({global_opts}) ;;
   esac
   _describe 'option' opts
@@ -375,12 +539,16 @@ fn render_fish_completion() -> String {
 
     let per_cmd = [
         ("scan", completion_scan_options()),
+        ("hardening", completion_hardening_options()),
+        ("regression", completion_regression_options()),
+        ("surface-map", completion_surface_map_options()),
         ("va", completion_va_options()),
         ("va2", completion_va2_options()),
         ("benchmark", completion_benchmark_options()),
         ("providers", &["--perf-report", "-h", "--help"][..]),
         ("doctor", completion_doctor_options()),
         ("completions", completion_completions_options()),
+        ("origin-probe", completion_origin_probe_options()),
     ];
 
     for (cmd, opts) in per_cmd {
@@ -475,6 +643,7 @@ impl SimpleCliApp {
     pub async fn run_with_matches(&self, matches: ArgMatches) -> Result<()> {
         let mode = crate::DeploymentMode::from_env();
         tracing::info!("WAF Detector running in {:?} mode", mode);
+        let _runtime_env = RuntimeEnvGuard::apply(&matches)?;
 
         if let Some((subcommand, sub_matches)) = matches.subcommand() {
             self.validate_subcommand_root_flags(&matches)?;
@@ -488,25 +657,20 @@ impl SimpleCliApp {
             .set_payload_analysis_enabled(payload_analysis_enabled);
         let engine = DetectionEngine::new(self.registry.clone())?.with_waf_mode_detection();
 
-        // Handle TUI mode (before other modes)
-        if matches.get_flag("tui") {
-            let url = matches
-                .get_many::<String>("targets")
-                .and_then(|mut t| t.next().cloned())
-                .map(|u| self.normalize_url(&u))
-                .transpose()?;
-            return crate::tui::TuiApp::run(engine, url).await;
-        }
-
 
         if matches.get_flag("list") {
             return self.list_providers(&engine).await;
         }
 
-        // Handle consent command
+        // Handle target scope command
         if let Some(consent_args) = matches.get_many::<String>("consent") {
             let args: Vec<String> = consent_args.cloned().collect();
-            return crate::effectiveness::consent::manage_consent_cli(args);
+            let target_class = if matches.get_flag("scope-internal") {
+                TargetClass::Internal
+            } else {
+                TargetClass::Public
+            };
+            return crate::effectiveness::consent::manage_consent_cli(args, target_class);
         }
 
         // Handle benchmark evaluation
@@ -544,8 +708,10 @@ impl SimpleCliApp {
             let normalized = self.normalize_url(url)?;
             let detection_result = engine.detect(&normalized).await?;
             let phases = parse_va2_phases("baseline,protocol-variance")?;
+            let scope = ConsentManager::new();
+            let target = guard_target(&scope, &normalized)?;
             let mut plan = build_va2_campaign_plan(
-                &normalized,
+                &target.normalized_url,
                 &phases,
                 Va2CampaignConfig {
                     seed: 1337,
@@ -555,8 +721,17 @@ impl SimpleCliApp {
             for step in &mut plan.steps {
                 step.delay_ms = 0;
             }
+            let mut audit = AuditSession::new("posture_summary_va2", &target, true)?;
             let runner = Va2Runner::new()?;
-            let va2_report = runner.run_plan(plan).await?;
+            let mut va2_report = match runner.run_plan_with_target(plan, &target).await {
+                Ok(report) => report,
+                Err(err) => {
+                    audit.record_failed(&err.to_string())?;
+                    return Err(err);
+                }
+            };
+            audit.record_completed()?;
+            va2_report.audit = Some(audit.snapshot());
             let summary = crate::posture::compose_posture_summary(
                 Some(&detection_result),
                 Some(&va2_report),
@@ -577,12 +752,23 @@ impl SimpleCliApp {
                 let phases_raw = "baseline,protocol-variance";
                 let phases = parse_va2_phases(phases_raw)?;
                 let config = Va2CampaignConfig::default();
-                let mut plan = build_va2_campaign_plan(&normalized, &phases, config)?;
+                let scope = ConsentManager::new();
+                let target = guard_target(&scope, &normalized)?;
+                let mut plan = build_va2_campaign_plan(&target.normalized_url, &phases, config)?;
                 for step in &mut plan.steps {
                     step.delay_ms = 0;
                 }
+                let mut audit = AuditSession::new("posture_va2", &target, true)?;
                 let runner = Va2Runner::new()?;
-                let report = runner.run_plan(plan).await?;
+                let mut report = match runner.run_plan_with_target(plan, &target).await {
+                    Ok(report) => report,
+                    Err(err) => {
+                        audit.record_failed(&err.to_string())?;
+                        return Err(err);
+                    }
+                };
+                audit.record_completed()?;
+                report.audit = Some(audit.snapshot());
                 builder = builder.with_va2(&report);
             }
 
@@ -633,94 +819,30 @@ impl SimpleCliApp {
                 seed: *matches.get_one::<u64>("va2-seed").unwrap_or(&1337),
                 budget: *matches.get_one::<u32>("va2-budget").unwrap_or(&60),
             };
-            let plan = build_va2_campaign_plan(&normalized, &phases, config)?;
 
             if matches.get_flag("va2-run") {
+                let scope = ConsentManager::new();
+                let target = guard_target(&scope, &normalized)?;
+                let plan = build_va2_campaign_plan(&target.normalized_url, &phases, config)?;
+                let mut audit = AuditSession::new("va2", &target, true)?;
                 let runner = Va2Runner::new()?;
-                let report = runner.run_plan(plan).await?;
-
-                if matches.get_flag("va2-json") {
-                    let json = serde_json::to_string_pretty(&report)?;
-                    println!("{json}");
-                    self.write_perf_report_if_requested(&matches)?;
-                    return Ok(());
-                }
-
-                if let Some(output) = matches.get_one::<String>("va2-output") {
-                    let json = serde_json::to_string_pretty(&report)?;
-                    fs::write(output, &json)?;
-                    println!("📄 Behavioral analysis report saved to: {output}");
-                    self.write_perf_report_if_requested(&matches)?;
-                    return Ok(());
-                }
-
-                let errors = report
-                    .results
-                    .iter()
-                    .filter(|result| result.error.is_some())
-                    .count();
-                println!(
-                    "🧪 Behavioral Analysis: {} steps | errors {}",
-                    report.results.len(),
-                    errors
-                );
-                if let Some(cc) = &report.channel_coverage {
-                    println!("\nChannel Inspection:");
-                    let mut channels: Vec<_> = cc.channels.iter().collect();
-                    channels.sort_by_key(|(ch, _)| format!("{ch:?}"));
-                    for (ch, rate) in &channels {
-                        let disc_count = report
-                            .differential
-                            .iter()
-                            .filter(|d| d.channel == Some(**ch) && d.discriminated)
-                            .count();
-                        let total_count = report
-                            .differential
-                            .iter()
-                            .filter(|d| d.channel == Some(**ch))
-                            .count();
-                        let blind = if cc.blind_spots.contains(ch) {
-                            " [UNPROTECTED]"
-                        } else {
-                            ""
-                        };
-                        println!(
-                            "  {:<8} {:>3.0}% ({}/{}){}",
-                            ch.to_string() + ":",
-                            *rate * 100.0,
-                            disc_count,
-                            total_count,
-                            blind
-                        );
+                let mut report = match runner.run_plan_with_target(plan, &target).await {
+                    Ok(report) => report,
+                    Err(err) => {
+                        audit.record_failed(&err.to_string())?;
+                        return Err(err);
                     }
-                    println!("  Overall: {:.0}%", cc.coverage_score * 100.0);
-                }
+                };
+                audit.record_completed()?;
+                report.audit = Some(audit.snapshot());
+                let mut audit = Some(audit);
+                self.emit_va2_report(&mut report, &matches, "va2-json", "va2-output", &mut audit)?;
                 self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
 
-            if matches.get_flag("va2-json") {
-                let json = serde_json::to_string_pretty(&plan)?;
-                println!("{json}");
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-
-            if let Some(output) = matches.get_one::<String>("va2-output") {
-                let json = serde_json::to_string_pretty(&plan)?;
-                fs::write(output, json)?;
-                println!("📄 Behavioral analysis plan saved to: {output}");
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-
-            println!(
-                "🧭 Behavioral Analysis Dry Run: {} steps across {} phases (seed={}, budget={})",
-                plan.steps.len(),
-                plan.phases.len(),
-                plan.seed,
-                plan.budget
-            );
+            let plan = build_va2_campaign_plan(&normalized, &phases, config)?;
+            self.emit_va2_plan(&plan, &matches, "va2-json", "va2-output")?;
             self.write_perf_report_if_requested(&matches)?;
             return Ok(());
         }
@@ -736,102 +858,39 @@ impl SimpleCliApp {
                     .map(|stored| stored.report)
                 })
                 .map_err(|err| anyhow!("failed to parse replay report: {err}"))?;
+            self.validate_va_replay_report(&report, matches.get_flag("allow-legacy-replay"))?;
             let target = matches
                 .get_one::<String>("va-replay-target")
                 .cloned()
                 .unwrap_or_else(|| report.target_url.clone());
+            let scope = ConsentManager::new();
+            let target = guard_target(&scope, &target)?;
+            let mut audit = AuditSession::new("va_replay", &target, true)?;
             let mut runner = VirtualAdversaryRunner::new(report.config.clone())?;
-            let report = runner.run_replay_plan(&target, report.replay_plan.clone())?;
-
-            if matches.get_flag("va-json") {
-                let json = serde_json::to_string_pretty(&report)?;
-                println!("{json}");
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-            if matches.get_flag("va-replay") {
-                let json = serde_json::to_string_pretty(&report.replay_plan)?;
-                println!("{json}");
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-            if matches.get_flag("va-replay-csv") {
-                let mut lines = Vec::new();
-                lines.push(
-                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
-                        .to_string(),
-                );
-                for item in &report.replay_plan {
-                    let row = [
-                        item.index.to_string(),
-                        csv_escape(&item.class),
-                        csv_escape(&item.channel),
-                        csv_escape(&item.description),
-                        csv_escape(&item.method),
-                        csv_escape(&item.url),
-                        csv_escape(&serde_json::to_string(&item.headers).unwrap_or_default()),
-                        csv_escape(&item.body.clone().unwrap_or_default()),
-                    ]
-                    .join(",");
-                    lines.push(row);
-                }
-                println!("{}", lines.join("\n"));
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-            if let Some(output) = matches.get_one::<String>("va-output") {
-                let json = serde_json::to_string_pretty(&report)?;
-                std::fs::write(output, json)?;
-                let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
-                let summary = format!(
-                    "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
-                    report.target_url,
-                    report.summary.confidence_score(),
-                    report.summary.risk_label(),
-                    report.summary.blocked,
-                    report.summary.challenge,
-                    report.summary.allowed,
-                    report.summary.error
-                );
-                std::fs::write(&summary_path, summary)?;
-                println!("📄 Enforcement replay report saved to: {output}");
-                println!("📄 Enforcement replay summary saved to: {summary_path}");
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-            println!(
-                "🧪 Enforcement Replay: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
-                report.target_url,
-                report.summary.total,
-                report.summary.blocked,
-                report.summary.challenge,
-                report.summary.allowed,
-                report.summary.error,
-                report.summary.confidence_score(),
-                report.summary.risk_label(),
-                report.enforcement,
-                report.evidence_score
-            );
-            let max_results = *matches.get_one::<u8>("va-top").unwrap_or(&3) as usize;
-            if !report.results.is_empty() {
-                println!("   Top Results:");
-                let reason_level = *matches.get_one::<u8>("va-reason-level").unwrap_or(&1);
-                let max_len = *matches.get_one::<u16>("va-max-len").unwrap_or(&80) as usize;
-                for result in report.results.iter().take(max_results) {
-                    let payload = truncate_with_ellipsis(&result.payload, max_len);
-                    if reason_level == 0 {
-                        println!(
-                            "   - {:?} | {} | {:?}",
-                            result.category, payload, result.outcome
-                        );
-                    } else {
-                        println!(
-                            "   - {:?} | {} | {:?} | {}",
-                            result.category, payload, result.outcome, result.reason
-                        );
+            let mut report =
+                match runner.run_replay_plan_with_target(&target, report.replay_plan.clone()) {
+                    Ok(report) => report,
+                    Err(err) => {
+                        audit.record_failed(&err.to_string())?;
+                        return Err(err);
                     }
-                }
-            }
+                };
+            audit.record_completed()?;
+            report.audit = Some(audit.snapshot());
+            let mut audit = Some(audit);
+            self.emit_va_report(
+                &mut report,
+                &matches,
+                "va-json",
+                "va-replay",
+                "va-replay-csv",
+                "va-output",
+                "va-top",
+                "va-reason-level",
+                "va-max-len",
+                true,
+                &mut audit,
+            )?;
             self.write_perf_report_if_requested(&matches)?;
             return Ok(());
         }
@@ -863,104 +922,32 @@ impl SimpleCliApp {
                 self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
-            let report = runner.run(&normalized)?;
-            if matches.get_flag("va-json") {
-                let json = serde_json::to_string_pretty(&report)?;
-                println!("{json}");
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-            if matches.get_flag("va-replay") {
-                let json = serde_json::to_string_pretty(&report.replay_plan)?;
-                println!("{json}");
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-            if matches.get_flag("va-replay-csv") {
-                let mut lines = Vec::new();
-                lines.push(
-                    "index,probe_class,probe_channel,probe_description,method,url,headers,body"
-                        .to_string(),
-                );
-                for item in &report.replay_plan {
-                    let row = [
-                        item.index.to_string(),
-                        csv_escape(&item.class),
-                        csv_escape(&item.channel),
-                        csv_escape(&item.description),
-                        csv_escape(&item.method),
-                        csv_escape(&item.url),
-                        csv_escape(&serde_json::to_string(&item.headers).unwrap_or_default()),
-                        csv_escape(&item.body.clone().unwrap_or_default()),
-                    ]
-                    .join(",");
-                    lines.push(row);
+            let scope = ConsentManager::new();
+            let target = guard_target(&scope, &normalized)?;
+            let mut audit = AuditSession::new("va", &target, true)?;
+            let mut report = match runner.run_with_events_for_target(&target, |_, _| {}, |_| {}) {
+                Ok(report) => report,
+                Err(err) => {
+                    audit.record_failed(&err.to_string())?;
+                    return Err(err);
                 }
-                println!("{}", lines.join("\n"));
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-            if let Some(output) = matches.get_one::<String>("va-output") {
-                let json = serde_json::to_string_pretty(&report)?;
-                std::fs::write(output, json)?;
-                let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
-                let summary = format!(
-                    "target={}\nconfidence={:.2}\nrisk={}\nblocked={}\nchallenge={}\nallowed={}\nerror={}\n",
-                    report.target_url,
-                    report.summary.confidence_score(),
-                    report.summary.risk_label(),
-                    report.summary.blocked,
-                    report.summary.challenge,
-                    report.summary.allowed,
-                    report.summary.error
-                );
-                std::fs::write(&summary_path, summary)?;
-                println!("📄 Enforcement report saved to: {output}");
-                println!("📄 Enforcement summary saved to: {summary_path}");
-                self.write_perf_report_if_requested(&matches)?;
-                return Ok(());
-            }
-            println!(
-                "🧪 Enforcement Test: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
-                report.target_url,
-                report.summary.total,
-                report.summary.blocked,
-                report.summary.challenge,
-                report.summary.allowed,
-                report.summary.error,
-                report.summary.confidence_score(),
-                report.summary.risk_label(),
-                report.enforcement,
-                report.evidence_score
-            );
-            println!(
-                "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",
-                report.config.tier,
-                report.config.request_budget,
-                report.config.request_delay.as_millis(),
-                report.config.request_timeout.as_secs(),
-                report.config.max_variants_per_payload
-            );
-            let max_results = *matches.get_one::<u8>("va-top").unwrap_or(&3) as usize;
-            if !report.results.is_empty() {
-                println!("   Top Results:");
-                let reason_level = *matches.get_one::<u8>("va-reason-level").unwrap_or(&1);
-                let max_len = *matches.get_one::<u16>("va-max-len").unwrap_or(&80) as usize;
-                for result in report.results.iter().take(max_results) {
-                    let payload = truncate_with_ellipsis(&result.payload, max_len);
-                    if reason_level == 0 {
-                        println!(
-                            "   - {:?} | {} | {:?}",
-                            result.category, payload, result.outcome
-                        );
-                    } else {
-                        println!(
-                            "   - {:?} | {} | {:?} | {}",
-                            result.category, payload, result.outcome, result.reason
-                        );
-                    }
-                }
-            }
+            };
+            audit.record_completed()?;
+            report.audit = Some(audit.snapshot());
+            let mut audit = Some(audit);
+            self.emit_va_report(
+                &mut report,
+                &matches,
+                "va-json",
+                "va-replay",
+                "va-replay-csv",
+                "va-output",
+                "va-top",
+                "va-reason-level",
+                "va-max-len",
+                false,
+                &mut audit,
+            )?;
             self.write_perf_report_if_requested(&matches)?;
             return Ok(());
         }
@@ -1056,6 +1043,21 @@ impl SimpleCliApp {
                 self.write_perf_report_if_requested(matches)?;
                 result
             }
+            "hardening" => {
+                let result = self.run_hardening_subcommand(matches).await;
+                self.write_perf_report_if_requested(matches)?;
+                result
+            }
+            "regression" => {
+                let result = self.run_regression_subcommand(matches).await;
+                self.write_perf_report_if_requested(matches)?;
+                result
+            }
+            "surface-map" => {
+                let result = self.run_surface_map_subcommand(matches).await;
+                self.write_perf_report_if_requested(matches)?;
+                result
+            }
             "va" => {
                 let result = self.run_va_subcommand(matches).await;
                 self.write_perf_report_if_requested(matches)?;
@@ -1075,6 +1077,11 @@ impl SimpleCliApp {
                 self.run_completions_subcommand(matches)?;
                 self.write_perf_report_if_requested(matches)?;
                 Ok(())
+            }
+            "origin-probe" => {
+                let result = self.run_origin_probe_subcommand(matches).await;
+                self.write_perf_report_if_requested(matches)?;
+                result
             }
             other => Err(anyhow!("Unknown subcommand: {other}")),
         }
@@ -1112,6 +1119,10 @@ impl SimpleCliApp {
             ));
         }
 
+        if matches.get_flag("payload-analysis") {
+            self.ensure_owned_targets_registered(&targets, "active payload analysis")?;
+        }
+
         // Determine output format
         let format = self.determine_format(matches);
         let debug = matches.get_flag("debug");
@@ -1126,6 +1137,223 @@ impl SimpleCliApp {
             self.scan_batch(engine, &targets, &format, debug, verbose, fail_on_error)
                 .await
         }
+    }
+
+    async fn run_hardening_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        let target = matches
+            .get_one::<String>("target")
+            .ok_or_else(|| anyhow!("hardening requires a target URL"))?;
+        let normalized = self.normalize_url(target)?;
+        let ci_gate = CiGateMode::parse(
+            matches
+                .get_one::<String>("ci-gate")
+                .map(String::as_str)
+                .unwrap_or("off"),
+        )?;
+        let vendor_mode = VendorMode::parse(
+            matches
+                .get_one::<String>("vendor")
+                .map(String::as_str)
+                .unwrap_or("auto"),
+        )?;
+
+        let surface_map = self.load_or_compile_surface_map(matches, &normalized)?;
+        let config = HardeningConfig {
+            ci_gate,
+            vendor_mode,
+            surface_map,
+            ..HardeningConfig::default()
+        };
+        let orchestrator = HardeningOrchestrator::new(self.registry.clone(), config);
+        let mut execution = orchestrator.run(&normalized).await?;
+
+        if let Some(path) = matches.get_one::<String>("regression-pack") {
+            if let Some(audit) = execution.audit.as_mut() {
+                audit.record_artifact_written(path)?;
+                execution.report.audit = Some(audit.snapshot());
+            }
+            let json = serde_json::to_string_pretty(&execution.report.regression_pack)?;
+            fs::write(path, json)?;
+        }
+
+        if let Some(path) = matches.get_one::<String>("surface-map-output") {
+            let Some(surface_map) = execution.refined_surface_map.as_ref() else {
+                return Err(anyhow!(
+                    "--surface-map-output requires --surface-map or one of --repo/--spec/--har"
+                ));
+            };
+            if let Some(audit) = execution.audit.as_mut() {
+                audit.record_artifact_written(path)?;
+                execution.report.audit = Some(audit.snapshot());
+            }
+            fs::write(path, serde_json::to_string_pretty(surface_map)?)?;
+        }
+
+        if let Some(path) = matches.get_one::<String>("output") {
+            if let Some(audit) = execution.audit.as_mut() {
+                audit.record_artifact_written(path)?;
+                execution.report.audit = Some(audit.snapshot());
+            }
+            let json = serde_json::to_string_pretty(&execution.report)?;
+            fs::write(path, json)?;
+            println!("Hardening report saved to: {path}");
+        }
+
+        if matches.get_flag("json") {
+            println!("{}", serde_json::to_string_pretty(&execution.report)?);
+        } else if matches.get_one::<String>("output").is_none() {
+            self.print_hardening_report(&execution.report);
+        }
+
+        if execution.report.summary.ci_gate_triggered {
+            let ids =
+                crate::hardening::finding::ci_gate_failures(&execution.report.findings, ci_gate)
+                    .map(|finding| finding.id.clone())
+                    .collect::<Vec<_>>();
+            return Err(anyhow!(
+                "hardening CI gate '{}' triggered by findings: {}",
+                ci_gate.as_str(),
+                ids.join(", ")
+            ));
+        }
+
+        Ok(())
+    }
+
+    async fn run_surface_map_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        let target = matches
+            .get_one::<String>("target")
+            .ok_or_else(|| anyhow!("surface-map requires a target URL"))?;
+        let normalized = self.normalize_url(target)?;
+
+        let Some(surface_map) = self.load_or_compile_surface_map(matches, &normalized)? else {
+            return Err(anyhow!(
+                "surface-map requires at least one of --repo, --spec, or --har"
+            ));
+        };
+
+        if let Some(path) = matches.get_one::<String>("output") {
+            fs::write(path, serde_json::to_string_pretty(&surface_map)?)?;
+            println!("Surface map saved to: {path}");
+        } else {
+            println!("Surface Map: {}", surface_map.target_base_url);
+            println!("  Endpoints: {}", surface_map.summary.total_endpoints);
+            println!(
+                "  Auth required: {}",
+                surface_map.summary.auth_required_endpoints
+            );
+            println!(
+                "  Sources: {}",
+                surface_map
+                    .summary
+                    .sources
+                    .iter()
+                    .map(|(source, count)| format!("{source}={count}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            for endpoint in surface_map.endpoints.iter().take(10) {
+                println!(
+                    "  [{}] {} {} ({:.0}% confidence)",
+                    endpoint.priority.as_str(),
+                    endpoint.methods.join(","),
+                    endpoint.path_template,
+                    endpoint.confidence * 100.0
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn run_regression_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        let pack_path = matches
+            .get_one::<String>("pack")
+            .ok_or_else(|| anyhow!("regression requires a regression pack path"))?;
+        let raw = fs::read_to_string(pack_path)?;
+        let pack = serde_json::from_str::<crate::hardening::RegressionPack>(&raw)
+            .map_err(|err| anyhow!("failed to parse regression pack: {err}"))?;
+        let target_override = matches.get_one::<String>("target").map(String::as_str);
+
+        let runner = RegressionRunner::new()?;
+        let report = runner.run_pack(&pack, target_override).await?;
+
+        if let Some(path) = matches.get_one::<String>("output") {
+            fs::write(path, serde_json::to_string_pretty(&report)?)?;
+            println!("Regression report saved to: {path}");
+        }
+
+        if matches.get_flag("json") {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else if matches.get_one::<String>("output").is_none() {
+            self.print_regression_report(&report);
+        }
+
+        if report.failed_assertions > 0 {
+            return Err(anyhow!(
+                "regression replay failed: {} assertion(s) still open",
+                report.failed_assertions
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn load_or_compile_surface_map(
+        &self,
+        matches: &ArgMatches,
+        normalized_target: &str,
+    ) -> Result<Option<SurfaceMap>> {
+        let surface_map_path = matches
+            .try_get_one::<String>("surface-map")
+            .ok()
+            .flatten()
+            .cloned();
+        let repo = matches
+            .try_get_one::<String>("repo")
+            .ok()
+            .flatten()
+            .cloned();
+        let spec = matches
+            .try_get_one::<String>("spec")
+            .ok()
+            .flatten()
+            .cloned();
+        let har = matches.try_get_one::<String>("har").ok().flatten().cloned();
+        let manifest = matches
+            .try_get_one::<String>("manifest")
+            .ok()
+            .flatten()
+            .cloned();
+        let has_discovery_inputs = repo.is_some() || spec.is_some() || har.is_some();
+        let has_compiler_inputs = has_discovery_inputs || manifest.is_some();
+
+        if surface_map_path.is_some() && has_compiler_inputs {
+            return Err(anyhow!(
+                "--surface-map cannot be combined with --repo, --spec, --har, or --manifest"
+            ));
+        }
+
+        if let Some(path) = surface_map_path {
+            let raw = fs::read_to_string(&path)?;
+            return Ok(Some(serde_json::from_str(&raw).map_err(|err| {
+                anyhow!("failed to parse surface map {}: {err}", path)
+            })?));
+        }
+
+        if !has_discovery_inputs {
+            return Ok(None);
+        }
+
+        let compiler = SurfaceMapCompiler::new();
+        let inputs = CompilerInputs {
+            target_url: normalized_target.to_string(),
+            repo,
+            spec: spec.map(PathBuf::from),
+            har: har.map(PathBuf::from),
+            manifest: manifest.map(PathBuf::from),
+        };
+        Ok(Some(compiler.compile(inputs)?))
     }
 
     async fn run_va_subcommand(&self, matches: &ArgMatches) -> Result<()> {
@@ -1160,18 +1388,118 @@ impl SimpleCliApp {
             return Ok(());
         }
 
-        let report = runner.run(&normalized)?;
-        if matches.get_flag("json") {
-            let json = serde_json::to_string_pretty(&report)?;
+        let scope = ConsentManager::new();
+        let target = guard_target(&scope, &normalized)?;
+        let mut audit = AuditSession::new("va", &target, true)?;
+        let mut report = match runner.run_with_events_for_target(&target, |_, _| {}, |_| {}) {
+            Ok(report) => report,
+            Err(err) => {
+                audit.record_failed(&err.to_string())?;
+                return Err(err);
+            }
+        };
+        audit.record_completed()?;
+        report.audit = Some(audit.snapshot());
+        let mut audit = Some(audit);
+        self.emit_va_report(
+            &mut report,
+            matches,
+            "json",
+            "replay",
+            "replay-csv",
+            "output",
+            "top",
+            "reason-level",
+            "max-len",
+            false,
+            &mut audit,
+        )
+    }
+
+    async fn run_va2_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        let target = matches
+            .get_one::<String>("target")
+            .ok_or_else(|| anyhow!("va2 requires a target URL"))?;
+        let normalized = self.normalize_url(target)?;
+
+        let phases_raw = matches
+            .get_one::<String>("phases")
+            .map(String::as_str)
+            .unwrap_or("baseline,protocol-variance");
+        let phases = parse_va2_phases(phases_raw)?;
+        let config = Va2CampaignConfig {
+            seed: *matches.get_one::<u64>("seed").unwrap_or(&1337),
+            budget: *matches.get_one::<u32>("budget").unwrap_or(&60),
+        };
+
+        if matches.get_flag("run") {
+            let scope = ConsentManager::new();
+            let target = guard_target(&scope, &normalized)?;
+            let plan = build_va2_campaign_plan(&target.normalized_url, &phases, config)?;
+            let mut audit = AuditSession::new("va2", &target, true)?;
+            let runner = Va2Runner::new()?;
+            let mut report = match runner.run_plan_with_target(plan, &target).await {
+                Ok(report) => report,
+                Err(err) => {
+                    audit.record_failed(&err.to_string())?;
+                    return Err(err);
+                }
+            };
+            audit.record_completed()?;
+            report.audit = Some(audit.snapshot());
+            let mut audit = Some(audit);
+            return self.emit_va2_report(&mut report, matches, "json", "output", &mut audit);
+        }
+
+        let plan = build_va2_campaign_plan(&normalized, &phases, config)?;
+        self.emit_va2_plan(&plan, matches, "json", "output")
+    }
+
+    fn validate_va_replay_report(
+        &self,
+        report: &crate::virtual_adversary::VaRunReport,
+        allow_legacy_replay: bool,
+    ) -> Result<()> {
+        match &report.replay_bundle {
+            Some(bundle) if bundle.verify_integrity() => Ok(()),
+            Some(_) if allow_legacy_replay => Ok(()),
+            Some(_) => Err(anyhow!(
+                "Replay execution rejected because the replay bundle failed integrity verification. Re-run with `--allow-legacy-replay` to bypass this compatibility check."
+            )),
+            None if allow_legacy_replay => Ok(()),
+            None => Err(anyhow!(
+                "Replay execution requires a v2 replay bundle. This report is legacy; re-run with `--allow-legacy-replay` to bypass this compatibility check."
+            )),
+        }
+    }
+
+    fn emit_va_report(
+        &self,
+        report: &mut crate::virtual_adversary::VaRunReport,
+        matches: &ArgMatches,
+        json_flag: &str,
+        replay_flag: &str,
+        replay_csv_flag: &str,
+        output_arg: &str,
+        top_arg: &str,
+        reason_arg: &str,
+        max_len_arg: &str,
+        replay_mode: bool,
+        audit: &mut Option<AuditSession>,
+    ) -> Result<()> {
+        if matches.get_flag(json_flag) {
+            let json = serde_json::to_string_pretty(report)?;
             println!("{json}");
             return Ok(());
         }
-        if matches.get_flag("replay") {
+
+        if matches.get_flag(replay_flag) {
             let json = serde_json::to_string_pretty(&report.replay_plan)?;
             println!("{json}");
             return Ok(());
         }
-        if matches.get_flag("replay-csv") {
+
+        if matches.get_flag(replay_csv_flag) {
             let mut lines = Vec::new();
             lines.push(
                 "index,probe_class,probe_channel,probe_description,method,url,headers,body"
@@ -1194,8 +1522,13 @@ impl SimpleCliApp {
             println!("{}", lines.join("\n"));
             return Ok(());
         }
-        if let Some(output) = matches.get_one::<String>("output") {
-            let json = serde_json::to_string_pretty(&report)?;
+
+        if let Some(output) = matches.get_one::<String>(output_arg) {
+            if let Some(session) = audit.as_mut() {
+                session.record_artifact_written(output)?;
+                report.audit = Some(session.snapshot());
+            }
+            let json = serde_json::to_string_pretty(report)?;
             std::fs::write(output, json)?;
             let summary_path = format!("{}.summary.txt", output.trim_end_matches(".json"));
             let summary = format!(
@@ -1209,12 +1542,23 @@ impl SimpleCliApp {
                 report.summary.error
             );
             std::fs::write(&summary_path, summary)?;
-            println!("📄 Enforcement report saved to: {output}");
-            println!("📄 Enforcement summary saved to: {summary_path}");
+            if replay_mode {
+                println!("📄 Enforcement replay report saved to: {output}");
+                println!("📄 Enforcement replay summary saved to: {summary_path}");
+            } else {
+                println!("📄 Enforcement report saved to: {output}");
+                println!("📄 Enforcement summary saved to: {summary_path}");
+            }
             return Ok(());
         }
+
         println!(
-            "🧪 Enforcement Test: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
+            "{}: {} | Total: {} | Blocked: {} | Challenge: {} | Allowed: {} | Error: {} | Confidence: {:.2} | Risk: {} | Enforcement: {:?} | Evidence: {:.2}",
+            if replay_mode {
+                "🧪 Enforcement Replay"
+            } else {
+                "🧪 Enforcement Test"
+            },
             report.target_url,
             report.summary.total,
             report.summary.blocked,
@@ -1226,19 +1570,21 @@ impl SimpleCliApp {
             report.enforcement,
             report.evidence_score
         );
-        println!(
-            "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",
-            report.config.tier,
-            report.config.request_budget,
-            report.config.request_delay.as_millis(),
-            report.config.request_timeout.as_secs(),
-            report.config.max_variants_per_payload
-        );
-        let max_results = *matches.get_one::<u8>("top").unwrap_or(&3) as usize;
+        if !replay_mode {
+            println!(
+                "   Config: tier={} budget={} delay_ms={} timeout_s={} variants={}",
+                report.config.tier,
+                report.config.request_budget,
+                report.config.request_delay.as_millis(),
+                report.config.request_timeout.as_secs(),
+                report.config.max_variants_per_payload
+            );
+        }
+        let max_results = *matches.get_one::<u8>(top_arg).unwrap_or(&3) as usize;
         if !report.results.is_empty() {
             println!("   Top Results:");
-            let reason_level = *matches.get_one::<u8>("reason-level").unwrap_or(&1);
-            let max_len = *matches.get_one::<u16>("max-len").unwrap_or(&80) as usize;
+            let reason_level = *matches.get_one::<u8>(reason_arg).unwrap_or(&1);
+            let max_len = *matches.get_one::<u16>(max_len_arg).unwrap_or(&80) as usize;
             for result in report.results.iter().take(max_results) {
                 let payload = truncate_with_ellipsis(&result.payload, max_len);
                 if reason_level == 0 {
@@ -1258,92 +1604,21 @@ impl SimpleCliApp {
         Ok(())
     }
 
-    async fn run_va2_subcommand(&self, matches: &ArgMatches) -> Result<()> {
-        let target = matches
-            .get_one::<String>("target")
-            .ok_or_else(|| anyhow!("va2 requires a target URL"))?;
-        let normalized = self.normalize_url(target)?;
-
-        let phases_raw = matches
-            .get_one::<String>("phases")
-            .map(String::as_str)
-            .unwrap_or("baseline,protocol-variance");
-        let phases = parse_va2_phases(phases_raw)?;
-        let config = Va2CampaignConfig {
-            seed: *matches.get_one::<u64>("seed").unwrap_or(&1337),
-            budget: *matches.get_one::<u32>("budget").unwrap_or(&60),
-        };
-        let plan = build_va2_campaign_plan(&normalized, &phases, config)?;
-
-        if matches.get_flag("run") {
-            let runner = Va2Runner::new()?;
-            let report = runner.run_plan(plan).await?;
-
-            if matches.get_flag("json") {
-                let json = serde_json::to_string_pretty(&report)?;
-                println!("{json}");
-                return Ok(());
-            }
-
-            if let Some(output) = matches.get_one::<String>("output") {
-                let json = serde_json::to_string_pretty(&report)?;
-                fs::write(output, &json)?;
-                println!("📄 Behavioral analysis report saved to: {output}");
-                return Ok(());
-            }
-
-            let errors = report
-                .results
-                .iter()
-                .filter(|result| result.error.is_some())
-                .count();
-            println!(
-                "🧪 Behavioral Analysis: {} steps | errors {}",
-                report.results.len(),
-                errors
-            );
-            if let Some(cc) = &report.channel_coverage {
-                println!("\nChannel Inspection:");
-                let mut channels: Vec<_> = cc.channels.iter().collect();
-                channels.sort_by_key(|(ch, _)| format!("{ch:?}"));
-                for (ch, rate) in &channels {
-                    let disc_count = report
-                        .differential
-                        .iter()
-                        .filter(|d| d.channel == Some(**ch) && d.discriminated)
-                        .count();
-                    let total_count = report
-                        .differential
-                        .iter()
-                        .filter(|d| d.channel == Some(**ch))
-                        .count();
-                    let blind = if cc.blind_spots.contains(ch) {
-                        " [UNPROTECTED]"
-                    } else {
-                        ""
-                    };
-                    println!(
-                        "  {:<8} {:>3.0}% ({}/{}){}",
-                        ch.to_string() + ":",
-                        *rate * 100.0,
-                        disc_count,
-                        total_count,
-                        blind
-                    );
-                }
-                println!("  Overall: {:.0}%", cc.coverage_score * 100.0);
-            }
-            return Ok(());
-        }
-
-        if matches.get_flag("json") {
-            let json = serde_json::to_string_pretty(&plan)?;
+    fn emit_va2_plan(
+        &self,
+        plan: &crate::virtual_adversary2::Va2CampaignPlan,
+        matches: &ArgMatches,
+        json_flag: &str,
+        output_arg: &str,
+    ) -> Result<()> {
+        if matches.get_flag(json_flag) {
+            let json = serde_json::to_string_pretty(plan)?;
             println!("{json}");
             return Ok(());
         }
 
-        if let Some(output) = matches.get_one::<String>("output") {
-            let json = serde_json::to_string_pretty(&plan)?;
+        if let Some(output) = matches.get_one::<String>(output_arg) {
+            let json = serde_json::to_string_pretty(plan)?;
             fs::write(output, json)?;
             println!("📄 Behavioral analysis plan saved to: {output}");
             return Ok(());
@@ -1356,6 +1631,76 @@ impl SimpleCliApp {
             plan.seed,
             plan.budget
         );
+        Ok(())
+    }
+
+    fn emit_va2_report(
+        &self,
+        report: &mut crate::virtual_adversary2::Va2RunReport,
+        matches: &ArgMatches,
+        json_flag: &str,
+        output_arg: &str,
+        audit: &mut Option<AuditSession>,
+    ) -> Result<()> {
+        if matches.get_flag(json_flag) {
+            let json = serde_json::to_string_pretty(report)?;
+            println!("{json}");
+            return Ok(());
+        }
+
+        if let Some(output) = matches.get_one::<String>(output_arg) {
+            if let Some(session) = audit.as_mut() {
+                session.record_artifact_written(output)?;
+                report.audit = Some(session.snapshot());
+            }
+            let json = serde_json::to_string_pretty(report)?;
+            fs::write(output, &json)?;
+            println!("📄 Behavioral analysis report saved to: {output}");
+            return Ok(());
+        }
+
+        let errors = report
+            .results
+            .iter()
+            .filter(|result| result.error.is_some())
+            .count();
+        println!(
+            "🧪 Behavioral Analysis: {} steps | errors {}",
+            report.results.len(),
+            errors
+        );
+        if let Some(cc) = &report.channel_coverage {
+            println!("\nChannel Inspection:");
+            let mut channels: Vec<_> = cc.channels.iter().collect();
+            channels.sort_by_key(|(ch, _)| format!("{ch:?}"));
+            for (ch, rate) in &channels {
+                let disc_count = report
+                    .differential
+                    .iter()
+                    .filter(|d| d.channel == Some(**ch) && d.discriminated)
+                    .count();
+                let total_count = report
+                    .differential
+                    .iter()
+                    .filter(|d| d.channel == Some(**ch))
+                    .count();
+                let blind = if cc.blind_spots.contains(ch) {
+                    " [UNPROTECTED]"
+                } else {
+                    ""
+                };
+                println!(
+                    "  {:<8} {:>3.0}% ({}/{}){}",
+                    ch.to_string() + ":",
+                    *rate * 100.0,
+                    disc_count,
+                    total_count,
+                    blind
+                );
+            }
+            println!("  Overall: {:.0}%", cc.coverage_score * 100.0);
+        }
+
         Ok(())
     }
 
@@ -1457,16 +1802,15 @@ impl SimpleCliApp {
                         "consent_status",
                         DoctorStatus::Pass,
                         format!(
-                            "valid consent (targets={}, expires_in_days={})",
-                            status.authorized_targets.len(),
-                            status.expires_in_days.unwrap_or_default()
+                            "active target scope configured (targets={})",
+                            status.authorized_targets.len()
                         ),
                     );
                 } else {
                     push_check(
                         "consent_status",
                         DoctorStatus::Warn,
-                        "no valid consent on file (required for enforcement/behavioral/effectiveness tests)"
+                        "no active target scope configured (required for smoke/payload/enforcement/behavioral/effectiveness tests)"
                             .to_string(),
                     );
                 }
@@ -1474,7 +1818,7 @@ impl SimpleCliApp {
             Err(err) => push_check(
                 "consent_status",
                 DoctorStatus::Fail,
-                format!("failed to load consent status: {err}"),
+                format!("failed to load target scope status: {err}"),
             ),
         }
 
@@ -1619,6 +1963,65 @@ impl SimpleCliApp {
 
     fn run_completions_subcommand(&self, matches: &ArgMatches) -> Result<()> {
         run_completions_command(matches)
+    }
+
+    async fn run_origin_probe_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        let target = matches
+            .get_one::<String>("target")
+            .ok_or_else(|| anyhow!("origin-probe requires a target URL"))?;
+        let normalized = self.normalize_url(target)?;
+
+        let config = OriginProbeConfig {
+            timeout: std::time::Duration::from_secs(
+                *matches.get_one::<u64>("timeout").unwrap_or(&10),
+            ),
+            delay_ms: *matches.get_one::<u64>("delay").unwrap_or(&200),
+            max_paths_to_check: matches
+                .get_one::<usize>("max-paths")
+                .copied()
+                .unwrap_or(crate::origin_probe::WELL_KNOWN_BYPASS_PATHS.len()),
+            send_attack_probe: !matches.get_flag("no-attack-probe"),
+        };
+
+        let scope = ConsentManager::new();
+        let resolved = guard_target(&scope, &normalized)?;
+
+        let prober = OriginProber::new(config)?;
+        let report = prober.run(&resolved).await?;
+
+        if matches.get_flag("json") {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!(
+                "Origin probe: {} (origin IP: {})",
+                report.target_url, report.origin_ip
+            );
+            if report.findings.is_empty() {
+                println!("  No accessible bypass paths found.");
+            } else {
+                for finding in &report.findings {
+                    let status = if finding.waf_bypassed {
+                        "BYPASSED"
+                    } else {
+                        "accessible"
+                    };
+                    println!(
+                        "  {} {} → HTTP {}",
+                        status, finding.bypass_path, finding.status_on_bypass_path
+                    );
+                    for e in &finding.evidence {
+                        println!("    • {e}");
+                    }
+                }
+            }
+            if report.bypass_confirmed {
+                println!("  [!] WAF bypass confirmed via origin IP");
+            } else {
+                println!("  WAF bypass not confirmed.");
+            }
+        }
+
+        Ok(())
     }
 
     fn validate_matches(&self, matches: &ArgMatches) -> Result<()> {
@@ -1809,6 +2212,18 @@ impl SimpleCliApp {
         }
     }
 
+    fn ensure_owned_targets_registered(&self, targets: &[String], capability: &str) -> Result<()> {
+        let scope = crate::effectiveness::consent::ConsentManager::new();
+        for target in targets {
+            if let Err(err) = guard_target(&scope, target) {
+                return Err(anyhow!(
+                    "Target {target} is not allowed for {capability}: {err}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn write_perf_report_if_requested(&self, matches: &ArgMatches) -> Result<()> {
         if let Some(path) = matches.get_one::<String>("perf-report") {
             let snapshot = crate::perf::snapshot();
@@ -1859,6 +2274,96 @@ impl SimpleCliApp {
         }
 
         Ok(())
+    }
+
+    fn print_hardening_report(&self, report: &crate::hardening::HardeningReport) {
+        println!("Hardening Report: {}", report.target);
+        if let Some(provider) = &report.summary.provider {
+            println!(
+                "  Provider:   {} ({})",
+                provider,
+                report.summary.vendor_mode.as_str()
+            );
+        } else {
+            println!(
+                "  Provider:   not confidently detected ({})",
+                report.summary.vendor_mode.as_str()
+            );
+        }
+        println!(
+            "  Surface:    {} ({:.0}% confidence)",
+            if report.surface_assessment.suitable {
+                "suitable"
+            } else {
+                "unsuitable"
+            },
+            report.surface_assessment.confidence * 100.0
+        );
+        println!(
+            "  Findings:   {} total, {} actionable",
+            report.summary.total_findings, report.summary.actionable_findings
+        );
+        if let Some(summary) = &report.surface_map_summary {
+            println!(
+                "  SurfaceMap: {} endpoints ({} auth required)",
+                summary.total_endpoints, summary.auth_required_endpoints
+            );
+        }
+        if let Some(stats) = &report.refined_surface_map_stats {
+            println!(
+                "  RoutePlan:  {} selected, {} partial, {} auth-uncovered",
+                stats.selected_endpoints,
+                stats.partial_coverage_endpoints,
+                stats.uncovered_auth_required_endpoints
+            );
+        }
+        println!(
+            "  CI Gate:    {}{}",
+            report.summary.ci_gate.as_str(),
+            if report.summary.ci_gate_triggered {
+                " (triggered)"
+            } else {
+                ""
+            }
+        );
+        if !report.summary.notes.is_empty() {
+            println!("  Notes:");
+            for note in &report.summary.notes {
+                println!("    - {note}");
+            }
+        }
+        for finding in report.findings.iter().take(5) {
+            println!(
+                "  [{}] {} ({:.0}% confidence)",
+                finding.severity.as_str(),
+                finding.title,
+                finding.confidence * 100.0
+            );
+            println!("    Root cause: {}", finding.likely_root_cause);
+            if let Some(guidance) = finding.fix_guidance.first() {
+                println!("    Fix:        {guidance}");
+            }
+        }
+    }
+
+    fn print_regression_report(&self, report: &crate::hardening::RegressionRunReport) {
+        println!("Regression Replay: {}", report.target);
+        println!(
+            "  Assertions: {} total, {} passed, {} failed",
+            report.total_assertions, report.passed_assertions, report.failed_assertions
+        );
+        for result in report.results.iter().take(10) {
+            println!(
+                "  [{}] {} -> {:?} (expected {:?})",
+                if result.passed { "pass" } else { "fail" },
+                result.finding_id,
+                result.observed_action,
+                result.expected_action
+            );
+            for note in &result.notes {
+                println!("    - {note}");
+            }
+        }
     }
 
     async fn scan_batch(
@@ -2227,13 +2732,24 @@ impl SimpleCliApp {
             config.min_length_diff = *value;
         }
 
+        let scope = crate::effectiveness::consent::ConsentManager::new();
+        let target = guard_target(&scope, url)?;
+        let mut audit = AuditSession::new("effectiveness", &target, config.audit_logging)?;
         let mut test = EffectivenessTest::new(config).await?;
 
         // Run the test
-        println!("🎯 Target: {url}");
+        println!("🎯 Target: {}", target.normalized_url);
         println!("⏳ Running comprehensive effectiveness tests...\n");
 
-        let report = test.test_effectiveness(url).await?;
+        let mut report = match test.test_effectiveness_with_target(&target).await {
+            Ok(report) => report,
+            Err(err) => {
+                audit.record_failed(&err.to_string())?;
+                return Err(err);
+            }
+        };
+        audit.record_completed()?;
+        report.audit = Some(audit.snapshot());
 
         // Display results
         println!("\n{}", report.generate_summary());
@@ -2244,6 +2760,8 @@ impl SimpleCliApp {
                 "waf-effectiveness-{}.json",
                 chrono::Utc::now().format("%Y%m%d_%H%M%S")
             );
+            audit.record_artifact_written(&filename)?;
+            report.audit = Some(audit.snapshot());
             std::fs::write(&filename, report.to_json()?)?;
             println!("\n📁 High-risk report saved to: {filename}");
         }
@@ -2307,6 +2825,9 @@ impl SimpleCliApp {
         })?;
 
         let normalized_url = self.normalize_url(url)?;
+        let scope = crate::effectiveness::consent::ConsentManager::new();
+        let target = guard_target(&scope, &normalized_url)?;
+        let mut audit = AuditSession::new("smoke_test", &target, true)?;
 
         // Parse custom headers
         let mut custom_headers = HashMap::new();
@@ -2342,13 +2863,23 @@ impl SimpleCliApp {
         println!("📊 Test Type │ Payload                        │ Result       │ Code │ Time");
         println!("─────────────┼────────────────────────────────┼──────────────┼──────┼──────");
 
-        let result = smoke_test.run_test(&normalized_url).await?;
+        let mut result = match smoke_test.run_test_with_target(&target).await {
+            Ok(result) => result,
+            Err(err) => {
+                audit.record_failed(&err.to_string())?;
+                return Err(err);
+            }
+        };
+        audit.record_completed()?;
+        result.audit = Some(audit.snapshot());
 
         // Print summary
         smoke_test.print_summary(&result);
 
         // Export to JSON if requested
         if let Some(output_file) = matches.get_one::<String>("output") {
+            audit.record_artifact_written(output_file)?;
+            result.audit = Some(audit.snapshot());
             smoke_test.export_json(&result, output_file)?;
         }
 
@@ -2460,7 +2991,7 @@ fn build_scan_subcommand() -> Command {
         .arg(
             Arg::new("payload-analysis")
                 .long("payload-analysis")
-                .help("Enable active payload-based probing during detection (authorized targets only)")
+                .help("Enable active payload-based probing during detection (registered owned targets only)")
                 .action(clap::ArgAction::SetTrue),
         )
         .group(
@@ -2510,6 +3041,158 @@ fn build_benchmark_subcommand() -> Command {
                 .long("fixtures")
                 .help("Directory containing benchmark fixture corpus (fixtures.json)")
                 .value_name("DIR"),
+        )
+}
+
+fn build_hardening_subcommand() -> Command {
+    Command::new("hardening")
+        .about("Run fix-oriented WAF hardening analysis and emit evidence/regression artifacts")
+        .arg(
+            Arg::new("target")
+                .help("Target URL or domain")
+                .value_name("URL")
+                .required(true),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .help("Print the full hardening report JSON to stdout")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .help("Write the hardening report JSON to file")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("regression-pack")
+                .long("regression-pack")
+                .help("Write the generated regression assertion pack to file")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("surface-map")
+                .long("surface-map")
+                .help("Use an existing surface map JSON artifact instead of compiling one")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("repo")
+                .long("repo")
+                .help("Frontend repo path or git URL used to compile a route-level surface map")
+                .value_name("PATH|URL"),
+        )
+        .arg(
+            Arg::new("spec")
+                .long("spec")
+                .help("OpenAPI document used to enrich the surface map")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("har")
+                .long("har")
+                .help("HAR file used to enrich the surface map")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("manifest")
+                .long("manifest")
+                .help("Optional waf-hardening.yaml override file")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("surface-map-output")
+                .long("surface-map-output")
+                .help("Write the refined surface map JSON artifact to file")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("ci-gate")
+                .long("ci-gate")
+                .help("Optional CI gate: off, critical, or any")
+                .value_name("MODE")
+                .value_parser(["off", "critical", "any"])
+                .default_value("off"),
+        )
+        .arg(
+            Arg::new("vendor")
+                .long("vendor")
+                .help("Vendor-specific hardening guidance mode")
+                .value_name("MODE")
+                .value_parser(["auto", "cloudflare", "aws"])
+                .default_value("auto"),
+        )
+}
+
+fn build_regression_subcommand() -> Command {
+    Command::new("regression")
+        .about("Replay a hardening regression pack against an owned target")
+        .arg(
+            Arg::new("pack")
+                .help("Path to a hardening regression pack JSON file")
+                .value_name("FILE")
+                .required(true),
+        )
+        .arg(
+            Arg::new("target")
+                .long("target")
+                .help("Optional target override. Replays the pack paths and queries against this URL.")
+                .value_name("URL"),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .help("Print the regression replay report JSON to stdout")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .help("Write the regression replay report JSON to file")
+                .value_name("FILE"),
+        )
+}
+
+fn build_surface_map_subcommand() -> Command {
+    Command::new("surface-map")
+        .about("Compile and refine a route-aware application surface map from repo/spec/HAR inputs")
+        .arg(
+            Arg::new("target")
+                .long("target")
+                .help("Owned staging target URL used for live refinement")
+                .value_name("URL")
+                .required(true),
+        )
+        .arg(
+            Arg::new("repo")
+                .long("repo")
+                .help("Frontend repo path or git URL")
+                .value_name("PATH|URL"),
+        )
+        .arg(
+            Arg::new("spec")
+                .long("spec")
+                .help("OpenAPI document")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("har")
+                .long("har")
+                .help("HAR file")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("manifest")
+                .long("manifest")
+                .help("Optional waf-hardening.yaml override file")
+                .value_name("FILE"),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .help("Write the compiled/refined surface map JSON to file")
+                .value_name("FILE"),
         )
 }
 
@@ -2630,7 +3313,7 @@ fn build_va2_subcommand() -> Command {
         .arg(
             Arg::new("run")
                 .long("run")
-                .help("Execute behavioral analysis (requires consent)")
+                .help("Execute behavioral analysis (requires registered target scope)")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -2687,6 +3370,58 @@ fn build_doctor_subcommand() -> Command {
         )
 }
 
+fn build_origin_probe_subcommand() -> Command {
+    Command::new("origin-probe")
+        .about("Probe for WAF bypass via unprotected endpoints sharing origin IP")
+        .arg(
+            Arg::new("target")
+                .help("Target URL to probe (must be a registered consent scope)")
+                .required(true)
+                .index(1),
+        )
+        .arg(
+            Arg::new("json")
+                .long("json")
+                .help("Output results as JSON")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("no-attack-probe")
+                .long("no-attack-probe")
+                .help("Skip attack probe — discovery only (check bypass paths without sending probe)")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("timeout")
+                .long("timeout")
+                .help("Request timeout in seconds")
+                .value_name("SECS")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("10"),
+        )
+        .arg(
+            Arg::new("delay")
+                .long("delay")
+                .help("Delay between requests in milliseconds")
+                .value_name("MS")
+                .value_parser(clap::value_parser!(u64))
+                .default_value("200"),
+        )
+        .arg(
+            Arg::new("max-paths")
+                .long("max-paths")
+                .help("Maximum number of bypass paths to check")
+                .value_name("N")
+                .value_parser(clap::value_parser!(usize)),
+        )
+        .arg(
+            Arg::new("perf-report")
+                .long("perf-report")
+                .help("Write performance snapshot to file")
+                .value_name("FILE"),
+        )
+}
+
 fn build_completions_subcommand() -> Command {
     Command::new("completions")
         .about("Generate shell completion scripts")
@@ -2715,6 +3450,9 @@ pub fn build_simple_cli() -> Command {
             r#"
 MODERN COMMANDS (recommended):
   waf-detect scan cloudflare.com
+  waf-detect hardening api.example.com --json --regression-pack hardening-pack.json
+  waf-detect surface-map --repo ./tokenizer-ui --target https://staging.example.com --output surface-map.json
+  waf-detect regression hardening-pack.json --target https://api.example.com
   waf-detect scan @urls.txt --ndjson
   cat urls.txt | waf-detect scan --stdin --compact
   waf-detect va example.com --dry-run
@@ -2733,12 +3471,45 @@ The tool automatically adds https:// for bare domains where supported.
         "#,
         )
         .subcommand(build_scan_subcommand())
+        .subcommand(build_hardening_subcommand())
+        .subcommand(build_regression_subcommand())
+        .subcommand(build_surface_map_subcommand())
         .subcommand(build_va_subcommand())
         .subcommand(build_va2_subcommand())
         .subcommand(build_benchmark_subcommand())
         .subcommand(build_providers_subcommand())
         .subcommand(build_doctor_subcommand())
         .subcommand(build_completions_subcommand())
+        .subcommand(build_origin_probe_subcommand())
+        .arg(
+            Arg::new("active-target-profile")
+                .long("active-target-profile")
+                .help("Active testing target profile: public or internal")
+                .value_name("PROFILE")
+                .value_parser(["public", "internal"])
+                .global(true),
+        )
+        .arg(
+            Arg::new("operator-id")
+                .long("operator-id")
+                .help("Operator identifier recorded in active testing audit trails")
+                .value_name("ID")
+                .global(true),
+        )
+        .arg(
+            Arg::new("auth-profile")
+                .long("auth-profile")
+                .help("Path to an auth-profile.yaml file used for non-browser authenticated route testing")
+                .value_name("FILE")
+                .global(true),
+        )
+        .arg(
+            Arg::new("allow-legacy-replay")
+                .long("allow-legacy-replay")
+                .help("Allow replay execution from legacy or invalid replay bundles")
+                .action(clap::ArgAction::SetTrue)
+                .global(true),
+        )
         .arg(
             Arg::new("targets")
                 .help("Domain names, URLs, or @file.txt to scan")
@@ -2804,13 +3575,6 @@ The tool automatically adds https:// for bare domains where supported.
                     "Enable active payload-based probing during detection (authorized targets only)",
                 )
                 .action(clap::ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("tui")
-                .long("tui")
-                .help("Launch interactive TUI with navigable scan results")
-                .action(clap::ArgAction::SetTrue)
-                .conflicts_with_all(["json", "yaml"]),
         )
         .arg(
             Arg::new("list")
@@ -2890,14 +3654,22 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("consent")
                 .long("consent")
-                .help("Manage consent for effectiveness testing")
+                .visible_alias("scope")
+                .help("Manage owned-target scope for active testing")
                 .value_name("COMMAND")
                 .num_args(0..),
         )
         .arg(
+            Arg::new("scope-internal")
+                .long("internal")
+                .help("Register scope entries as internal targets")
+                .action(clap::ArgAction::SetTrue)
+                .requires("consent"),
+        )
+        .arg(
             Arg::new("effectiveness")
                 .long("effectiveness")
-                .help("Run comprehensive WAF effectiveness testing (requires consent)")
+                .help("Run comprehensive WAF effectiveness testing (requires registered target scope)")
                 .value_name("URL")
                 .num_args(1),
         )
@@ -2949,7 +3721,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va2-run")
                 .long("va2-run")
-                .help("Execute behavioral analysis (requires consent)")
+                .help("Execute behavioral analysis (requires registered target scope)")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va2"),
         )
@@ -3010,7 +3782,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("posture-va2")
                 .long("posture-va2")
-                .help("Include behavioral analysis in posture report (requires consent)")
+                .help("Include behavioral analysis in posture report (requires registered target scope)")
                 .action(clap::ArgAction::SetTrue)
                 .requires("posture"),
         )
@@ -3024,7 +3796,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va")
                 .long("va")
-                .help("Run enforcement test — send attack payloads and measure block rates (requires consent)")
+                .help("Run enforcement test — send attack payloads and measure block rates (requires registered target scope)")
                 .value_name("URL")
                 .num_args(1),
         )

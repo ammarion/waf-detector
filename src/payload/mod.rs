@@ -6,6 +6,9 @@
 pub mod loader;
 pub mod waf_smoke_test;
 
+use crate::active::{guard_target, ResolvedTarget};
+use crate::audit::{AuditSession, RunAudit};
+use crate::effectiveness::consent::ConsentManager;
 use crate::http::HttpClient;
 use crate::{Evidence, MethodType};
 use serde::{Deserialize, Serialize};
@@ -62,6 +65,8 @@ pub struct PayloadAnalysisResult {
     pub blocked_payloads: Vec<BlockedPayload>,
     pub baseline_response: BaselineInfo,
     pub analysis_time_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<RunAudit>,
 }
 
 /// Information about a blocked payload
@@ -81,7 +86,18 @@ pub struct BaselineInfo {
     pub status: u16,
     pub headers: HashMap<String, String>,
     pub body_length: usize,
+    pub body_sample: String,
     pub response_time_ms: u64,
+}
+
+const BASELINE_BODY_SAMPLE_LIMIT: usize = 1024;
+
+fn baseline_body_sample(body: &str) -> String {
+    if body.len() <= BASELINE_BODY_SAMPLE_LIMIT {
+        body.to_string()
+    } else {
+        body.chars().take(BASELINE_BODY_SAMPLE_LIMIT).collect()
+    }
 }
 
 impl Default for PayloadConfig {
@@ -114,18 +130,29 @@ impl PayloadAnalyzer {
 
     /// Analyze URL using payload-based probing
     pub async fn analyze(&self, url: &str) -> Result<PayloadAnalysisResult, anyhow::Error> {
+        let scope = ConsentManager::new();
+        let target = guard_target(&scope, url)?;
+        self.analyze_with_target(&target).await
+    }
+
+    pub async fn analyze_with_target(
+        &self,
+        target: &ResolvedTarget,
+    ) -> Result<PayloadAnalysisResult, anyhow::Error> {
         let start_time = Instant::now();
+        let mut audit = AuditSession::new("payload_analysis", target, true)?;
 
         // Step 1: Get baseline response
-        let baseline = self.get_baseline_response(url).await?;
+        let baseline = self.get_baseline_response(target).await?;
 
         // Step 2: Test payloads
-        let blocked_payloads = self.test_payloads(url, &baseline).await?;
+        let blocked_payloads = self.test_payloads(target, &baseline).await?;
 
         // Step 3: Analyze results and determine WAF
         let (detected_waf, confidence) = self.analyze_blocked_payloads(&blocked_payloads);
 
         let analysis_time = start_time.elapsed().as_millis() as u64;
+        audit.record_completed()?;
 
         Ok(PayloadAnalysisResult {
             detected_waf,
@@ -133,20 +160,35 @@ impl PayloadAnalyzer {
             blocked_payloads,
             baseline_response: baseline,
             analysis_time_ms: analysis_time,
+            audit: Some(audit.snapshot()),
         })
     }
 
     /// Get baseline response for comparison
-    async fn get_baseline_response(&self, url: &str) -> Result<BaselineInfo, anyhow::Error> {
+    async fn get_baseline_response(
+        &self,
+        target: &ResolvedTarget,
+    ) -> Result<BaselineInfo, anyhow::Error> {
         let start_time = Instant::now();
 
-        let response = self.http_client.get(url).await?;
+        let response = self
+            .http_client
+            .request_pinned(
+                "GET",
+                &target.normalized_url,
+                &[],
+                None,
+                target.pinned_ip,
+                Some(self.config.request_timeout),
+            )
+            .await?;
         let response_time = start_time.elapsed().as_millis() as u64;
 
         Ok(BaselineInfo {
             status: response.status,
             headers: response.headers.clone(),
             body_length: response.body.len(),
+            body_sample: baseline_body_sample(&response.body),
             response_time_ms: response_time,
         })
     }
@@ -154,7 +196,7 @@ impl PayloadAnalyzer {
     /// Test various payloads against the target
     async fn test_payloads(
         &self,
-        base_url: &str,
+        target: &ResolvedTarget,
         baseline: &BaselineInfo,
     ) -> Result<Vec<BlockedPayload>, anyhow::Error> {
         let mut blocked_payloads = Vec::new();
@@ -164,8 +206,7 @@ impl PayloadAnalyzer {
             // Add delay to avoid overwhelming the server
             tokio::time::sleep(self.config.request_delay).await;
 
-            if let Ok(Some(blocked)) = self.test_single_payload(base_url, &payload, baseline).await
-            {
+            if let Ok(Some(blocked)) = self.test_single_payload(target, &payload, baseline).await {
                 blocked_payloads.push(blocked);
             }
         }
@@ -176,18 +217,29 @@ impl PayloadAnalyzer {
     /// Test a single payload
     async fn test_single_payload(
         &self,
-        base_url: &str,
+        target: &ResolvedTarget,
         payload: &Payload,
         baseline: &BaselineInfo,
     ) -> Result<Option<BlockedPayload>, anyhow::Error> {
         // Construct URL with payload as query parameter
         let test_url = format!(
             "{}?test={}",
-            base_url,
+            target.normalized_url,
             urlencoding::encode(&payload.payload)
         );
 
-        match self.http_client.get(&test_url).await {
+        match self
+            .http_client
+            .request_pinned(
+                "GET",
+                &test_url,
+                &[],
+                None,
+                target.pinned_ip,
+                Some(self.config.request_timeout),
+            )
+            .await
+        {
             Ok(response) => {
                 // Check if response indicates blocking
                 if self.is_blocked_response(&response, baseline, payload) {
@@ -260,6 +312,7 @@ impl PayloadAnalyzer {
 
         // Check for blocking patterns in response body
         let body_lower = response.body.to_lowercase();
+        let body_changed = baseline_body_sample(&response.body) != baseline.body_sample;
         let blocking_indicators = [
             "access denied",
             "blocked",
@@ -274,14 +327,14 @@ impl PayloadAnalyzer {
         ];
 
         for indicator in &blocking_indicators {
-            if body_lower.contains(indicator) {
+            if body_changed && body_lower.contains(indicator) {
                 return true;
             }
         }
 
         // Check for expected blocking patterns specific to this payload
         for expected_block in &payload.expected_blocks {
-            if body_lower.contains(&expected_block.to_lowercase()) {
+            if body_changed && body_lower.contains(&expected_block.to_lowercase()) {
                 return true;
             }
         }
@@ -607,5 +660,88 @@ impl PayloadAnalyzer {
 impl Default for PayloadAnalyzer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http::HttpResponse;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_payload_analysis_requires_registered_target_scope() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+
+        let analyzer = PayloadAnalyzer::new();
+        let err = analyzer
+            .analyze("https://example.com")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Target is not registered for active testing"));
+
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
+    }
+
+    #[test]
+    fn test_is_blocked_response_ignores_unchanged_keyword_body() {
+        let analyzer = PayloadAnalyzer::new();
+        let baseline = BaselineInfo {
+            status: 200,
+            headers: HashMap::new(),
+            body_length: "access denied".len(),
+            body_sample: "access denied".to_string(),
+            response_time_ms: 1,
+        };
+        let payload = Payload {
+            category: PayloadCategory::XSS,
+            payload: "<script>alert(1)</script>".to_string(),
+            description: "xss".to_string(),
+            expected_blocks: vec!["blocked".to_string()],
+        };
+        let response = HttpResponse {
+            status: 200,
+            headers: HashMap::new(),
+            body: "access denied".to_string(),
+            url: "https://example.com".to_string(),
+        };
+
+        assert!(!analyzer.is_blocked_response(&response, &baseline, &payload));
+    }
+
+    #[test]
+    fn test_is_blocked_response_detects_changed_keyword_body() {
+        let analyzer = PayloadAnalyzer::new();
+        let baseline = BaselineInfo {
+            status: 200,
+            headers: HashMap::new(),
+            body_length: 2,
+            body_sample: "ok".to_string(),
+            response_time_ms: 1,
+        };
+        let payload = Payload {
+            category: PayloadCategory::XSS,
+            payload: "<script>alert(1)</script>".to_string(),
+            description: "xss".to_string(),
+            expected_blocks: vec!["blocked".to_string()],
+        };
+        let response = HttpResponse {
+            status: 200,
+            headers: HashMap::new(),
+            body: "access denied".to_string(),
+            url: "https://example.com".to_string(),
+        };
+
+        assert!(analyzer.is_blocked_response(&response, &baseline, &payload));
     }
 }
