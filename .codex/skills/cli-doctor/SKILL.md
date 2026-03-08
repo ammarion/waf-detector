@@ -3,7 +3,7 @@ name: cli-doctor
 description: Use when scans fail early, the environment looks unhealthy, or the user wants shell completions.
 ---
 
-# Claude wrapper for the shared cli-doctor workflow.
+This is a thin Codex wrapper.
 
 Source of truth: `agent-skills/cli-doctor/WORKFLOW.md`
 

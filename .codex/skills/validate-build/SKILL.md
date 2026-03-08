@@ -3,7 +3,7 @@ name: validate-build
 description: Use when the user wants final formatting, lint, test, and build validation before merge or push.
 ---
 
-# Claude wrapper for the shared validate-build workflow.
+This is a thin Codex wrapper.
 
 Source of truth: `agent-skills/validate-build/WORKFLOW.md`
 
