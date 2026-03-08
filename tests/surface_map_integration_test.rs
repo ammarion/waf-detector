@@ -11,7 +11,10 @@ fn test_fixture_frontend_repo_produces_route_aware_surface_map() {
 
     // Fixtures are local-only (gitignored). Skip in CI where they don't exist.
     if !fixture_repo.exists() {
-        eprintln!("skipping: fixture repo not present at {}", fixture_repo.display());
+        eprintln!(
+            "skipping: fixture repo not present at {}",
+            fixture_repo.display()
+        );
         return;
     }
 
