@@ -1,10 +1,9 @@
 ---
 name: validate-build
-description: Full build validation — compile, test, lint, and verify
-user_invocable: true
+description: Run the repo validation pipeline for formatting, linting, tests, and release build verification. Use before merge or push.
 ---
 
-# Claude wrapper for the shared build validation workflow.
+This is a thin Codex wrapper.
 
 Source of truth: `agent-skills/validate-build/WORKFLOW.md`
 

@@ -1,10 +1,9 @@
 ---
 name: security-audit
-description: Run a structured security audit on the WAF detector codebase
-user_invocable: true
+description: Run a structured security audit on the WAF detector codebase. Use for security reviews, pre-release audits, or hardening work.
 ---
 
-# Claude wrapper for the shared security audit workflow.
+This is a thin Codex wrapper.
 
 Source of truth: `agent-skills/security-audit/WORKFLOW.md`
 
