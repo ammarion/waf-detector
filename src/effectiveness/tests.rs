@@ -3,7 +3,15 @@
 #[cfg(test)]
 mod effectiveness_tests {
     use super::super::*;
+    use axum::{
+        body::Bytes,
+        extract::OriginalUri,
+        http::{HeaderMap, StatusCode},
+        routing::any,
+        Router,
+    };
     use tempfile::TempDir;
+
     fn with_temp_home<F>(f: F)
     where
         F: FnOnce(&TempDir),
@@ -22,6 +30,73 @@ mod effectiveness_tests {
         }
     }
 
+    fn write_valid_consent(temp_dir: &TempDir, authorized_targets: &[&str]) {
+        let consent_path = temp_dir.path().join(".waf-detector-consent.json");
+        let record = serde_json::json!({
+            "timestamp": chrono::Utc::now(),
+            "terms_version": "1.0.0",
+            "authorized_targets": authorized_targets,
+            "acknowledgment": "I AGREE"
+        });
+        std::fs::write(consent_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
+    }
+
+    async fn start_effectiveness_server() -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().route("/", any(effectiveness_test_handler));
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{address}/"), handle)
+    }
+
+    async fn effectiveness_test_handler(
+        headers: HeaderMap,
+        OriginalUri(uri): OriginalUri,
+        body: Bytes,
+    ) -> (StatusCode, String) {
+        let content_type = headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let body_text = String::from_utf8_lossy(&body);
+        let query = uri.query().unwrap_or_default().to_ascii_lowercase();
+
+        let parser_variant = content_type.contains("profile=")
+            || content_type.contains("charset=\"utf-8\"")
+            || content_type.contains("text/xml")
+            || content_type.contains("multipart/form-data; boundary=fake-boundary")
+            || content_type.contains("boundary*0=real-")
+            || content_type.contains("boundary=\"real-boundary\"")
+            || content_type == "multipart/form-data; boundary=real-boundary;"
+            || content_type.contains("multipart/form-data; boundary=real-boundary; charset=utf-8")
+            || body_text.contains(r#""field1":"safe","field1":"#)
+            || body_text.contains(r#""field1":["#)
+            || body_text.contains("<![CDATA[")
+            || body_text.contains("xmlns:ns=")
+            || body_text.contains("<field0>safe</field0>")
+            || body_text.contains("<!doctype root");
+
+        let obvious_attack = query.contains("union select")
+            || query.contains("waitfor")
+            || query.contains("../etc/passwd")
+            || query.contains("169.254.169.254")
+            || query.contains("{{7*7}}")
+            || query.contains("<script>")
+            || query.contains("ping=127.0.0.1;id")
+            || body_text.contains("<script>alert(1)</script>")
+            || body_text.contains("document.cookie")
+            || body_text.contains("' union select null--");
+
+        if obvious_attack && !parser_variant {
+            return (StatusCode::FORBIDDEN, "Access Denied".to_string());
+        }
+
+        (StatusCode::OK, "ok".to_string())
+    }
+
     #[test]
     fn test_effectiveness_config_default() {
         let config = EffectivenessConfig::default();
@@ -33,6 +108,8 @@ mod effectiveness_tests {
         assert_eq!(config.similarity_threshold, 0.65);
         assert_eq!(config.reduction_ratio, 0.70);
         assert_eq!(config.min_length_diff, 1200);
+        assert!(config.parser_discrepancy_enabled);
+        assert_eq!(config.parser_discrepancy_max_pairs, 18);
     }
 
     #[test]
@@ -47,6 +124,8 @@ mod effectiveness_tests {
             similarity_threshold: Some(0.5),
             reduction_ratio: Some(0.6),
             min_length_diff: Some(500),
+            parser_discrepancy_enabled: Some(false),
+            parser_discrepancy_max_pairs: Some(6),
         };
 
         config.apply_overrides(overrides);
@@ -59,6 +138,8 @@ mod effectiveness_tests {
         assert_eq!(config.similarity_threshold, 0.5);
         assert_eq!(config.reduction_ratio, 0.6);
         assert_eq!(config.min_length_diff, 500);
+        assert!(!config.parser_discrepancy_enabled);
+        assert_eq!(config.parser_discrepancy_max_pairs, 6);
     }
 
     #[test]
@@ -614,6 +695,57 @@ mod effectiveness_tests {
     }
 
     #[test]
+    fn test_report_parser_discrepancy_json_roundtrip() {
+        let mut report = report::EffectivenessReport::new("https://example.com");
+        report.parser_discrepancy = Some(report::ParserDiscrepancySummary {
+            executed_pairs: 2,
+            candidate_bypasses: 1,
+            unique_bypasses: 1,
+            by_content_type: std::collections::HashMap::from([("application/json".to_string(), 1)]),
+            by_canonical_class: std::collections::HashMap::from([(
+                "duplicate_json_keys".to_string(),
+                1,
+            )]),
+            findings: vec![report::DiscrepancyFinding {
+                content_type: "application/json".to_string(),
+                canonical_class: "duplicate_json_keys".to_string(),
+                severity: "HIGH".to_string(),
+                confidence: 1.0,
+                suppressed_variants: 0,
+                evidence: "Control blocked; variant allowed".to_string(),
+                control_replay: report::ReplayRequest {
+                    method: "POST".to_string(),
+                    url: "https://example.com".to_string(),
+                    headers: std::collections::HashMap::from([(
+                        "Content-Type".to_string(),
+                        "application/json".to_string(),
+                    )]),
+                    body: "{\"field1\":\"safe\"}".to_string(),
+                },
+                variant_replay: report::ReplayRequest {
+                    method: "POST".to_string(),
+                    url: "https://example.com".to_string(),
+                    headers: std::collections::HashMap::from([(
+                        "Content-Type".to_string(),
+                        "application/json; profile=\"waffled\"".to_string(),
+                    )]),
+                    body: "{\"field1\":\"<script>alert(1)</script>\"}".to_string(),
+                },
+            }],
+        });
+
+        let json = report.to_json().unwrap();
+        let parsed: report::EffectivenessReport = serde_json::from_str(&json).unwrap();
+        let parser_discrepancy = parsed.parser_discrepancy.unwrap();
+        assert_eq!(parser_discrepancy.executed_pairs, 2);
+        assert_eq!(parser_discrepancy.findings.len(), 1);
+        assert_eq!(
+            parser_discrepancy.findings[0].canonical_class,
+            "duplicate_json_keys"
+        );
+    }
+
+    #[test]
     fn test_report_html_export() {
         let report = report::EffectivenessReport::new("https://example.com");
         let html = report.to_html();
@@ -665,5 +797,79 @@ mod effectiveness_tests {
         let elapsed = start.elapsed();
         // Should have delayed for at least 1 second (60 requests/min = 1/sec)
         assert!(elapsed.as_millis() >= 500); // Allow some tolerance
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_effectiveness_runs_parser_discrepancy_phase_by_default() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+        write_valid_consent(&temp_dir, &["127.0.0.1"]);
+        let (url, handle) = start_effectiveness_server().await;
+
+        let mut config = EffectivenessConfig::default();
+        config.max_requests_per_minute = 10_000;
+        config.request_delay = std::time::Duration::from_millis(0);
+
+        let mut test = EffectivenessTest::new(config).await.unwrap();
+        let report = test.test_effectiveness(&url).await.unwrap();
+
+        handle.abort();
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
+
+        assert!(report
+            .phases
+            .iter()
+            .any(|phase| phase.name == "Parser Discrepancy Testing"));
+        let parser_discrepancy = report.parser_discrepancy.unwrap();
+        assert_eq!(parser_discrepancy.executed_pairs, 18);
+        assert!(parser_discrepancy.candidate_bypasses > 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_effectiveness_can_disable_parser_discrepancy_via_toml_override() {
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
+        let temp_dir = TempDir::new().unwrap();
+        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
+        write_valid_consent(&temp_dir, &["127.0.0.1"]);
+        let (url, handle) = start_effectiveness_server().await;
+
+        let mut config = EffectivenessConfig::default();
+        let overrides: EffectivenessConfigOverrides = toml::from_str(
+            r#"
+parser_discrepancy_enabled = false
+parser_discrepancy_max_pairs = 3
+"#,
+        )
+        .unwrap();
+        config.apply_overrides(overrides);
+        config.max_requests_per_minute = 10_000;
+        config.request_delay = std::time::Duration::from_millis(0);
+
+        let mut test = EffectivenessTest::new(config).await.unwrap();
+        let report = test.test_effectiveness(&url).await.unwrap();
+
+        handle.abort();
+        if let Some(value) = original_home {
+            std::env::set_var("WAF_DETECTOR_HOME", value);
+        } else {
+            std::env::remove_var("WAF_DETECTOR_HOME");
+        }
+
+        assert!(!report
+            .phases
+            .iter()
+            .any(|phase| phase.name == "Parser Discrepancy Testing"));
+        assert!(report.parser_discrepancy.is_none());
     }
 }
