@@ -304,7 +304,9 @@ mod tests {
         );
         let evidence = provider.passive_detect(&response).await.unwrap();
         assert!(!evidence.is_empty());
-        assert!(evidence.iter().any(|e| e.signature_matched == "cf-ray-header"));
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "cf-ray-header"));
     }
 
     #[tokio::test]
@@ -312,7 +314,9 @@ mod tests {
         let provider = CloudFlareProvider::new();
         let response = mock_response(200, [("cf-cache-status", "MISS")], "");
         let evidence = provider.passive_detect(&response).await.unwrap();
-        assert!(evidence.iter().any(|e| e.signature_matched == "cf-cache-status-header"));
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "cf-cache-status-header"));
     }
 
     #[tokio::test]
