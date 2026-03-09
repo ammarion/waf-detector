@@ -17,7 +17,10 @@ pub fn run_detector_cli(args: &[&str]) -> Result<CliOutput> {
     let binary_path = std::env::var("WAF_DETECTOR_BINARY")
         .unwrap_or_else(|_| "./target/debug/waf-detect".to_string());
 
-    let output = Command::new(&binary_path).args(args).output()?;
+    let output = Command::new(&binary_path)
+        .args(args)
+        .env("WAF_DETECTOR_NO_PROXY", "1")
+        .output()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -66,24 +69,32 @@ where
     (String::new(), String::new())
 }
 
-/// Parse detection results from JSON output
+/// Parse detection results from JSON output.
+/// Handles both single-object and array output (CLI emits array of results).
 pub fn parse_detection_results(json: &Value) -> Result<DetectionResults> {
-    let waf = json
+    let obj = if let Some(arr) = json.as_array() {
+        arr.first()
+            .ok_or_else(|| anyhow::anyhow!("Empty results array"))?
+    } else {
+        json
+    };
+
+    let waf = obj
         .get("detected_waf")
         .and_then(|w| parse_detection_info(w).ok());
 
-    let cdn = json
+    let cdn = obj
         .get("detected_cdn")
         .and_then(|c| parse_detection_info(c).ok());
 
-    let mut evidence: Vec<EvidenceInfo> = json
+    let mut evidence: Vec<EvidenceInfo> = obj
         .get("evidence")
         .and_then(|e| e.as_array())
         .map(|arr| arr.iter().filter_map(|v| parse_evidence(v).ok()).collect())
         .unwrap_or_default();
 
     if evidence.is_empty() {
-        if let Some(map) = json.get("evidence_map").and_then(|e| e.as_object()) {
+        if let Some(map) = obj.get("evidence_map").and_then(|e| e.as_object()) {
             for entries in map.values() {
                 if let Some(arr) = entries.as_array() {
                     for item in arr {

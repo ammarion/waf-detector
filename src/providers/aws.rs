@@ -690,7 +690,9 @@ mod tests {
         );
         let evidence = provider.passive_detect(&response).await.unwrap();
         assert!(!evidence.is_empty());
-        assert!(evidence.iter().any(|e| e.signature_matched == "x-amz-cf-id-header"));
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "x-amz-cf-id-header"));
     }
 
     #[tokio::test]
@@ -702,7 +704,9 @@ mod tests {
             "",
         );
         let evidence = provider.passive_detect(&response).await.unwrap();
-        assert!(evidence.iter().any(|e| e.signature_matched == "aws-request-id-pattern"));
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "aws-request-id-pattern"));
     }
 
     #[tokio::test]

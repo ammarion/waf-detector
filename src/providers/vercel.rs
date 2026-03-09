@@ -230,14 +230,12 @@ mod tests {
     #[tokio::test]
     async fn detects_vercel_id_header() {
         let provider = VercelProvider::new();
-        let response = mock_response(
-            200,
-            [("x-vercel-id", "iad1::sfo1-12345-abc123def456")],
-            "",
-        );
+        let response = mock_response(200, [("x-vercel-id", "iad1::sfo1-12345-abc123def456")], "");
         let evidence = provider.passive_detect(&response).await.unwrap();
         assert!(!evidence.is_empty());
-        assert!(evidence.iter().any(|e| e.signature_matched == "x-vercel-id-header"));
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "x-vercel-id-header"));
     }
 
     #[tokio::test]
@@ -245,7 +243,9 @@ mod tests {
         let provider = VercelProvider::new();
         let response = mock_response(200, [("server", "vercel")], "");
         let evidence = provider.passive_detect(&response).await.unwrap();
-        assert!(evidence.iter().any(|e| e.signature_matched == "vercel-server-header"));
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "vercel-server-header"));
     }
 
     #[tokio::test]

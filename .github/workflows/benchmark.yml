@@ -39,7 +39,7 @@ jobs:
 
     - name: Determinism + perf gates (hermetic)
       run: |
-        ./scripts/check_perf_and_determinism.sh benchmark_corpus.json tests/fixtures/benchmark
+        BIN=./target/release/waf-detect ./scripts/check_perf_and_determinism.sh benchmark_corpus.json tests/fixtures/benchmark
 
     - name: Check F1 thresholds
       run: |

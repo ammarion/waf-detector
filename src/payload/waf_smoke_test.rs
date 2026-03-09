@@ -1200,5 +1200,4 @@ mod tests {
         assert_eq!(summary.allowed_count, 1);
         assert_eq!(summary.effectiveness_percentage, 50.0);
     }
-
 }

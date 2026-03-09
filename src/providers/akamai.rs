@@ -282,7 +282,9 @@ mod tests {
         let response = mock_response(200, [("server", "AkamaiGHost")], "");
         let evidence = provider.passive_detect(&response).await.unwrap();
         assert!(!evidence.is_empty());
-        assert!(evidence.iter().any(|e| e.signature_matched == "akamai-server-pattern"));
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "akamai-server-pattern"));
     }
 
     #[tokio::test]
@@ -297,7 +299,9 @@ mod tests {
             "",
         );
         let evidence = provider.passive_detect(&response).await.unwrap();
-        assert!(evidence.iter().any(|e| e.signature_matched == "x-akamai-header"));
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "x-akamai-header"));
     }
 
     #[tokio::test]
