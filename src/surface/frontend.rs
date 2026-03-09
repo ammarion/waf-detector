@@ -960,7 +960,7 @@ mod tests {
             };
 
             function getDomain() {
-              return "https://tokui-commerce.adobe.com";
+              return "https://payments.example.com";
             }
 
             function getPTSEndpoint() {

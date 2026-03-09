@@ -40,7 +40,7 @@
       "notes": "Known Akamai customer - major tech company"
     },
     {
-      "url": "https://adobe.com",
+      "url": "https://example.com",
       "expected_waf": "Akamai",
       "expected_cdn": "Akamai",
       "notes": "Known Akamai customer - software company"
