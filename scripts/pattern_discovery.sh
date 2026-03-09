@@ -20,7 +20,7 @@ KNOWN_SITES=(
     "akamai.com:Akamai"
     "apple.com:Akamai"
     "microsoft.com:Akamai"
-    "adobe.com:Akamai"
+    "example.com:Akamai"
     "fastly.com:Fastly"
     "github.com:Fastly"
     "shopify.com:Fastly"

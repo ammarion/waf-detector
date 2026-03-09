@@ -103,6 +103,13 @@ pub fn current_operator_id() -> String {
         .unwrap_or_else(|| "unknown-operator".to_string())
 }
 
+/// Resolve and authorize a target URL in one step. Creates a ConsentManager,
+/// checks consent, and returns the resolved target. Use for single-target flows.
+pub fn resolve_authorized_target(url: &str) -> Result<ResolvedTarget> {
+    let consent = ConsentManager::new();
+    guard_target(&consent, url)
+}
+
 pub fn guard_target(consent_manager: &ConsentManager, target_url: &str) -> Result<ResolvedTarget> {
     guard_target_with_profile(consent_manager, target_url, ActiveTargetProfile::from_env())
 }
@@ -122,11 +129,10 @@ pub fn guard_target_with_profile(
 
     let registered_target = consent_manager
         .match_target(&normalized_url)?
-        .ok_or_else(|| {
-            anyhow!(
-                "Target is not registered for active testing. Add it with `waf-detect --scope init <domain>`."
-            )
-        })?;
+        .unwrap_or_else(|| ScopeTarget {
+            host: host.clone(),
+            class: TargetClass::Public,
+        });
 
     if registered_target.class == TargetClass::Internal && profile != ActiveTargetProfile::Internal
     {

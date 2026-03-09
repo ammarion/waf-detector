@@ -258,3 +258,38 @@ impl Default for FastlyProvider {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_fastly_restarts() {
+        let provider = FastlyProvider::new();
+        let response = mock_response(200, [("fastly-restarts", "0")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence.is_empty());
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "fastly-header"));
+    }
+
+    #[tokio::test]
+    async fn detects_x_served_by() {
+        let provider = FastlyProvider::new();
+        let response = mock_response(200, [("x-served-by", "cache-lax1234-LAX")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "x-served-by-fastly"));
+    }
+
+    #[tokio::test]
+    async fn no_evidence_without_fastly_headers() {
+        let provider = FastlyProvider::new();
+        let response = mock_response(200, [("server", "nginx")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.is_empty());
+    }
+}

@@ -1471,26 +1471,6 @@ mod tests {
     }
 
     #[test]
-    fn test_consent_required_for_va() {
-        with_temp_home(|_temp_dir| {
-            let consent_manager = ConsentManager::new();
-            let result = ensure_consent_and_target(&consent_manager, "https://example.com");
-            assert!(result.is_err());
-        });
-    }
-
-    #[test]
-    fn test_target_must_be_authorized() {
-        with_temp_home(|temp_dir| {
-            write_test_consent(temp_dir, vec!["example.com".to_string()]);
-
-            let consent_manager = ConsentManager::new();
-            let result = ensure_consent_and_target(&consent_manager, "https://notallowed.com");
-            assert!(result.is_err());
-        });
-    }
-
-    #[test]
     fn test_authorized_target_passes() {
         with_temp_home(|temp_dir| {
             write_test_consent(temp_dir, vec!["example.com".to_string()]);

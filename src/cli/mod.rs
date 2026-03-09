@@ -1,10 +1,10 @@
 //! Simple CLI Interface - Modern and intuitive WAF detection
 
 use crate::active::{
-    guard_target, ActiveTargetProfile, ACTIVE_TARGET_PROFILE_ENV, OPERATOR_ID_ENV,
+    guard_target, resolve_authorized_target, ActiveTargetProfile, ACTIVE_TARGET_PROFILE_ENV,
+    OPERATOR_ID_ENV,
 };
 use crate::audit::AuditSession;
-use crate::effectiveness::consent::{ConsentManager, TargetClass};
 use crate::engine::DetectionEngine;
 use crate::hardening::{
     CiGateMode, HardeningConfig, HardeningOrchestrator, RegressionRunner, VendorMode,
@@ -22,7 +22,6 @@ use crate::registry::ProviderRegistry;
 use crate::surface::{CompilerInputs, SurfaceMap, SurfaceMapCompiler, AUTH_PROFILE_ENV};
 use crate::virtual_adversary::{VirtualAdversaryConfig, VirtualAdversaryRunner};
 use crate::virtual_adversary2::{build_va2_campaign_plan, Va2CampaignConfig, Va2Phase, Va2Runner};
-use crate::DetectionResult;
 use anyhow::{anyhow, Result};
 use clap::{Arg, ArgGroup, ArgMatches, Command};
 use serde::Serialize;
@@ -35,8 +34,10 @@ use std::time::Instant;
 use url::Url;
 
 mod benchmark;
+mod output;
 pub use benchmark::BenchmarkReport;
 use benchmark::{BenchmarkMode, BenchmarkOptions};
+use output::{emit_scan_results, print_batch_summary, truncate_with_ellipsis};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
@@ -156,21 +157,6 @@ impl Drop for RuntimeEnvGuard {
     }
 }
 
-fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        return value.to_string();
-    }
-    if max_chars <= 3 {
-        return ".".repeat(max_chars);
-    }
-    let mut output = String::with_capacity(max_chars);
-    for ch in value.chars().take(max_chars - 3) {
-        output.push(ch);
-    }
-    output.push_str("...");
-    output
-}
-
 fn completion_subcommands() -> &'static [&'static str] {
     &[
         "scan",
@@ -223,9 +209,6 @@ fn completion_global_options() -> &'static [&'static str] {
         "--benchmark-workers",
         "--benchmark-mode",
         "--benchmark-fixtures",
-        "--scope",
-        "--consent",
-        "--internal",
         "--effectiveness",
         "--effectiveness-config",
         "--effectiveness-output",
@@ -662,17 +645,6 @@ impl SimpleCliApp {
             return self.list_providers(&engine).await;
         }
 
-        // Handle target scope command
-        if let Some(consent_args) = matches.get_many::<String>("consent") {
-            let args: Vec<String> = consent_args.cloned().collect();
-            let target_class = if matches.get_flag("scope-internal") {
-                TargetClass::Internal
-            } else {
-                TargetClass::Public
-            };
-            return crate::effectiveness::consent::manage_consent_cli(args, target_class);
-        }
-
         // Handle benchmark evaluation
         if let Some(corpus_path) = matches.get_one::<String>("benchmark") {
             let result = self.run_benchmark(&engine, corpus_path, &matches).await;
@@ -708,8 +680,7 @@ impl SimpleCliApp {
             let normalized = self.normalize_url(url)?;
             let detection_result = engine.detect(&normalized).await?;
             let phases = parse_va2_phases("baseline,protocol-variance")?;
-            let scope = ConsentManager::new();
-            let target = guard_target(&scope, &normalized)?;
+            let target = resolve_authorized_target(&normalized)?;
             let mut plan = build_va2_campaign_plan(
                 &target.normalized_url,
                 &phases,
@@ -752,8 +723,7 @@ impl SimpleCliApp {
                 let phases_raw = "baseline,protocol-variance";
                 let phases = parse_va2_phases(phases_raw)?;
                 let config = Va2CampaignConfig::default();
-                let scope = ConsentManager::new();
-                let target = guard_target(&scope, &normalized)?;
+                let target = resolve_authorized_target(&normalized)?;
                 let mut plan = build_va2_campaign_plan(&target.normalized_url, &phases, config)?;
                 for step in &mut plan.steps {
                     step.delay_ms = 0;
@@ -821,8 +791,7 @@ impl SimpleCliApp {
             };
 
             if matches.get_flag("va2-run") {
-                let scope = ConsentManager::new();
-                let target = guard_target(&scope, &normalized)?;
+                let target = resolve_authorized_target(&normalized)?;
                 let plan = build_va2_campaign_plan(&target.normalized_url, &phases, config)?;
                 let mut audit = AuditSession::new("va2", &target, true)?;
                 let runner = Va2Runner::new()?;
@@ -863,8 +832,7 @@ impl SimpleCliApp {
                 .get_one::<String>("va-replay-target")
                 .cloned()
                 .unwrap_or_else(|| report.target_url.clone());
-            let scope = ConsentManager::new();
-            let target = guard_target(&scope, &target)?;
+            let target = resolve_authorized_target(&target)?;
             let mut audit = AuditSession::new("va_replay", &target, true)?;
             let mut runner = VirtualAdversaryRunner::new(report.config.clone())?;
             let mut report =
@@ -922,8 +890,7 @@ impl SimpleCliApp {
                 self.write_perf_report_if_requested(&matches)?;
                 return Ok(());
             }
-            let scope = ConsentManager::new();
-            let target = guard_target(&scope, &normalized)?;
+            let target = resolve_authorized_target(&normalized)?;
             let mut audit = AuditSession::new("va", &target, true)?;
             let mut report = match runner.run_with_events_for_target(&target, |_, _| {}, |_| {}) {
                 Ok(report) => report,
@@ -977,7 +944,6 @@ impl SimpleCliApp {
             ("--list", matches.get_flag("list")),
             ("--smoke-test", matches.get_flag("smoke-test")),
             ("--va-schema", matches.get_flag("va-schema")),
-            ("--consent", matches.get_many::<String>("consent").is_some()),
             (
                 "--benchmark",
                 matches.get_one::<String>("benchmark").is_some(),
@@ -1393,8 +1359,7 @@ impl SimpleCliApp {
             return Ok(());
         }
 
-        let scope = ConsentManager::new();
-        let target = guard_target(&scope, &normalized)?;
+        let target = resolve_authorized_target(&normalized)?;
         let mut audit = AuditSession::new("va", &target, true)?;
         let mut report = match runner.run_with_events_for_target(&target, |_, _| {}, |_| {}) {
             Ok(report) => report,
@@ -1438,8 +1403,7 @@ impl SimpleCliApp {
         };
 
         if matches.get_flag("run") {
-            let scope = ConsentManager::new();
-            let target = guard_target(&scope, &normalized)?;
+            let target = resolve_authorized_target(&normalized)?;
             let plan = build_va2_campaign_plan(&target.normalized_url, &phases, config)?;
             let mut audit = AuditSession::new("va2", &target, true)?;
             let runner = Va2Runner::new()?;
@@ -1800,34 +1764,6 @@ impl SimpleCliApp {
             ),
         }
 
-        let consent_manager = crate::effectiveness::consent::ConsentManager::new();
-        match consent_manager.status() {
-            Ok(status) => {
-                if status.has_consent {
-                    push_check(
-                        "consent_status",
-                        DoctorStatus::Pass,
-                        format!(
-                            "active target scope configured (targets={})",
-                            status.authorized_targets.len()
-                        ),
-                    );
-                } else {
-                    push_check(
-                        "consent_status",
-                        DoctorStatus::Warn,
-                        "no active target scope configured (required for smoke/payload/enforcement/behavioral/effectiveness tests)"
-                            .to_string(),
-                    );
-                }
-            }
-            Err(err) => push_check(
-                "consent_status",
-                DoctorStatus::Fail,
-                format!("failed to load target scope status: {err}"),
-            ),
-        }
-
         if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
             push_check(
                 "tls_mode",
@@ -2000,8 +1936,7 @@ impl SimpleCliApp {
             send_attack_probe: !matches.get_flag("no-attack-probe"),
         };
 
-        let scope = ConsentManager::new();
-        let resolved = guard_target(&scope, &normalized)?;
+        let resolved = resolve_authorized_target(&normalized)?;
 
         let prober = OriginProber::new(config)?;
         let report = prober.run(&resolved).await?;
@@ -2044,7 +1979,6 @@ impl SimpleCliApp {
     fn validate_matches(&self, matches: &ArgMatches) -> Result<()> {
         let modes = [
             ("--list", matches.get_flag("list")),
-            ("--consent", matches.get_many::<String>("consent").is_some()),
             (
                 "--benchmark",
                 matches.get_one::<String>("benchmark").is_some(),
@@ -2268,23 +2202,7 @@ impl SimpleCliApp {
         let detection_result = engine.detect(url).await?;
         let scan_time = start_time.elapsed();
 
-        match format {
-            OutputFormat::Json => {
-                println!("{}", serde_json::to_string_pretty(&detection_result)?);
-            }
-            OutputFormat::Ndjson => {
-                println!("{}", serde_json::to_string(&detection_result)?);
-            }
-            OutputFormat::Yaml => {
-                println!("{}", serde_yml::to_string(&detection_result)?);
-            }
-            OutputFormat::Compact => {
-                self.print_compact(&detection_result);
-            }
-            OutputFormat::Table => {
-                self.print_table_format(&detection_result, debug);
-            }
-        }
+        emit_scan_results(&[detection_result], format, debug)?;
 
         if verbose && human_output {
             println!("⏱️  Scan completed in {:.2}ms", scan_time.as_millis());
@@ -2417,39 +2335,14 @@ impl SimpleCliApp {
 
         let total_time = total_start.elapsed();
 
-        match format {
-            OutputFormat::Json => {
-                println!("{}", serde_json::to_string_pretty(&results)?);
-            }
-            OutputFormat::Ndjson => {
-                for result in &results {
-                    println!("{}", serde_json::to_string(result)?);
-                }
-            }
-            OutputFormat::Yaml => {
-                println!("{}", serde_yml::to_string(&results)?);
-            }
-            OutputFormat::Compact => {
-                for result in &results {
-                    self.print_compact(result);
-                }
-            }
-            OutputFormat::Table => {
-                for (i, result) in results.iter().enumerate() {
-                    if i > 0 {
-                        println!();
-                    }
-                    self.print_table_format(result, debug);
-                }
-            }
-        }
+        emit_scan_results(&results, format, debug)?;
 
         let error_count = results
             .iter()
             .filter(|result| result.error.is_some())
             .count();
         if human_output {
-            self.print_batch_summary(&results, total_time);
+            print_batch_summary(&results, total_time);
         } else if verbose {
             println!("\n⏱️  Total scan time: {:.2}s", total_time.as_secs_f64());
         }
@@ -2461,221 +2354,6 @@ impl SimpleCliApp {
         }
 
         Ok(())
-    }
-
-    fn print_batch_summary(&self, results: &[DetectionResult], total_time: std::time::Duration) {
-        let total = results.len();
-        if total == 0 {
-            return;
-        }
-
-        let waf = results.iter().filter(|r| r.detected_waf.is_some()).count();
-        let cdn = results.iter().filter(|r| r.detected_cdn.is_some()).count();
-        let both = results
-            .iter()
-            .filter(|r| r.detected_waf.is_some() && r.detected_cdn.is_some())
-            .count();
-        let errors = results.iter().filter(|r| r.error.is_some()).count();
-        let successful_durations: Vec<u64> = results
-            .iter()
-            .filter(|r| r.error.is_none())
-            .map(|r| r.detection_time_ms)
-            .collect();
-        let avg_ms = if successful_durations.is_empty() {
-            0.0
-        } else {
-            successful_durations.iter().sum::<u64>() as f64 / successful_durations.len() as f64
-        };
-
-        println!();
-        println!(
-            "Summary: targets={} waf={} cdn={} both={} errors={} avg_scan_ms={:.1} total_time_s={:.2}",
-            total,
-            waf,
-            cdn,
-            both,
-            errors,
-            avg_ms,
-            total_time.as_secs_f64()
-        );
-    }
-
-    fn print_compact(&self, result: &DetectionResult) {
-        let url_short = truncate_with_ellipsis(&result.url, 40);
-
-        match (&result.detected_waf, &result.detected_cdn) {
-            (Some(waf), Some(cdn)) if waf.name == cdn.name => {
-                println!(
-                    "{:<40} {} ({:.1}%)",
-                    url_short,
-                    waf.name,
-                    waf.confidence * 100.0
-                );
-            }
-            (Some(waf), Some(cdn)) => {
-                println!(
-                    "{:<40} WAF: {}, CDN: {} ({:.1}%/{:.1}%)",
-                    url_short,
-                    waf.name,
-                    cdn.name,
-                    waf.confidence * 100.0,
-                    cdn.confidence * 100.0
-                );
-            }
-            (Some(waf), None) => {
-                println!(
-                    "{:<40} WAF: {} ({:.1}%)",
-                    url_short,
-                    waf.name,
-                    waf.confidence * 100.0
-                );
-            }
-            (None, Some(cdn)) => {
-                println!(
-                    "{:<40} CDN: {} ({:.1}%)",
-                    url_short,
-                    cdn.name,
-                    cdn.confidence * 100.0
-                );
-            }
-            (None, None) => {
-                println!("{url_short:<40} Not Detected");
-            }
-        }
-    }
-
-    fn print_table_format(&self, result: &DetectionResult, debug: bool) {
-        if debug {
-            self.print_debug_info(result);
-        }
-
-        // Clean table format (reuse from existing CLI)
-        println!("┌─────────────────────────────────────────────────────────────────────────┐");
-        println!("│                            WAF/CDN Detection Results                    │");
-        println!("├─────────────────────────────────────────────────────────────────────────┤");
-
-        // URL (truncate if too long)
-        let url_display = truncate_with_ellipsis(&result.url, 67);
-        println!("│ URL: {url_display:<67} │");
-        println!("├─────────────────────────────────────────────────────────────────────────┤");
-
-        // WAF Detection
-        if let Some(waf_detection) = &result.detected_waf {
-            println!(
-                "│ WAF: {:<20} Confidence: {:<6.1}%                    │",
-                waf_detection.name,
-                waf_detection.confidence * 100.0
-            );
-        } else {
-            println!("│ WAF: Not Detected                                                      │");
-        }
-
-        // CDN Detection
-        if let Some(cdn_detection) = &result.detected_cdn {
-            println!(
-                "│ CDN: {:<20} Confidence: {:<6.1}%                    │",
-                cdn_detection.name,
-                cdn_detection.confidence * 100.0
-            );
-        } else {
-            println!("│ CDN: Not Detected                                                      │");
-        }
-
-        println!("├─────────────────────────────────────────────────────────────────────────┤");
-        println!(
-            "│ Detection Time: {:<8} ms                                          │",
-            result.detection_time_ms
-        );
-
-        if !result.evidence_map.is_empty() {
-            println!("├─────────────────────────────────────────────────────────────────────────┤");
-            println!("│ Evidence Summary:                                                       │");
-
-            for (provider_name, evidence_list) in &result.evidence_map {
-                if !evidence_list.is_empty() {
-                    println!(
-                        "│ • {:<20} Evidence Count: {:<3}                          │",
-                        provider_name,
-                        evidence_list.len()
-                    );
-
-                    for (i, evidence) in evidence_list.iter().enumerate() {
-                        if i < 3 {
-                            let desc = truncate_with_ellipsis(&evidence.description, 45);
-                            println!("│   - {:<45} ({:.0}%) │", desc, evidence.confidence * 100.0);
-                            if !evidence.raw_data.is_empty() && evidence.raw_data.len() <= 60 {
-                                println!("│     Data: {:<57} │", evidence.raw_data);
-                            }
-                        }
-                    }
-
-                    if evidence_list.len() > 3 {
-                        println!(
-                            "│   ... and {} more evidence items                             │",
-                            evidence_list.len() - 3
-                        );
-                    }
-                }
-            }
-        }
-
-        println!("└─────────────────────────────────────────────────────────────────────────┘");
-    }
-
-    fn print_debug_info(&self, result: &DetectionResult) {
-        println!("🐛 DEBUG INFO:");
-        println!(
-            "─────────────────────────────────────────────────────────────────────────────────────"
-        );
-        println!("URL: {}", result.url);
-        println!("Detection Time: {}ms", result.detection_time_ms);
-        println!(
-            "Timestamp: {}",
-            result.metadata.timestamp.format("%Y-%m-%d %H:%M:%S UTC")
-        );
-        println!();
-
-        println!("🔍 Provider Scores:");
-        if result.provider_scores.is_empty() {
-            println!("  No provider scores - no evidence found");
-        } else {
-            for (provider, score) in &result.provider_scores {
-                println!("  {}: {:.1}%", provider, score * 100.0);
-            }
-        }
-        println!();
-
-        println!("📝 Evidence Details:");
-        for (provider, evidence_list) in &result.evidence_map {
-            if !evidence_list.is_empty() {
-                println!("  {provider}:");
-                for (i, evidence) in evidence_list.iter().enumerate() {
-                    println!(
-                        "    {}. {} (Confidence: {:.1}%)",
-                        i + 1,
-                        evidence.description,
-                        evidence.confidence * 100.0
-                    );
-                    println!("       Method: {:?}", evidence.method_type);
-                    println!("       Data: {}", evidence.raw_data);
-                    println!("       Signature: {}", evidence.signature_matched);
-                }
-                println!();
-            }
-        }
-
-        if result.evidence_map.is_empty() {
-            println!("  No evidence found");
-            println!("  This means either:");
-            println!("    • No WAF/CDN is present");
-            println!("    • The site uses a WAF/CDN not supported by this tool");
-            println!("    • The WAF/CDN is configured to hide its presence");
-        }
-
-        println!(
-            "─────────────────────────────────────────────────────────────────────────────────────"
-        );
-        println!();
     }
 
     async fn list_providers(&self, engine: &DetectionEngine) -> Result<()> {
@@ -2749,8 +2427,7 @@ impl SimpleCliApp {
             config.min_length_diff = *value;
         }
 
-        let scope = crate::effectiveness::consent::ConsentManager::new();
-        let target = guard_target(&scope, url)?;
+        let target = resolve_authorized_target(url)?;
         let mut audit = AuditSession::new("effectiveness", &target, config.audit_logging)?;
         let mut test = EffectivenessTest::new(config).await?;
 
@@ -2849,8 +2526,7 @@ impl SimpleCliApp {
         })?;
 
         let normalized_url = self.normalize_url(url)?;
-        let scope = crate::effectiveness::consent::ConsentManager::new();
-        let target = guard_target(&scope, &normalized_url)?;
+        let target = resolve_authorized_target(&normalized_url)?;
         let mut audit = AuditSession::new("smoke_test", &target, true)?;
 
         // Parse custom headers
@@ -3337,7 +3013,7 @@ fn build_va2_subcommand() -> Command {
         .arg(
             Arg::new("run")
                 .long("run")
-                .help("Execute behavioral analysis (requires registered target scope)")
+                .help("Execute behavioral analysis")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -3399,7 +3075,7 @@ fn build_origin_probe_subcommand() -> Command {
         .about("Probe for WAF bypass via unprotected endpoints sharing origin IP")
         .arg(
             Arg::new("target")
-                .help("Target URL to probe (must be a registered consent scope)")
+                .help("Target URL to probe")
                 .required(true)
                 .index(1),
         )
@@ -3698,24 +3374,9 @@ The tool automatically adds https:// for bare domains where supported.
                 .requires("benchmark"),
         )
         .arg(
-            Arg::new("consent")
-                .long("consent")
-                .visible_alias("scope")
-                .help("Manage owned-target scope for active testing")
-                .value_name("COMMAND")
-                .num_args(0..),
-        )
-        .arg(
-            Arg::new("scope-internal")
-                .long("internal")
-                .help("Register scope entries as internal targets")
-                .action(clap::ArgAction::SetTrue)
-                .requires("consent"),
-        )
-        .arg(
             Arg::new("effectiveness")
                 .long("effectiveness")
-                .help("Run comprehensive WAF effectiveness testing (requires registered target scope)")
+                .help("Run comprehensive WAF effectiveness testing")
                 .value_name("URL")
                 .num_args(1),
         )
@@ -3774,7 +3435,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va2-run")
                 .long("va2-run")
-                .help("Execute behavioral analysis (requires registered target scope)")
+                .help("Execute behavioral analysis")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va2"),
         )
@@ -3835,7 +3496,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("posture-va2")
                 .long("posture-va2")
-                .help("Include behavioral analysis in posture report (requires registered target scope)")
+                .help("Include behavioral analysis in posture report")
                 .action(clap::ArgAction::SetTrue)
                 .requires("posture"),
         )
@@ -3849,7 +3510,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va")
                 .long("va")
-                .help("Run enforcement test — send attack payloads and measure block rates (requires registered target scope)")
+                .help("Run enforcement test — send attack payloads and measure block rates")
                 .value_name("URL")
                 .num_args(1),
         )
@@ -3996,7 +3657,6 @@ The tool automatically adds https:// for bare domains where supported.
             ArgGroup::new("exclusive-mode")
                 .args([
                     "list",
-                    "consent",
                     "benchmark",
                     "effectiveness",
                     "smoke-test",

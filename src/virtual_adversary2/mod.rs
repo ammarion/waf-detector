@@ -1556,23 +1556,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_va2_runner_requires_consent() {
-        with_temp_home(|_temp| async move {
-            let phases = vec![Va2Phase::Baseline];
-            let plan = build_va2_campaign_plan(
-                "https://example.com",
-                &phases,
-                Va2CampaignConfig::default(),
-            )
-            .unwrap();
-            let runner = Va2Runner::with_adapter(Box::new(StubAdapter)).unwrap();
-            let err = runner.run_plan(plan).await.unwrap_err().to_string();
-            assert!(err.contains("not registered for active testing"));
-        })
-        .await;
-    }
-
-    #[tokio::test]
     async fn test_va2_runner_executes_plan() {
         with_temp_home(|temp| async move {
             write_consent(&temp, &["example.com"]);

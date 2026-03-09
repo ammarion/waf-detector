@@ -189,3 +189,38 @@ impl Default for FortiWebProvider {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_fortiweb_x_fortiweb_nonce_header() {
+        let provider = FortiWebProvider::new();
+        let response = mock_response(200, [("x-fortiweb-nonce", "abc123")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence.is_empty());
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "fortiweb-nonce-header"));
+    }
+
+    #[tokio::test]
+    async fn detects_fortiweb_server_header() {
+        let provider = FortiWebProvider::new();
+        let response = mock_response(200, [("server", "FortiWeb")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "fortiweb-server-header"));
+    }
+
+    #[tokio::test]
+    async fn no_evidence_without_fortiweb_indicators() {
+        let provider = FortiWebProvider::new();
+        let response = mock_response(200, [("server", "nginx")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.is_empty());
+    }
+}

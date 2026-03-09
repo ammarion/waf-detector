@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use integration::{
     framework::{IntegrationTestCase, TestContext, TestResult, TestRunner},
     mock_server::MockServer,
-    utils::{parse_detection_results, run_detector_cli_async},
+    utils::{parse_detection_results, run_detector_cli_async, wait_for_server},
 };
 use std::time::Duration;
 
@@ -47,9 +47,10 @@ impl IntegrationTestCase for AwsCloudFrontTest {
         // CloudFront with S3 origin
         let mut response = integration::mock_server::MockResponse::default();
         response.status = 200;
-        response
-            .headers
-            .insert("x-amz-cf-id".to_string(), "ABC123DEF456==".to_string());
+        response.headers.insert(
+            "x-amz-cf-id".to_string(),
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string(),
+        );
         response
             .headers
             .insert("x-amz-cf-pop".to_string(), "DFW50-C1".to_string());
@@ -66,9 +67,10 @@ impl IntegrationTestCase for AwsCloudFrontTest {
         );
         server.mock_response("/s3-origin", response);
 
-        context.mock_server_url = Some(url);
+        context.mock_server_url = Some(url.clone());
         self.mock_server = Some(server);
 
+        wait_for_server(&url, 5).await?;
         Ok(())
     }
 
@@ -171,9 +173,10 @@ impl IntegrationTestCase for AwsWafTest {
         // AWS WAF with custom rule
         let mut response = integration::mock_server::MockResponse::default();
         response.status = 403;
-        response
-            .headers
-            .insert("x-amzn-requestid".to_string(), "1234567890".to_string());
+        response.headers.insert(
+            "x-amzn-requestid".to_string(),
+            "12345678-1234-5678-9abc-def012345678".to_string(),
+        );
         response.headers.insert(
             "x-amzn-errortype".to_string(),
             "AwsWafException".to_string(),
@@ -204,9 +207,10 @@ impl IntegrationTestCase for AwsWafTest {
         shield_response.body = r#"<Error><Code>RequestThrottled</Code><Message>AWS Shield has blocked this request</Message></Error>"#.to_string();
         server.mock_response("/shield", shield_response);
 
-        context.mock_server_url = Some(url);
+        context.mock_server_url = Some(url.clone());
         self.mock_server = Some(server);
 
+        wait_for_server(&url, 5).await?;
         Ok(())
     }
 
@@ -316,9 +320,10 @@ impl IntegrationTestCase for AwsLoadBalancerTest {
             .insert("server".to_string(), "AmazonEC2".to_string());
         server.mock_response("/elb", elb_response);
 
-        context.mock_server_url = Some(url);
+        context.mock_server_url = Some(url.clone());
         self.mock_server = Some(server);
 
+        wait_for_server(&url, 5).await?;
         Ok(())
     }
 

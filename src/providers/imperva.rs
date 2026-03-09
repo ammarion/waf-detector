@@ -265,3 +265,38 @@ impl Default for ImpervaProvider {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_imperva_x_iinfo_header() {
+        let provider = ImpervaProvider::new();
+        let response = mock_response(200, [("x-iinfo", "12345-67890-12345")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence.is_empty());
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "imperva-x-iinfo-header"));
+    }
+
+    #[tokio::test]
+    async fn detects_imperva_x_cdn_header() {
+        let provider = ImpervaProvider::new();
+        let response = mock_response(200, [("x-cdn", "Incapsula")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence
+            .iter()
+            .any(|e| e.signature_matched == "imperva-x-cdn-header"));
+    }
+
+    #[tokio::test]
+    async fn no_evidence_without_imperva_headers() {
+        let provider = ImpervaProvider::new();
+        let response = mock_response(200, [("server", "nginx")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.is_empty());
+    }
+}

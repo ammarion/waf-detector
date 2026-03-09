@@ -44,12 +44,19 @@ integration_test_report.txt
 *-posture.json
 *-effectiveness.txt
 waf-effectiveness-*.html
+waf-effectiveness-*.json
 tokui-*
+
+# Internal / company-specific — never commit to public repo
+**/WAF_ASSESSMENT_*.md
+adobe_urls.txt
+pattern_analysis/
+akamai-rules/
 
 # Captured traffic / live session artifacts
 *.har
 tests/fixtures/tokenizer_ui_mock*
 
-# Personal files
+# Personal files (resume, CV, etc.)
 Ammar_Alim_*
 *.pdf

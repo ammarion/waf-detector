@@ -1,8 +1,8 @@
 # WAF Detector
 
-A high-performance tool for detecting, testing, and profiling Web Application Firewalls (WAFs) and Content Delivery Networks (CDNs). Built for security engineers who need to validate their defensive infrastructure.
+CLI tool for detecting, testing, and profiling Web Application Firewalls (WAFs) and Content Delivery Networks (CDNs).
 
-> **Important:** Only use against systems you own or have explicit authorization to test. Unauthorized scanning may violate terms of service or laws in your jurisdiction.
+> **Important:** Only test systems you own or have explicit authorization to test.
 
 ## What It Does
 
@@ -18,45 +18,32 @@ A high-performance tool for detecting, testing, and profiling Web Application Fi
 ## Quick Start
 
 ```bash
-# Build
 cargo build --release
-
-# Detect WAF/CDN
-./target/release/waf-detect example.com
-
-# Run smoke test
-./target/release/waf-detect --scope init example.com
-./target/release/waf-detect --smoke-test example.com
-
-# Full posture report (detection + behavioral analysis)
-./target/release/waf-detect --posture example.com --posture-va2 --posture-json
+./target/release/waf-detect scan example.com
 
 # Full hardening scan + HTML report
 ./target/release/waf-detect hardening https://example.com --output /tmp/example-hardening.json
 ./target/release/waf-detect report /tmp/example-hardening.json --output /tmp/example-hardening.html
 ```
 
+## Commands
+
+| Mode | Command |
+|------|---------|
+| **Detection** | `waf-detect scan <url>` or `waf-detect <url>` |
+| **Smoke test** | `waf-detect --smoke-test <url>` |
+| **Enforcement** | `waf-detect va <url>` |
+| **Behavioral** | `waf-detect va2 <url> --run` |
+| **Posture** | `waf-detect --posture <url>` |
+| **Effectiveness** | `waf-detect --effectiveness <url>` |
+
 ## Detection
 
-Identifies WAF and CDN providers using HTTP headers, response bodies, DNS records, timing analysis, and TLS certificates.
-
-**Supported providers:** CloudFlare, AWS WAF, Akamai, Fastly, Vercel, Azure, F5 BIG-IP
+Identifies WAF/CDN via headers, body, DNS, TLS, and timing. **12 providers:** CloudFlare, AWS, Akamai, Fastly, Vercel, Azure, F5, Imperva, ModSecurity, Sucuri, Radware, FortiWeb.
 
 ```bash
-# Single URL
-./target/release/waf-detect example.com
-
-# Multiple URLs
-./target/release/waf-detect example.com google.com cloudflare.com
-
-# Batch from file
-./target/release/waf-detect @urls.txt
-
-# JSON output
-./target/release/waf-detect example.com --json
-
-# With payload-based analysis (adds detection signals)
-./target/release/waf-detect example.com --payload-analysis
+waf-detect scan example.com --json
+waf-detect scan @urls.txt --ndjson
 ```
 
 ## Smoke Test
@@ -239,23 +226,17 @@ Smoke test, payload analysis, enforcement, behavioral analysis, and effectivenes
 ./target/release/waf-detect example.com --debug --verbose
 ```
 
+**Output options:** `--json` / `--ndjson` / `--compact` / `--yaml` · `waf-detect providers` · `waf-detect doctor`
+
 ## Development
 
 ```bash
-# Build
-cargo build --release
-
-# Run tests
-cargo test --all
-
-# Lint
+cargo test --lib
 cargo clippy -- -D warnings
-
-# Format
 cargo fmt
 ```
 
-**Branch workflow:** `main` is protected. Use feature branches (`feature/name`) and pull requests.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for full details.
 
 ## License
 

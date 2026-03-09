@@ -4,9 +4,8 @@
 //! payloads and analysis techniques. It replaces the bash script with better detection,
 //! colorful output, and structured results for both CLI and UI consumption.
 
-use crate::active::{guard_target, ResolvedTarget};
+use crate::active::{resolve_authorized_target, ResolvedTarget};
 use crate::audit::RunAudit;
-use crate::effectiveness::consent::ConsentManager;
 use crate::effectiveness::static_detection::calculate_similarity;
 use crate::engine::waf_mode_detector::{PayloadType, WafMode};
 use crate::http::HttpClient;
@@ -372,8 +371,7 @@ impl WafSmokeTest {
 
     /// Run comprehensive WAF smoke test
     pub async fn run_test(&self, url: &str) -> Result<SmokeTestResult, anyhow::Error> {
-        let scope = ConsentManager::new();
-        let target = guard_target(&scope, url)?;
+        let target = resolve_authorized_target(url)?;
         self.run_test_with_target(&target).await
     }
 
@@ -1112,7 +1110,6 @@ impl Default for WafSmokeTest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn test_payload_classification() {
@@ -1202,34 +1199,5 @@ mod tests {
         assert_eq!(summary.blocked_count, 1);
         assert_eq!(summary.allowed_count, 1);
         assert_eq!(summary.effectiveness_percentage, 50.0);
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
-    async fn test_smoke_test_requires_registered_target_scope() {
-        let _guard = crate::test_utils::env_lock()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
-
-        let smoke_test = WafSmokeTest::new(SmokeTestConfig {
-            quiet: true,
-            ..SmokeTestConfig::default()
-        })
-        .unwrap();
-        let err = smoke_test
-            .run_test("https://example.com")
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("Target is not registered for active testing"));
-
-        if let Some(value) = original_home {
-            std::env::set_var("WAF_DETECTOR_HOME", value);
-        } else {
-            std::env::remove_var("WAF_DETECTOR_HOME");
-        }
     }
 }

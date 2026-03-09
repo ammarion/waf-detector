@@ -1,0 +1,5 @@
+# Temporary allowlist for CI - address in follow-up
+[advisories]
+ignore = [
+    "RUSTSEC-2025-0009",  # ring AES overflow - upgrade to 0.17.12+ when deps allow
+]

@@ -7,10 +7,10 @@ This document contains information for developers who want to contribute to the 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                    CLI Application                            │
-├──────────┬───────────┬──────────┬──────────┬─────────────────┤
-│   Scan   │ Enforce.  │ Behav.   │ Posture  │  TUI            │
-│ Command  │ Test (va) │ (va2)    │ Report   │  (--tui)        │
-├──────────┴───────────┴──────────┴──────────┴─────────────────┤
+├──────────┬───────────┬──────────┬──────────┤
+│   Scan   │ Enforce.  │ Behav.   │ Posture  │
+│ Command  │ Test (va) │ (va2)    │ Report   │
+├──────────┴───────────┴──────────┴──────────┤
 │                   Detection Engine                            │
 ├──────────────────┬──────────────────┬────────────────────────┤
 │ Provider Registry│ Confidence Engine│  HTTP Client            │

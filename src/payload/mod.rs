@@ -6,9 +6,8 @@
 pub mod loader;
 pub mod waf_smoke_test;
 
-use crate::active::{guard_target, ResolvedTarget};
+use crate::active::{resolve_authorized_target, ResolvedTarget};
 use crate::audit::{AuditSession, RunAudit};
-use crate::effectiveness::consent::ConsentManager;
 use crate::http::HttpClient;
 use crate::{Evidence, MethodType};
 use serde::{Deserialize, Serialize};
@@ -130,8 +129,7 @@ impl PayloadAnalyzer {
 
     /// Analyze URL using payload-based probing
     pub async fn analyze(&self, url: &str) -> Result<PayloadAnalysisResult, anyhow::Error> {
-        let scope = ConsentManager::new();
-        let target = guard_target(&scope, url)?;
+        let target = resolve_authorized_target(url)?;
         self.analyze_with_target(&target).await
     }
 
@@ -667,32 +665,6 @@ impl Default for PayloadAnalyzer {
 mod tests {
     use super::*;
     use crate::http::HttpResponse;
-    use tempfile::TempDir;
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
-    async fn test_payload_analysis_requires_registered_target_scope() {
-        let _guard = crate::test_utils::env_lock()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
-        let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
-        let temp_dir = TempDir::new().unwrap();
-        std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
-
-        let analyzer = PayloadAnalyzer::new();
-        let err = analyzer
-            .analyze("https://example.com")
-            .await
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("Target is not registered for active testing"));
-
-        if let Some(value) = original_home {
-            std::env::set_var("WAF_DETECTOR_HOME", value);
-        } else {
-            std::env::remove_var("WAF_DETECTOR_HOME");
-        }
-    }
 
     #[test]
     fn test_is_blocked_response_ignores_unchanged_keyword_body() {

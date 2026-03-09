@@ -156,6 +156,53 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
         method: "GET",
         body: None,
     });
+    // A-10: Method override
+    probes.push(Probe {
+        class: ProbeClass::SemanticDrift,
+        channel: ProbeChannel::Header,
+        description: "HTTP method override via header",
+        payload: "method-override-delete".to_string(),
+        headers: vec![
+            ("X-HTTP-Method-Override".to_string(), "DELETE".to_string()),
+            ("X-Method-Override".to_string(), "DELETE".to_string()),
+        ],
+        method: "GET",
+        body: None,
+    });
+    // A-11: Tab in path
+    probes.push(Probe {
+        class: ProbeClass::EncodingBoundary,
+        channel: ProbeChannel::Path,
+        description: "Tab character in path (CVE-2024-1019)",
+        payload: "/admin%09".to_string(),
+        headers: Vec::new(),
+        method: "GET",
+        body: None,
+    });
+    // A-12: %3f path confusion
+    probes.push(Probe {
+        class: ProbeClass::SemanticDrift,
+        channel: ProbeChannel::Path,
+        description: "Percent-encoded question mark path confusion",
+        payload: "/%3fadmin-path-confusion".to_string(),
+        headers: Vec::new(),
+        method: "GET",
+        body: None,
+    });
+    // A-13: Geolocation header spoof
+    probes.push(Probe {
+        class: ProbeClass::ProtocolMutation,
+        channel: ProbeChannel::Header,
+        description: "Geolocation header spoof",
+        payload: "geo-header-spoof".to_string(),
+        headers: vec![
+            ("CF-IPCountry".to_string(), "US".to_string()),
+            ("CloudFront-Viewer-Country".to_string(), "US".to_string()),
+            ("X-Country-Code".to_string(), "US".to_string()),
+        ],
+        method: "GET",
+        body: None,
+    });
 
     if tier >= 2 {
         probes.push(Probe {
@@ -286,6 +333,72 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
             method: "GET",
             body: None,
         });
+        // A-14: TE.TE obfuscation
+        probes.push(Probe {
+            class: ProbeClass::ParserAmbiguity,
+            channel: ProbeChannel::Header,
+            description: "TE.TE obfuscation with duplicate Transfer-Encoding headers",
+            payload: "te-te-obfuscation".to_string(),
+            headers: vec![
+                ("Transfer-Encoding".to_string(), "chunked".to_string()),
+                ("Transfer-encoding".to_string(), "cow".to_string()),
+            ],
+            method: "POST",
+            body: Some("0\r\n\r\n".to_string()),
+        });
+        // A-15: TE obs-fold
+        probes.push(Probe {
+            class: ProbeClass::ParserAmbiguity,
+            channel: ProbeChannel::Header,
+            description: "Transfer-Encoding obsolete whitespace folding",
+            payload: "te-obs-fold".to_string(),
+            headers: vec![("Transfer-Encoding".to_string(), " chunked".to_string())],
+            method: "POST",
+            body: Some("0\r\n\r\n".to_string()),
+        });
+        // A-16: Hex IP in XFF
+        probes.push(Probe {
+            class: ProbeClass::EncodingBoundary,
+            channel: ProbeChannel::Header,
+            description: "Hex-format IP in X-Forwarded-For",
+            payload: "xff-hex-ip".to_string(),
+            headers: vec![("X-Forwarded-For".to_string(), "0x7F000001".to_string())],
+            method: "GET",
+            body: None,
+        });
+        // A-17: IPv6-mapped IPv4 in XFF
+        probes.push(Probe {
+            class: ProbeClass::EncodingBoundary,
+            channel: ProbeChannel::Header,
+            description: "IPv6-mapped IPv4 loopback in X-Forwarded-For",
+            payload: "xff-ipv6-mapped".to_string(),
+            headers: vec![(
+                "X-Forwarded-For".to_string(),
+                "::ffff:127.0.0.1".to_string(),
+            )],
+            method: "GET",
+            body: None,
+        });
+        // A-18: Fat GET
+        probes.push(Probe {
+            class: ProbeClass::ParserAmbiguity,
+            channel: ProbeChannel::Body,
+            description: "GET request with body (fat GET)",
+            payload: "fat-get-body".to_string(),
+            headers: vec![("Content-Length".to_string(), "11".to_string())],
+            method: "GET",
+            body: Some("field1=test".to_string()),
+        });
+        // A-19: Prototype pollution in query
+        probes.push(Probe {
+            class: ProbeClass::SemanticDrift,
+            channel: ProbeChannel::Query,
+            description: "Prototype pollution keys in query string",
+            payload: "__proto__[x]=y".to_string(),
+            headers: Vec::new(),
+            method: "GET",
+            body: None,
+        });
     }
 
     if tier >= 3 {
@@ -327,6 +440,19 @@ pub fn probe_catalog_for_tier(tier: u8) -> Result<Vec<Probe>> {
             headers: vec![("X-Rate-Hint".to_string(), "1".to_string())],
             method: "GET",
             body: None,
+        });
+        // A-20: IBM037 charset declaration
+        probes.push(Probe {
+            class: ProbeClass::EncodingBoundary,
+            channel: ProbeChannel::Header,
+            description: "EBCDIC charset declaration (ibm037) to evade body inspection",
+            payload: "charset-ibm037".to_string(),
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/x-www-form-urlencoded; charset=ibm037".to_string(),
+            )],
+            method: "POST",
+            body: Some("field1=test".to_string()),
         });
     }
 
@@ -444,6 +570,57 @@ mod tests {
         let probes = probe_catalog_for_tier(2).unwrap();
         assert!(probes.iter().any(|p| p.payload == "h2c-upgrade-probe"));
         assert!(probes.iter().any(|p| p.payload == "ws-upgrade-probe"));
+    }
+
+    #[test]
+    fn tier1_has_method_override_probe() {
+        let probes = probe_catalog_for_tier(1).unwrap();
+        assert!(probes.iter().any(|p| p.payload == "method-override-delete"));
+    }
+
+    #[test]
+    fn tier1_has_path_confusion_probes() {
+        let probes = probe_catalog_for_tier(1).unwrap();
+        assert!(probes.iter().any(|p| p.payload == "/admin%09"));
+        assert!(probes
+            .iter()
+            .any(|p| p.payload == "/%3fadmin-path-confusion"));
+    }
+
+    #[test]
+    fn tier1_has_geolocation_spoof_probe() {
+        let probes = probe_catalog_for_tier(1).unwrap();
+        assert!(probes.iter().any(|p| p.payload == "geo-header-spoof"));
+    }
+
+    #[test]
+    fn tier2_has_te_obfuscation_probes() {
+        let probes = probe_catalog_for_tier(2).unwrap();
+        assert!(probes.iter().any(|p| p.payload == "te-te-obfuscation"));
+        assert!(probes.iter().any(|p| p.payload == "te-obs-fold"));
+    }
+
+    #[test]
+    fn tier2_has_hex_ip_probes() {
+        let probes = probe_catalog_for_tier(2).unwrap();
+        assert!(probes.iter().any(|p| p.payload == "xff-hex-ip"));
+        assert!(probes.iter().any(|p| p.payload == "xff-ipv6-mapped"));
+    }
+
+    #[test]
+    fn tier2_has_fat_get_probe() {
+        let probes = probe_catalog_for_tier(2).unwrap();
+        let fat = probes.iter().find(|p| p.payload == "fat-get-body");
+        assert!(fat.is_some());
+        let fat = fat.unwrap();
+        assert_eq!(fat.method, "GET");
+        assert!(fat.body.is_some());
+    }
+
+    #[test]
+    fn tier3_has_ibm037_probe() {
+        let probes = probe_catalog_for_tier(3).unwrap();
+        assert!(probes.iter().any(|p| p.payload == "charset-ibm037"));
     }
 
     #[test]
