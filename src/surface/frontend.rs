@@ -78,9 +78,9 @@ fn collect_repo_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 
 fn language_for_path(path: &Path) -> Option<tree_sitter::Language> {
     match path.extension().and_then(|ext| ext.to_str()) {
-        Some("js") | Some("jsx") => Some(tree_sitter_javascript::language()),
-        Some("ts") => Some(tree_sitter_typescript::language_typescript()),
-        Some("tsx") => Some(tree_sitter_typescript::language_tsx()),
+        Some("js") | Some("jsx") => Some(tree_sitter_javascript::LANGUAGE.into()),
+        Some("ts") => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+        Some("tsx") => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
         _ => None,
     }
 }
