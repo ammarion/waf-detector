@@ -4,6 +4,8 @@ CLI tool for detecting, testing, and profiling Web Application Firewalls (WAFs) 
 
 > **Important:** Only test systems you own or have explicit authorization to test.
 
+**For AI coding agents:** See [AGENTS.md](AGENTS.md) for skill mapping and workflow pointers. Use `agent-skills/waf-assess/WORKFLOW.md` for full assessments; use `agent-skills/validate-build/WORKFLOW.md` before merge.
+
 ## What It Does
 
 | Mode | What it tests | Flag |
@@ -31,11 +33,14 @@ cargo build --release
 | Mode | Command |
 |------|---------|
 | **Detection** | `waf-detect scan <url>` or `waf-detect <url>` |
+| **Hardening** | `waf-detect hardening <url> --output file.json` |
 | **Smoke test** | `waf-detect --smoke-test <url>` |
 | **Enforcement** | `waf-detect va <url>` |
 | **Behavioral** | `waf-detect va2 <url> --run` |
 | **Posture** | `waf-detect --posture <url>` |
 | **Effectiveness** | `waf-detect --effectiveness <url>` |
+| **Origin probe** | `waf-detect origin-probe <url> --json` |
+| **HTML report** | `waf-detect report <file.json> -o <file.html>` |
 
 ## Detection
 
