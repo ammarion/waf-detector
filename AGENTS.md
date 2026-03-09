@@ -22,7 +22,7 @@ If a wrapper and a shared workflow disagree, follow the shared workflow and fix 
 
 ## Mapping
 
-- Full scan pipeline, detection, smoke, effectiveness, enforcement, behavioral review, and posture reporting:
+- Full scan pipeline, detection, smoke, effectiveness, enforcement, behavioral review, posture reporting, and HTML report rendering:
   `agent-skills/waf-assess/WORKFLOW.md`
 - CLI health checks and shell completion setup:
   `agent-skills/cli-doctor/WORKFLOW.md`

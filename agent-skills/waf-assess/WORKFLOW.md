@@ -18,7 +18,7 @@ Use this workflow when the user wants an end-to-end WAF assessment, not just a s
 
 1. Build or confirm the binary
 2. Run doctor
-3. Check consent and target authorization
+3. Check consent: `./target/release/waf-detect --scope`; use `--scope init <domain>` to register targets
 4. Run detection
 5. Run smoke testing
 6. Run effectiveness testing when the user wants deeper validation
@@ -89,6 +89,7 @@ Extract:
 
 ```bash
 ./target/release/waf-detect --effectiveness <url>
+./target/release/waf-detect --effectiveness <url> --effectiveness-output report.json
 ./target/release/waf-detect --effectiveness <url> --effectiveness-config <path/to/config.toml>
 ```
 
@@ -126,7 +127,7 @@ Use when the user wants channel coverage, statefulness, challenge behavior, rate
 
 Use when the user wants one final protection summary instead of raw per-command output.
 
-### 10. HTML Report Rendering
+### 9. HTML Report Rendering
 
 ```bash
 ./target/release/waf-detect report <saved-report.json>
