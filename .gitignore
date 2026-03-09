@@ -50,6 +50,7 @@ tokui-*
 **/WAF_ASSESSMENT_*.md
 adobe_urls.txt
 pattern_analysis/
+akamai-rules/
 
 # Captured traffic / live session artifacts
 *.har

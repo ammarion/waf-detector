@@ -36,7 +36,7 @@
       "detection_time_ms": 115,
       "error": null
     },
-    "https://adobe.com": {
+    "https://example.com": {
       "detected_waf": "Akamai",
       "detected_cdn": "Akamai",
       "detection_time_ms": 122,
