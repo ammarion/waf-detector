@@ -3,6 +3,7 @@
 //! This module handles the generation of comprehensive reports from effectiveness testing.
 
 use crate::audit::RunAudit;
+use crate::effectiveness::static_detection::StaticPageAnalysis;
 use crate::effectiveness::TestResult;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,9 @@ pub struct EffectivenessReport {
     /// Parser discrepancy candidate bypass summary
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parser_discrepancy: Option<ParserDiscrepancySummary>,
+    /// Static page / endpoint suitability analysis captured before active testing
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_page_analysis: Option<StaticPageAnalysis>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audit: Option<RunAudit>,
 }
@@ -133,6 +137,7 @@ impl EffectivenessReport {
                 false_positive_rate: 0.0,
             },
             parser_discrepancy: None,
+            static_page_analysis: None,
             audit: None,
         }
     }
@@ -164,22 +169,45 @@ impl EffectivenessReport {
         self.recommendations.push(recommendation);
     }
 
+    pub fn actionable_test_count(&self) -> usize {
+        self.statistics.blocked_requests + self.statistics.allowed_requests
+    }
+
+    pub fn degraded_test_count(&self) -> usize {
+        self.statistics.error_responses
+    }
+
+    pub fn baseline_all_degraded(&self) -> bool {
+        !self.baseline_results.is_empty()
+            && self
+                .baseline_results
+                .values()
+                .all(crate::effectiveness::TestResult::is_degraded)
+    }
+
+    pub fn has_static_target_hint(&self) -> bool {
+        self.static_page_analysis
+            .as_ref()
+            .map(|analysis| analysis.is_likely_static)
+            .unwrap_or(false)
+            || self.recommendations.iter().any(|rec| {
+                rec.category == "Parameter Processing"
+                    || rec
+                        .description
+                        .contains("Server returns identical responses regardless of parameters")
+            })
+    }
+
     /// Add a test result
     pub fn add_test_result(&mut self, name: String, result: TestResult) {
         self.statistics.total_tests += 1;
 
-        if result.status_code == 0 {
+        if result.is_degraded() {
             self.statistics.error_responses += 1;
+        } else if result.blocked {
+            self.statistics.blocked_requests += 1;
         } else {
-            if result.blocked {
-                self.statistics.blocked_requests += 1;
-            } else {
-                self.statistics.allowed_requests += 1;
-            }
-
-            if result.status_code >= 500 {
-                self.statistics.error_responses += 1;
-            }
+            self.statistics.allowed_requests += 1;
         }
 
         self.test_results.insert(name, result);
@@ -195,8 +223,9 @@ impl EffectivenessReport {
     /// Recalculate risk score based on vulnerabilities and block rate
     fn recalculate_risk_score(&mut self) {
         // Base risk score calculation based on block rate
-        let block_rate = if self.statistics.total_tests > 0 {
-            self.statistics.blocked_requests as f64 / self.statistics.total_tests as f64
+        let actionable_tests = self.actionable_test_count();
+        let block_rate = if actionable_tests > 0 {
+            self.statistics.blocked_requests as f64 / actionable_tests as f64
         } else {
             0.0
         };
@@ -248,18 +277,34 @@ impl EffectivenessReport {
         summary.push_str(&format!("**Risk Score:** {:.1}/100\n\n", self.risk_score));
 
         // Statistics
+        let actionable_tests = self.actionable_test_count();
+        let blocked_pct = if actionable_tests > 0 {
+            (self.statistics.blocked_requests as f64 / actionable_tests as f64) * 100.0
+        } else {
+            0.0
+        };
+        let allowed_pct = if actionable_tests > 0 {
+            (self.statistics.allowed_requests as f64 / actionable_tests as f64) * 100.0
+        } else {
+            0.0
+        };
         summary.push_str("## Statistics\n");
         summary.push_str(&format!("- Total Tests: {}\n", self.statistics.total_tests));
+        summary.push_str(&format!("- Actionable Tests: {}\n", actionable_tests));
         summary.push_str(&format!(
             "- Blocked: {} ({:.1}%)\n",
-            self.statistics.blocked_requests,
-            (self.statistics.blocked_requests as f64 / self.statistics.total_tests as f64) * 100.0
+            self.statistics.blocked_requests, blocked_pct
         ));
         summary.push_str(&format!(
             "- Allowed: {} ({:.1}%)\n",
-            self.statistics.allowed_requests,
-            (self.statistics.allowed_requests as f64 / self.statistics.total_tests as f64) * 100.0
+            self.statistics.allowed_requests, allowed_pct
         ));
+        if self.statistics.error_responses > 0 {
+            summary.push_str(&format!(
+                "- Degraded / Error Responses: {}\n",
+                self.statistics.error_responses
+            ));
+        }
         summary.push_str(&format!(
             "- Avg Response Time: {:.0}ms\n",
             self.statistics.average_response_time_ms
@@ -325,6 +370,41 @@ impl EffectivenessReport {
                 summary.push_str(&format!("- Top Classes: {rendered}\n"));
             }
 
+            summary.push('\n');
+        }
+
+        if let Some(static_analysis) = &self.static_page_analysis {
+            summary.push_str("## Target Suitability\n");
+            summary.push_str(&format!(
+                "- Likely Static: {}\n",
+                if static_analysis.is_likely_static {
+                    "yes"
+                } else {
+                    "no"
+                }
+            ));
+            summary.push_str(&format!(
+                "- Confidence: {:.0}%\n",
+                static_analysis.confidence * 100.0
+            ));
+            if !static_analysis.indicators.is_empty() {
+                summary.push_str("- Indicators:\n");
+                for indicator in &static_analysis.indicators {
+                    summary.push_str(&format!(
+                        "  - {}\n",
+                        render_static_indicator_summary(indicator)
+                    ));
+                }
+            }
+            if !static_analysis.suggestions.is_empty() {
+                summary.push_str("- Suggested endpoints:\n");
+                for suggestion in static_analysis.suggestions.iter().take(5) {
+                    summary.push_str(&format!(
+                        "  - {} ({})\n",
+                        suggestion.endpoint, suggestion.description
+                    ));
+                }
+            }
             summary.push('\n');
         }
 
@@ -483,5 +563,36 @@ impl EffectivenessReport {
 
         html.push_str("</div></body></html>");
         html
+    }
+}
+
+fn render_static_indicator_summary(
+    indicator: &crate::effectiveness::static_detection::StaticIndicator,
+) -> String {
+    match indicator {
+        crate::effectiveness::static_detection::StaticIndicator::CacheHeaders { header, value } => {
+            format!("Long cache duration: {header} = {value}")
+        }
+        crate::effectiveness::static_detection::StaticIndicator::CdnDetected {
+            provider,
+            header,
+        } => format!("CDN detected: {provider} via {header}"),
+        crate::effectiveness::static_detection::StaticIndicator::StaticContentType {
+            content_type,
+        } => format!("Static content type: {content_type}"),
+        crate::effectiveness::static_detection::StaticIndicator::NoServerHeaders => {
+            "No dynamic server processing headers found".to_string()
+        }
+        crate::effectiveness::static_detection::StaticIndicator::IdenticalResponses {
+            similarity_percentage,
+        } => format!(
+            "Identical responses to parameter changes ({similarity_percentage:.1}% similar)"
+        ),
+        crate::effectiveness::static_detection::StaticIndicator::StaticFileExtension {
+            extension,
+        } => format!("Static file extension: {extension}"),
+        crate::effectiveness::static_detection::StaticIndicator::StaticHostingPlatform {
+            platform,
+        } => format!("Static hosting platform: {platform}"),
     }
 }

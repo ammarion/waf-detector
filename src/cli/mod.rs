@@ -211,6 +211,7 @@ fn completion_global_options() -> &'static [&'static str] {
         "--benchmark-fixtures",
         "--effectiveness",
         "--effectiveness-config",
+        "--effectiveness-output",
         "--effectiveness-similarity-threshold",
         "--effectiveness-reduction-ratio",
         "--effectiveness-min-length-diff",
@@ -1040,6 +1041,11 @@ impl SimpleCliApp {
             }
             "completions" => {
                 self.run_completions_subcommand(matches)?;
+                self.write_perf_report_if_requested(matches)?;
+                Ok(())
+            }
+            "report" => {
+                self.run_report_subcommand(matches)?;
                 self.write_perf_report_if_requested(matches)?;
                 Ok(())
             }
@@ -1901,6 +1907,17 @@ impl SimpleCliApp {
         run_completions_command(matches)
     }
 
+    fn run_report_subcommand(&self, matches: &ArgMatches) -> Result<()> {
+        let input = matches
+            .get_one::<String>("input")
+            .ok_or_else(|| anyhow!("report requires an input JSON file"))?;
+        let output = matches.get_one::<String>("output").map(PathBuf::from);
+        let input_path = PathBuf::from(input);
+        let rendered = crate::reporting::render_report_file(&input_path, output.as_deref())?;
+        println!("HTML report saved to: {}", rendered.display());
+        Ok(())
+    }
+
     async fn run_origin_probe_subcommand(&self, matches: &ArgMatches) -> Result<()> {
         let target = matches
             .get_one::<String>("target")
@@ -2430,6 +2447,13 @@ impl SimpleCliApp {
 
         // Display results
         println!("\n{}", report.generate_summary());
+
+        if let Some(path) = matches.get_one::<String>("effectiveness-output") {
+            audit.record_artifact_written(path)?;
+            report.audit = Some(audit.snapshot());
+            std::fs::write(path, report.to_json()?)?;
+            println!("\n📁 Effectiveness report saved to: {path}");
+        }
 
         // Save report if high risk
         if report.risk_score > 50.0 {
@@ -3119,6 +3143,24 @@ fn build_completions_subcommand() -> Command {
         )
 }
 
+fn build_report_subcommand() -> Command {
+    Command::new("report")
+        .about("Render a saved JSON scan report to standalone HTML")
+        .arg(
+            Arg::new("input")
+                .help("Path to a saved JSON report")
+                .value_name("INPUT")
+                .required(true),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .short('o')
+                .help("Write HTML to a specific file (defaults next to input)")
+                .value_name("FILE"),
+        )
+}
+
 pub fn build_simple_cli() -> Command {
     Command::new("waf-detect")
         .version("0.1.0")
@@ -3138,6 +3180,7 @@ MODERN COMMANDS (recommended):
   waf-detect benchmark benchmark_corpus.json --workers 8
   waf-detect providers
   waf-detect doctor
+  waf-detect report ./scan-report.json -o ./scan-report.html
   waf-detect completions zsh -o ~/.zsh/completions/_waf-detect
 
 LEGACY FLAG MODE (still supported):
@@ -3157,6 +3200,7 @@ The tool automatically adds https:// for bare domains where supported.
         .subcommand(build_benchmark_subcommand())
         .subcommand(build_providers_subcommand())
         .subcommand(build_doctor_subcommand())
+        .subcommand(build_report_subcommand())
         .subcommand(build_completions_subcommand())
         .subcommand(build_origin_probe_subcommand())
         .arg(
@@ -3340,6 +3384,13 @@ The tool automatically adds https:// for bare domains where supported.
             Arg::new("effectiveness-config")
                 .long("effectiveness-config")
                 .help("Path to TOML config overrides for effectiveness testing")
+                .value_name("FILE")
+                .requires("effectiveness"),
+        )
+        .arg(
+            Arg::new("effectiveness-output")
+                .long("effectiveness-output")
+                .help("Write the effectiveness report JSON to a file")
                 .value_name("FILE")
                 .requires("effectiveness"),
         )

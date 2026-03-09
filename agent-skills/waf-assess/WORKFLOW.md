@@ -18,11 +18,13 @@ Use this workflow when the user wants an end-to-end WAF assessment, not just a s
 
 1. Build or confirm the binary
 2. Run doctor
-3. Run detection
-4. Run smoke testing
-5. Run effectiveness testing when the user wants deeper validation
-6. Run enforcement and behavioral testing only when the user explicitly wants them
-7. Generate a posture-style summary
+3. Check consent and target authorization
+4. Run detection
+5. Run smoke testing
+6. Run effectiveness testing when the user wants deeper validation
+7. Run enforcement and behavioral testing only when the user explicitly wants them
+8. Generate a posture-style summary
+9. Render a shareable HTML report when the user wants an artifact
 
 ## Commands
 
@@ -124,6 +126,15 @@ Use when the user wants channel coverage, statefulness, challenge behavior, rate
 
 Use when the user wants one final protection summary instead of raw per-command output.
 
+### 10. HTML Report Rendering
+
+```bash
+./target/release/waf-detect report <saved-report.json>
+./target/release/waf-detect report <saved-report.json> --output <report.html>
+```
+
+Use when the user wants a polished, shareable artifact from a saved JSON report. Prefer this over any terminal-only review flow.
+
 ## Output Expectations
 
 Produce a concise report with:
@@ -136,6 +147,7 @@ Produce a concise report with:
 - Optional enforcement summary
 - Optional behavioral summary
 - Final posture and remediation notes
+- HTML report path when one was generated
 
 ## Remediation Guidance
 
