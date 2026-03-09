@@ -14,7 +14,6 @@ pub mod registry;
 #[cfg(feature = "legacy-script-executor")]
 pub mod script_executor;
 pub mod surface;
-pub mod utils;
 
 #[cfg(test)]
 mod test_utils;

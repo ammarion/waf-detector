@@ -129,7 +129,10 @@ impl MockServer {
     /// Mock AWS CloudFront response
     pub fn mock_aws_cloudfront(&self, path: &str) {
         let mut headers = HashMap::new();
-        headers.insert("x-amz-cf-id".to_string(), "EXAMPLE-ID123".to_string());
+        headers.insert(
+            "x-amz-cf-id".to_string(),
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890".to_string(),
+        );
         headers.insert("x-amz-cf-pop".to_string(), "DFW50-C1".to_string());
         headers.insert("x-cache".to_string(), "Hit from cloudfront".to_string());
         headers.insert(
@@ -208,7 +211,10 @@ impl MockServer {
 </html>"#
             }
             "aws" => {
-                headers.insert("x-amzn-requestid".to_string(), "123456789".to_string());
+                headers.insert(
+                    "x-amzn-requestid".to_string(),
+                    "12345678-1234-5678-9abc-def012345678".to_string(),
+                );
                 r#"<!DOCTYPE html>
 <html>
 <head><title>403 Forbidden</title></head>

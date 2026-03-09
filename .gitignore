@@ -56,6 +56,6 @@ akamai-rules/
 *.har
 tests/fixtures/tokenizer_ui_mock*
 
-# Personal files
+# Personal files (resume, CV, etc.)
 Ammar_Alim_*
 *.pdf

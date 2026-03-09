@@ -202,11 +202,7 @@ mod tests {
     #[tokio::test]
     async fn detects_radware_cookie() {
         let provider = RadwareProvider::new();
-        let response = mock_response(
-            200,
-            [("set-cookie", "rdwl_SID=abc123; path=/")],
-            "",
-        );
+        let response = mock_response(200, [("set-cookie", "rdwl_SID=abc123; path=/")], "");
         let evidence = provider.passive_detect(&response).await.unwrap();
         assert!(evidence
             .iter()

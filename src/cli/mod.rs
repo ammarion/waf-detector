@@ -5,7 +5,6 @@ use crate::active::{
     OPERATOR_ID_ENV,
 };
 use crate::audit::AuditSession;
-use crate::effectiveness::consent::TargetClass;
 use crate::engine::DetectionEngine;
 use crate::hardening::{
     CiGateMode, HardeningConfig, HardeningOrchestrator, RegressionRunner, VendorMode,
@@ -210,9 +209,6 @@ fn completion_global_options() -> &'static [&'static str] {
         "--benchmark-workers",
         "--benchmark-mode",
         "--benchmark-fixtures",
-        "--scope",
-        "--consent",
-        "--internal",
         "--effectiveness",
         "--effectiveness-config",
         "--effectiveness-similarity-threshold",
@@ -648,17 +644,6 @@ impl SimpleCliApp {
             return self.list_providers(&engine).await;
         }
 
-        // Handle target scope command
-        if let Some(consent_args) = matches.get_many::<String>("consent") {
-            let args: Vec<String> = consent_args.cloned().collect();
-            let target_class = if matches.get_flag("scope-internal") {
-                TargetClass::Internal
-            } else {
-                TargetClass::Public
-            };
-            return crate::effectiveness::consent::manage_consent_cli(args, target_class);
-        }
-
         // Handle benchmark evaluation
         if let Some(corpus_path) = matches.get_one::<String>("benchmark") {
             let result = self.run_benchmark(&engine, corpus_path, &matches).await;
@@ -958,7 +943,6 @@ impl SimpleCliApp {
             ("--list", matches.get_flag("list")),
             ("--smoke-test", matches.get_flag("smoke-test")),
             ("--va-schema", matches.get_flag("va-schema")),
-            ("--consent", matches.get_many::<String>("consent").is_some()),
             (
                 "--benchmark",
                 matches.get_one::<String>("benchmark").is_some(),
@@ -1774,34 +1758,6 @@ impl SimpleCliApp {
             ),
         }
 
-        let consent_manager = crate::effectiveness::consent::ConsentManager::new();
-        match consent_manager.status() {
-            Ok(status) => {
-                if status.has_consent {
-                    push_check(
-                        "consent_status",
-                        DoctorStatus::Pass,
-                        format!(
-                            "active target scope configured (targets={})",
-                            status.authorized_targets.len()
-                        ),
-                    );
-                } else {
-                    push_check(
-                        "consent_status",
-                        DoctorStatus::Warn,
-                        "no active target scope configured (required for smoke/payload/enforcement/behavioral/effectiveness tests)"
-                            .to_string(),
-                    );
-                }
-            }
-            Err(err) => push_check(
-                "consent_status",
-                DoctorStatus::Fail,
-                format!("failed to load target scope status: {err}"),
-            ),
-        }
-
         if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
             push_check(
                 "tls_mode",
@@ -2006,7 +1962,6 @@ impl SimpleCliApp {
     fn validate_matches(&self, matches: &ArgMatches) -> Result<()> {
         let modes = [
             ("--list", matches.get_flag("list")),
-            ("--consent", matches.get_many::<String>("consent").is_some()),
             (
                 "--benchmark",
                 matches.get_one::<String>("benchmark").is_some(),
@@ -3034,7 +2989,7 @@ fn build_va2_subcommand() -> Command {
         .arg(
             Arg::new("run")
                 .long("run")
-                .help("Execute behavioral analysis (requires registered target scope)")
+                .help("Execute behavioral analysis")
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
@@ -3096,7 +3051,7 @@ fn build_origin_probe_subcommand() -> Command {
         .about("Probe for WAF bypass via unprotected endpoints sharing origin IP")
         .arg(
             Arg::new("target")
-                .help("Target URL to probe (must be a registered consent scope)")
+                .help("Target URL to probe")
                 .required(true)
                 .index(1),
         )
@@ -3375,24 +3330,9 @@ The tool automatically adds https:// for bare domains where supported.
                 .requires("benchmark"),
         )
         .arg(
-            Arg::new("consent")
-                .long("consent")
-                .visible_alias("scope")
-                .help("Manage owned-target scope for active testing")
-                .value_name("COMMAND")
-                .num_args(0..),
-        )
-        .arg(
-            Arg::new("scope-internal")
-                .long("internal")
-                .help("Register scope entries as internal targets")
-                .action(clap::ArgAction::SetTrue)
-                .requires("consent"),
-        )
-        .arg(
             Arg::new("effectiveness")
                 .long("effectiveness")
-                .help("Run comprehensive WAF effectiveness testing (requires registered target scope)")
+                .help("Run comprehensive WAF effectiveness testing")
                 .value_name("URL")
                 .num_args(1),
         )
@@ -3444,7 +3384,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va2-run")
                 .long("va2-run")
-                .help("Execute behavioral analysis (requires registered target scope)")
+                .help("Execute behavioral analysis")
                 .action(clap::ArgAction::SetTrue)
                 .requires("va2"),
         )
@@ -3505,7 +3445,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("posture-va2")
                 .long("posture-va2")
-                .help("Include behavioral analysis in posture report (requires registered target scope)")
+                .help("Include behavioral analysis in posture report")
                 .action(clap::ArgAction::SetTrue)
                 .requires("posture"),
         )
@@ -3519,7 +3459,7 @@ The tool automatically adds https:// for bare domains where supported.
         .arg(
             Arg::new("va")
                 .long("va")
-                .help("Run enforcement test — send attack payloads and measure block rates (requires registered target scope)")
+                .help("Run enforcement test — send attack payloads and measure block rates")
                 .value_name("URL")
                 .num_args(1),
         )
@@ -3666,7 +3606,6 @@ The tool automatically adds https:// for bare domains where supported.
             ArgGroup::new("exclusive-mode")
                 .args([
                     "list",
-                    "consent",
                     "benchmark",
                     "effectiveness",
                     "smoke-test",

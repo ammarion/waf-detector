@@ -140,20 +140,6 @@ fn test_active_target_profile_parses_on_subcommand() {
 }
 
 #[test]
-fn test_scope_internal_flag_parses() {
-    let matches = build_simple_cli()
-        .try_get_matches_from([
-            "waf-detect",
-            "--scope",
-            "init",
-            "internal.example.com",
-            "--internal",
-        ])
-        .expect("scope internal flag should parse");
-    assert!(matches.get_flag("scope-internal"));
-}
-
-#[test]
 fn test_va2_cli_defaults() {
     let cmd = build_simple_cli();
     let matches = cmd
@@ -287,32 +273,6 @@ async fn test_scan_only_flags_rejected_in_special_modes() {
         .await
         .expect_err("runtime validation should reject scan-only flags in special mode");
     assert!(err.to_string().contains("Scan-only flags"));
-}
-
-#[tokio::test]
-async fn test_payload_analysis_requires_registered_scope() {
-    let original_home = std::env::var("WAF_DETECTOR_HOME").ok();
-    let temp_dir = tempfile::TempDir::new().expect("temp dir should be created");
-    std::env::set_var("WAF_DETECTOR_HOME", temp_dir.path());
-
-    let app = SimpleCliApp::new().await.expect("app should initialize");
-    let matches = build_simple_cli()
-        .try_get_matches_from(["waf-detect", "example.com", "--payload-analysis"])
-        .expect("arguments should parse");
-
-    let err = app
-        .run_with_matches(matches)
-        .await
-        .expect_err("payload analysis should fail without registered scope");
-    assert!(err
-        .to_string()
-        .contains("not allowed for active payload analysis"));
-
-    if let Some(value) = original_home {
-        std::env::set_var("WAF_DETECTOR_HOME", value);
-    } else {
-        std::env::remove_var("WAF_DETECTOR_HOME");
-    }
 }
 
 #[tokio::test]
