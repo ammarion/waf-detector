@@ -369,12 +369,14 @@ impl EffectivenessTest {
         self.resolved_target = Some(target.clone());
 
         // Check if target appears to be serving static content
+        let mut report = EffectivenessReport::new(&target.normalized_url);
         let parser_discrepancy_static_or_ambiguous =
             match analyze_static_page(&target.normalized_url).await {
                 Ok(analysis) => {
                     if analysis.is_likely_static {
                         warn!("{}", format_static_page_warning(&analysis));
                     }
+                    report.static_page_analysis = Some(analysis.clone());
                     analysis.is_likely_static
                 }
                 Err(e) => {
@@ -382,8 +384,6 @@ impl EffectivenessTest {
                     true
                 }
             };
-
-        let mut report = EffectivenessReport::new(&target.normalized_url);
 
         // Phase 1: Baseline testing (benign requests)
         report.add_phase("Baseline Testing".to_string());
@@ -507,7 +507,7 @@ impl EffectivenessTest {
             let result = self.apply_technique(url, &technique).await?;
 
             // Record vulnerability if WAF failed to block
-            if !result.blocked {
+            if result.is_actionable_allow() {
                 report.add_vulnerability(Vulnerability {
                     severity: technique.severity,
                     category: technique.category.clone(),
@@ -581,7 +581,7 @@ impl EffectivenessTest {
 
             let result = self.apply_technique(url, &technique).await?;
 
-            if !result.blocked {
+            if result.is_actionable_allow() {
                 report.add_vulnerability(Vulnerability {
                     severity: "HIGH".to_string(),
                     category: "Evasion".to_string(),
@@ -742,6 +742,12 @@ impl EffectivenessTest {
                             reasons.join("; "),
                             &response_text.chars().take(200).collect::<String>()
                         )
+                    } else if status_code >= 500 {
+                        format!(
+                            "Edge error response: HTTP {} | Sample: {}",
+                            status_code,
+                            &response_text.chars().take(200).collect::<String>()
+                        )
                     } else {
                         "Request allowed".to_string()
                     },
@@ -838,7 +844,7 @@ impl EffectivenessTest {
         }
 
         // Specific check for "Monitoring Mode" (WAF present but not blocking)
-        if report.statistics.blocked_requests == 0 && report.statistics.total_tests > 0 {
+        if report.statistics.blocked_requests == 0 && report.actionable_test_count() > 0 {
             report.add_recommendation(Recommendation {
                 priority: "CRITICAL".to_string(),
                 category: "WAF Mode".to_string(),
@@ -953,6 +959,35 @@ pub struct TestResult {
     pub response_body_sample: String,
     pub response_body_length: usize,
     pub response_headers: HashMap<String, String>,
+}
+
+impl TestResult {
+    pub fn is_transport_error(&self) -> bool {
+        self.status_code == 0
+    }
+
+    pub fn is_status_only_block(&self) -> bool {
+        self.blocked
+            && self.evidence.contains("Blocking status code:")
+            && !self.evidence.contains("Blocking keyword detected:")
+            && !self.evidence.contains("Block page template match:")
+            && !self.evidence.contains("Blocking header detected:")
+            && !self
+                .evidence
+                .contains("Response body deviates significantly")
+    }
+
+    pub fn is_edge_error(&self) -> bool {
+        self.status_code >= 500 && (!self.blocked || self.is_status_only_block())
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        self.is_transport_error() || self.is_edge_error()
+    }
+
+    pub fn is_actionable_allow(&self) -> bool {
+        !self.blocked && !self.is_degraded()
+    }
 }
 
 #[async_trait::async_trait]

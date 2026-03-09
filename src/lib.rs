@@ -32,6 +32,7 @@ pub mod tls;
 pub mod effectiveness;
 pub mod origin_probe;
 pub mod posture;
+pub mod reporting;
 pub mod virtual_adversary;
 pub mod virtual_adversary2;
 

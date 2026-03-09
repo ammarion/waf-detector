@@ -13,7 +13,7 @@ A high-performance tool for detecting, testing, and profiling Web Application Fi
 | **Enforcement Test** | Sends categorized attack probes, measures block/challenge/allow | `--va <url>` |
 | **Behavioral Analysis** | Paired probes testing WAF sophistication across 5 channels | `--va2 <url> --va2-run` |
 | **Posture Report** | Unified grade (A-F) combining all test results | `--posture <url>` |
-| **TUI** | Interactive terminal dashboard with live scan results | `--tui <url>` |
+| **HTML Report** | Renders saved JSON results into a shareable static report | `report <file.json>` |
 
 ## Quick Start
 
@@ -31,8 +31,9 @@ cargo build --release
 # Full posture report (detection + behavioral analysis)
 ./target/release/waf-detect --posture example.com --posture-va2 --posture-json
 
-# Interactive TUI
-./target/release/waf-detect --tui example.com
+# Full hardening scan + HTML report
+./target/release/waf-detect hardening https://example.com --output /tmp/example-hardening.json
+./target/release/waf-detect report /tmp/example-hardening.json --output /tmp/example-hardening.html
 ```
 
 ## Detection
@@ -166,26 +167,21 @@ Generates a unified security grade (A-F) and risk score (0-100) combining detect
 - **D** (61-80) — Weak protection, significant gaps
 - **F** (81-100) — Minimal or no effective protection
 
-## TUI (Terminal Dashboard)
+## HTML Report
 
-Interactive terminal interface with live scan results, signal bars, findings, and keyboard navigation.
+Render a saved JSON scan artifact into a static HTML report that is easy to review locally and share with other engineers.
 
 ```bash
-# Launch with target
-./target/release/waf-detect --tui example.com
+# Render a saved hardening report
+./target/release/waf-detect hardening https://example.com --output /tmp/example-hardening.json
+./target/release/waf-detect report /tmp/example-hardening.json
 
-# Launch in review mode (load last saved report)
-./target/release/waf-detect --tui
+# Render a saved posture report
+./target/release/waf-detect --posture https://example.com --posture-va2 --posture-json > /tmp/example-posture.json
+./target/release/waf-detect report /tmp/example-posture.json --output /tmp/example-posture.html
 ```
 
-**Keyboard shortcuts:**
-- `1-7` — Switch views (Dashboard, Detection, Smoke, Enforce, Behav., Findings, Log)
-- `r` — Run full scan
-- `j/k` — Navigate items
-- `Enter` — Expand selected item
-- `e` — Export report to JSON
-- `?` — Toggle info tooltip
-- `q` — Quit
+The generated HTML is static and self-contained, so it can be attached to tickets, shared in chat, or opened locally without rerunning the scan.
 
 ## Target Scope
 

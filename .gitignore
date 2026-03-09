@@ -43,6 +43,7 @@ integration_test_report.txt
 *-va2-full.json
 *-posture.json
 *-effectiveness.txt
+waf-effectiveness-*.html
 tokui-*
 
 # Captured traffic / live session artifacts

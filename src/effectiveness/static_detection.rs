@@ -6,12 +6,13 @@
 
 use anyhow::Result;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Duration;
 use tracing::info;
 
 /// Result of static page analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StaticPageAnalysis {
     /// Whether the page appears to be static
     pub is_likely_static: bool,
@@ -24,7 +25,7 @@ pub struct StaticPageAnalysis {
 }
 
 /// Indicators that suggest a page is static
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StaticIndicator {
     /// Static caching headers present
     CacheHeaders { header: String, value: String },
@@ -43,7 +44,7 @@ pub enum StaticIndicator {
 }
 
 /// Suggested alternative endpoints for testing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EndpointSuggestion {
     pub endpoint: String,
     pub description: String,

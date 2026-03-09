@@ -709,7 +709,34 @@ mod effectiveness_tests {
         assert_eq!(report.statistics.total_tests, 2);
         assert_eq!(report.statistics.blocked_requests, 1);
         assert_eq!(report.statistics.allowed_requests, 1);
+        assert_eq!(report.statistics.error_responses, 0);
         assert_eq!(report.statistics.average_response_time_ms, 150.0);
+    }
+
+    #[test]
+    fn test_edge_errors_do_not_count_as_allowed() {
+        let mut report = report::EffectivenessReport::new("https://example.com");
+
+        report.add_test_result(
+            "Edge Error".to_string(),
+            TestResult {
+                blocked: false,
+                status_code: 503,
+                evidence: "Edge error response: HTTP 503".to_string(),
+                response_time: std::time::Duration::from_millis(100),
+                response_body_sample: "Service Unavailable".to_string(),
+                response_body_length: 19,
+                response_headers: std::collections::HashMap::new(),
+            },
+        );
+
+        assert_eq!(report.statistics.total_tests, 1);
+        assert_eq!(report.statistics.blocked_requests, 0);
+        assert_eq!(report.statistics.allowed_requests, 0);
+        assert_eq!(report.statistics.error_responses, 1);
+        assert_eq!(report.actionable_test_count(), 0);
+        assert_eq!(report.degraded_test_count(), 1);
+        assert_eq!(report.risk_score, 100.0);
     }
 
     #[test]
@@ -720,6 +747,34 @@ mod effectiveness_tests {
         assert!(json.contains("https://example.com"));
         assert!(json.contains("risk_score"));
         assert!(json.contains("0.0"));
+    }
+
+    #[test]
+    fn test_report_summary_includes_static_target_analysis() {
+        let mut report = report::EffectivenessReport::new("https://example.com");
+        report.static_page_analysis =
+            Some(crate::effectiveness::static_detection::StaticPageAnalysis {
+                is_likely_static: true,
+                confidence: 0.8,
+                indicators: vec![
+                    crate::effectiveness::static_detection::StaticIndicator::StaticContentType {
+                        content_type: "text/html".to_string(),
+                    },
+                    crate::effectiveness::static_detection::StaticIndicator::IdenticalResponses {
+                        similarity_percentage: 98.4,
+                    },
+                ],
+                suggestions: vec![crate::effectiveness::static_detection::EndpointSuggestion {
+                    endpoint: "https://example.com/api/".to_string(),
+                    description: "API endpoints".to_string(),
+                    rationale: "Dynamic requests are more representative.".to_string(),
+                }],
+            });
+
+        let summary = report.generate_summary();
+        assert!(summary.contains("## Target Suitability"));
+        assert!(summary.contains("Likely Static: yes"));
+        assert!(summary.contains("https://example.com/api/"));
     }
 
     #[test]
