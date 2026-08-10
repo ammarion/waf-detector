@@ -30,11 +30,15 @@ pub fn active_enforcement_likelihood(
             }
         })
         .unwrap_or(0.0);
-    ((differential_score * 0.55) + (challenge_score * 0.25) + (blocked_ratio * 0.20)).clamp(0.0, 1.0)
+    ((differential_score * 0.55) + (challenge_score * 0.25) + (blocked_ratio * 0.20))
+        .clamp(0.0, 1.0)
 }
 
 /// P(WAF present but not enforcing) = P(WAF present) * P(not enforcing).
-pub fn monitor_mode_likelihood(detection_confidence: f64, active_enforcement_likelihood: f64) -> f64 {
+pub fn monitor_mode_likelihood(
+    detection_confidence: f64,
+    active_enforcement_likelihood: f64,
+) -> f64 {
     (detection_confidence * (1.0 - active_enforcement_likelihood)).clamp(0.0, 1.0)
 }
 
@@ -42,10 +46,16 @@ pub fn monitor_mode_likelihood(detection_confidence: f64, active_enforcement_lik
 mod tests {
     use super::*;
     use crate::virtual_adversary::{VaResultSummary, VaRunReport, VirtualAdversaryConfig};
-    use crate::virtual_adversary2::{Va2BaselineSummary, Va2CampaignPlan, Va2PmiScore, Va2Phase, Va2RunReport, Va2WbfSummary};
+    use crate::virtual_adversary2::{
+        Va2BaselineSummary, Va2CampaignPlan, Va2Phase, Va2PmiScore, Va2RunReport, Va2WbfSummary,
+    };
 
     fn va1_with_blocked_ratio(blocked: usize, total: usize) -> VaRunReport {
-        let mut report = VaRunReport::new("https://example.com", total, VirtualAdversaryConfig::default());
+        let mut report = VaRunReport::new(
+            "https://example.com",
+            total,
+            VirtualAdversaryConfig::default(),
+        );
         report.summary = VaResultSummary {
             total,
             blocked,
