@@ -796,7 +796,9 @@ impl SimpleCliApp {
                         enf.confidence_score * 100.0
                     );
                 }
-                if posture.monitor_mode_likelihood > 0.01 {
+                if (posture.enforcement.is_some() || posture.behavioral.is_some())
+                    && posture.monitor_mode_likelihood > 0.01
+                {
                     println!(
                         "  Monitor-mode likelihood: {:.0}%",
                         posture.monitor_mode_likelihood * 100.0
