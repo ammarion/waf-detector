@@ -221,6 +221,10 @@ impl PostureBuilder {
             VaEnforcement::ChallengeGate => confidence * 0.8,
             VaEnforcement::SilentFilter => confidence * 0.5,
             VaEnforcement::NoEnforcement => 0.0,
+            // Same score as NoEnforcement — this variant changes the label,
+            // not the enforcement-strength math. See spec section 2 / Global
+            // Constraints: no new risk-scoring logic for this variant.
+            VaEnforcement::PresentNotEnforcing => 0.0,
             VaEnforcement::Inconclusive => confidence * 0.3,
         };
         self

@@ -598,6 +598,13 @@ pub enum VaEnforcement {
     ChallengeGate,
     SilentFilter,
     NoEnforcement,
+    /// A WAF was passively detected but 0% of VA1 probes were blocked or
+    /// challenged — the WAF is present but not enforcing (monitor/log-only
+    /// mode), distinct from no WAF being present at all. Only ever produced
+    /// when `classify_enforcement` is called with a passive confidence
+    /// value (see `--posture-va1`); standalone `waf-detect va` never
+    /// produces this variant.
+    PresentNotEnforcing,
     Inconclusive,
 }
 
