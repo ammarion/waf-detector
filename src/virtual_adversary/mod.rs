@@ -462,7 +462,16 @@ fn summarize_evidence(results: &[VaResultRecord]) -> Vec<VaEvidenceTally> {
     tallies
 }
 
-fn classify_enforcement(summary: &VaResultSummary, evidence_score: f64) -> VaEnforcement {
+/// `passive_waf_confidence` is `None` for every standalone `waf-detect va`
+/// run (no passive DetectionResult is ever available there) and `Some(...)`
+/// only when called via `--posture --posture-va1`, which already ran
+/// passive detection first. When `None`, this function's decision tree is
+/// byte-identical to before `PresentNotEnforcing` existed.
+pub(crate) fn classify_enforcement(
+    summary: &VaResultSummary,
+    evidence_score: f64,
+    passive_waf_confidence: Option<f64>,
+) -> VaEnforcement {
     if summary.total == 0 {
         return VaEnforcement::Inconclusive;
     }
@@ -481,6 +490,11 @@ fn classify_enforcement(summary: &VaResultSummary, evidence_score: f64) -> VaEnf
         return VaEnforcement::SilentFilter;
     }
     if allowed_rate >= 0.8 && evidence_score < 0.35 {
+        if passive_waf_confidence.unwrap_or(0.0)
+            >= crate::posture::scoring::PASSIVE_WAF_PRESENCE_THRESHOLD
+        {
+            return VaEnforcement::PresentNotEnforcing;
+        }
         return VaEnforcement::NoEnforcement;
     }
 
@@ -1243,7 +1257,9 @@ impl VirtualAdversaryRunner {
         }
         report.evidence_score = compute_evidence_score(&report.results);
         report.evidence_summary = summarize_evidence(&report.results);
-        report.enforcement = classify_enforcement(&report.summary, report.evidence_score);
+        // Standalone VA1 runs (this call site, used by `run_with_events`/
+        // `run`/`waf-detect va`) never have passive detection available.
+        report.enforcement = classify_enforcement(&report.summary, report.evidence_score, None);
         report.finish();
         report.replay_bundle = Some(VaReplayBundle::from_report(&report));
         crate::perf::record(
@@ -1841,7 +1857,7 @@ mod tests {
             allowed: 3,
             error: 0,
         };
-        let enforcement = classify_enforcement(&summary, 0.7);
+        let enforcement = classify_enforcement(&summary, 0.7, None);
         assert_eq!(enforcement, VaEnforcement::HardBlock);
     }
 
@@ -1854,7 +1870,51 @@ mod tests {
             allowed: 8,
             error: 0,
         };
-        let enforcement = classify_enforcement(&summary, 0.2);
+        let enforcement = classify_enforcement(&summary, 0.2, None);
+        assert_eq!(enforcement, VaEnforcement::NoEnforcement);
+    }
+
+    #[test]
+    fn test_enforcement_classification_no_enforcement_with_no_passive_confidence_is_unchanged() {
+        // Regression guard: standalone `waf-detect va` never has a passive
+        // DetectionResult, so it always passes None here. This must produce
+        // the exact same result as before PresentNotEnforcing existed.
+        let summary = VaResultSummary {
+            total: 10,
+            blocked: 0,
+            challenge: 0,
+            allowed: 10,
+            error: 0,
+        };
+        let enforcement = classify_enforcement(&summary, 0.1, None);
+        assert_eq!(enforcement, VaEnforcement::NoEnforcement);
+    }
+
+    #[test]
+    fn test_enforcement_classification_present_not_enforcing_when_passive_confidence_high() {
+        let summary = VaResultSummary {
+            total: 10,
+            blocked: 0,
+            challenge: 0,
+            allowed: 10,
+            error: 0,
+        };
+        let enforcement = classify_enforcement(&summary, 0.1, Some(0.9));
+        assert_eq!(enforcement, VaEnforcement::PresentNotEnforcing);
+    }
+
+    #[test]
+    fn test_enforcement_classification_stays_no_enforcement_below_threshold() {
+        let summary = VaResultSummary {
+            total: 10,
+            blocked: 0,
+            challenge: 0,
+            allowed: 10,
+            error: 0,
+        };
+        // Below PASSIVE_WAF_PRESENCE_THRESHOLD (0.5) -> not confident enough
+        // to call this "present", stays NoEnforcement.
+        let enforcement = classify_enforcement(&summary, 0.1, Some(0.3));
         assert_eq!(enforcement, VaEnforcement::NoEnforcement);
     }
 
