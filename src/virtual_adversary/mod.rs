@@ -58,7 +58,7 @@ fn parse_http_method(value: &str) -> Result<&'static str> {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VirtualAdversaryConfig {
     /// Safety tier (1-3). Higher tiers enable more advanced mutations.
     pub tier: u8,

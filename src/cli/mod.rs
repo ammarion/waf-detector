@@ -226,6 +226,7 @@ fn completion_global_options() -> &'static [&'static str] {
         "--posture",
         "--posture-summary",
         "--posture-va2",
+        "--posture-va1",
         "--posture-json",
         "--va",
         "--va-replay-run",
@@ -742,6 +743,30 @@ impl SimpleCliApp {
                 builder = builder.with_va2(&report);
             }
 
+            if matches.get_flag("posture-va1") {
+                let config = VirtualAdversaryConfig::default();
+                let target = resolve_authorized_target(&normalized)?;
+                let mut audit = AuditSession::new("posture_va1", &target, true)?;
+                let mut runner = VirtualAdversaryRunner::new(config)?;
+                let mut report = match runner.run_with_events_for_target(&target, |_, _| {}, |_| {})
+                {
+                    Ok(report) => report,
+                    Err(err) => {
+                        audit.record_failed(&err.to_string())?;
+                        return Err(err);
+                    }
+                };
+                audit.record_completed()?;
+                report.audit = Some(audit.snapshot());
+                let waf_confidence = detection_result.waf_confidence().unwrap_or(0.0);
+                report.enforcement = crate::virtual_adversary::classify_enforcement(
+                    &report.summary,
+                    report.evidence_score,
+                    Some(waf_confidence),
+                );
+                builder = builder.with_va1(&report);
+            }
+
             let posture = builder.compute();
 
             if matches.get_flag("posture-json") {
@@ -769,6 +794,12 @@ impl SimpleCliApp {
                         "  Enforce:    {} ({:.0}%)",
                         enf.enforcement,
                         enf.confidence_score * 100.0
+                    );
+                }
+                if posture.monitor_mode_likelihood > 0.01 {
+                    println!(
+                        "  Monitor-mode likelihood: {:.0}%",
+                        posture.monitor_mode_likelihood * 100.0
                     );
                 }
                 println!("  Summary:    {}", posture.summary);
@@ -3497,6 +3528,13 @@ The tool automatically adds https:// for bare domains where supported.
             Arg::new("posture-va2")
                 .long("posture-va2")
                 .help("Include behavioral analysis in posture report")
+                .action(clap::ArgAction::SetTrue)
+                .requires("posture"),
+        )
+        .arg(
+            Arg::new("posture-va1")
+                .long("posture-va1")
+                .help("Include enforcement testing (VA1) in posture report")
                 .action(clap::ArgAction::SetTrue)
                 .requires("posture"),
         )
