@@ -93,7 +93,7 @@ pub fn compose_posture_summary(
 
     let detection_confidence = detection.and_then(|d| d.waf_confidence()).unwrap_or(0.0);
 
-    let (differential_score, challenge_score, pair_count, coverage_score) = va2
+    let (pair_count, coverage_score) = va2
         .map(|report| {
             if let Some(coverage) = &report.channel_coverage {
                 for (channel, score) in &coverage.channels {
@@ -106,8 +106,6 @@ pub fn compose_posture_summary(
                 .map(|p| p.executed_pairs)
                 .unwrap_or(report.differential.len());
             (
-                report.wbf.differential_score,
-                report.wbf.challenge_score,
                 pairs,
                 report
                     .channel_coverage
@@ -116,25 +114,11 @@ pub fn compose_posture_summary(
                     .unwrap_or(0.0),
             )
         })
-        .unwrap_or((0.0, 0.0, 0, 0.0));
+        .unwrap_or((0, 0.0));
 
-    let blocked_ratio = va1
-        .map(|report| {
-            let total = report.summary.total as f64;
-            if total > 0.0 {
-                report.summary.blocked as f64 / total
-            } else {
-                0.0
-            }
-        })
-        .unwrap_or(0.0);
-
-    let active_enforcement_likelihood =
-        ((differential_score * 0.55) + (challenge_score * 0.25) + (blocked_ratio * 0.20))
-            .clamp(0.0, 1.0);
-
+    let active_enforcement_likelihood = scoring::active_enforcement_likelihood(va1, va2);
     let monitor_mode_likelihood =
-        (detection_confidence * (1.0 - active_enforcement_likelihood)).clamp(0.0, 1.0);
+        scoring::monitor_mode_likelihood(detection_confidence, active_enforcement_likelihood);
 
     let overall_posture_score = ((active_enforcement_likelihood * 65.0)
         + (coverage_score * 25.0)
