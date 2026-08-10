@@ -8,6 +8,8 @@ use crate::virtual_adversary::{VaEnforcement, VaRunReport};
 use crate::virtual_adversary2::Va2RunReport;
 use crate::DetectionResult;
 
+pub mod scoring;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PostureGrade {
     A,
