@@ -648,6 +648,55 @@ mod tests {
     }
 
     #[test]
+    fn test_posture_monitor_mode_likelihood_low_when_va1_alone_shows_challenge_gate() {
+        use crate::virtual_adversary::{VaResultSummary, VirtualAdversaryConfig};
+
+        let det = mock_detection_result(0.9);
+        let va1 = VaRunReport {
+            target_url: "https://example.com".to_string(),
+            plan_size: 10,
+            replay_plan: vec![],
+            summary: VaResultSummary {
+                total: 10,
+                blocked: 0,
+                challenge: 10,
+                allowed: 0,
+                error: 0,
+            },
+            enforcement: VaEnforcement::ChallengeGate,
+            evidence_score: 0.9,
+            evidence_summary: vec![],
+            config: VirtualAdversaryConfig::default(),
+            results: vec![],
+            started_at: std::time::Instant::now(),
+            finished_at: None,
+            replay_bundle: None,
+            audit: None,
+        };
+        let report = PostureBuilder::new("https://example.com")
+            .with_detection(&det)
+            .with_va1(&va1)
+            .compute();
+
+        // Regression test for a bug found during live --posture-va1
+        // verification: a WAF challenging 100% of VA1 probes (ChallengeGate),
+        // with no VA2 evidence, must NOT read as "likely present but not
+        // enforcing" -- before this fix, active_enforcement_likelihood only
+        // counted outright-blocked requests, so this scenario produced
+        // monitor_mode_likelihood ~1.0 next to a live ChallengeGate verdict.
+        assert!(
+            report.active_enforcement_likelihood > 0.9,
+            "got {}",
+            report.active_enforcement_likelihood
+        );
+        assert!(
+            report.monitor_mode_likelihood < 0.1,
+            "got {}",
+            report.monitor_mode_likelihood
+        );
+    }
+
+    #[test]
     fn test_compose_posture_summary_with_low_signal_caveats() {
         let det = mock_detection_result(0.8);
         let va2 = mock_va2_report(30.0, 0.1);

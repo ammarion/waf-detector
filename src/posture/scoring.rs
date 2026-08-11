@@ -14,6 +14,14 @@ pub const PASSIVE_WAF_PRESENCE_THRESHOLD: f64 = 0.5;
 /// Blended estimate of how likely the target is actively enforcing
 /// (blocking/challenging), from whichever of VA1/VA2 evidence is available.
 /// Same formula `compose_posture_summary` used inline before this extraction.
+///
+/// VA1's contribution counts both blocked AND challenged requests as
+/// enforcement evidence, not blocked alone: a target that challenges every
+/// probe (`VaEnforcement::ChallengeGate`) is actively enforcing, and treating
+/// it as zero enforcement made it read as monitor mode. This matches VA1's own
+/// `classify_enforcement`, whose `ChallengeGate`/`SilentFilter` branches also
+/// treat challenges as enforcement evidence (e.g. `blocked_rate +
+/// challenge_rate >= 0.4` for `SilentFilter`).
 pub fn active_enforcement_likelihood(
     va1: Option<&crate::virtual_adversary::VaRunReport>,
     va2: Option<&crate::virtual_adversary2::Va2RunReport>,
@@ -21,25 +29,25 @@ pub fn active_enforcement_likelihood(
     let (differential_score, challenge_score) = va2
         .map(|r| (r.wbf.differential_score, r.wbf.challenge_score))
         .unwrap_or((0.0, 0.0));
-    let blocked_ratio = va1
+    let enforcement_ratio = va1
         .map(|r| {
             if r.summary.total > 0 {
-                r.summary.blocked as f64 / r.summary.total as f64
+                (r.summary.blocked + r.summary.challenge) as f64 / r.summary.total as f64
             } else {
                 0.0
             }
         })
         .unwrap_or(0.0);
-    ((differential_score * 0.55) + (challenge_score * 0.25) + (blocked_ratio * 0.20))
+    ((differential_score * 0.55) + (challenge_score * 0.25) + (enforcement_ratio * 0.20))
         .clamp(0.0, 1.0)
 }
 
 /// Like `active_enforcement_likelihood`, but renormalized over only the
 /// evidence sources that actually ran. The raw weighted blend (0.55/0.25/0.20
-/// for VA2 differential/challenge/VA1 blocked-ratio) assumes all three
+/// for VA2 differential/challenge/VA1 enforcement-ratio) assumes all three
 /// signals are available; when only VA1 or only VA2 ran, its ceiling is
 /// capped at that source's raw weight (e.g. VA1 alone tops out at 0.20 even
-/// at 100% blocked), producing an artificially low score. Used by
+/// at 100% blocked-or-challenged), producing an artificially low score. Used by
 /// `PostureBuilder::compute()`, which can be fed VA1 alone (via
 /// `--posture-va1` with no `--posture-va2`) — a combination the original
 /// formula was never exercised against. `compose_posture_summary` keeps
@@ -214,5 +222,44 @@ mod tests {
     #[test]
     fn test_active_enforcement_likelihood_normalized_no_evidence() {
         assert_eq!(active_enforcement_likelihood_normalized(None, None), 0.0);
+    }
+
+    #[test]
+    fn test_active_enforcement_likelihood_counts_challenge_not_just_blocked() {
+        // A target that challenges (not outright blocks) every VA1 probe is
+        // still actively enforcing -- this must NOT read as near-zero
+        // enforcement the way a pure blocked_ratio calculation would.
+        let mut report =
+            VaRunReport::new("https://example.com", 10, VirtualAdversaryConfig::default());
+        report.summary = VaResultSummary {
+            total: 10,
+            blocked: 0,
+            challenge: 10,
+            allowed: 0,
+            error: 0,
+        };
+        let score = active_enforcement_likelihood(Some(&report), None);
+        // enforcement_ratio = (0 + 10)/10 = 1.0, weight 0.20, no VA2 contribution
+        assert!((score - 0.20).abs() < 0.001, "expected 0.20, got {score}");
+    }
+
+    #[test]
+    fn test_active_enforcement_likelihood_normalized_va1_only_all_challenged() {
+        let mut report =
+            VaRunReport::new("https://example.com", 10, VirtualAdversaryConfig::default());
+        report.summary = VaResultSummary {
+            total: 10,
+            blocked: 0,
+            challenge: 10,
+            allowed: 0,
+            error: 0,
+        };
+        // Regression test for the bug found during --posture-va1 live
+        // verification: a target that's 100% challenged (VaEnforcement::
+        // ChallengeGate) must normalize to high enforcement likelihood, not
+        // be treated as if nothing happened because none of the requests
+        // were outright *blocked*.
+        let score = active_enforcement_likelihood_normalized(Some(&report), None);
+        assert!((score - 1.0).abs() < 0.001, "expected 1.0, got {score}");
     }
 }
