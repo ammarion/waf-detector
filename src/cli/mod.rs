@@ -744,7 +744,13 @@ impl SimpleCliApp {
             }
 
             if matches.get_flag("posture-va1") {
-                let config = VirtualAdversaryConfig::default();
+                // Trim the embedded run for speed, matching --posture-va2's precedent of
+                // zeroing its own campaign's step delays for the same reason: --posture
+                // should stay fast even with enforcement testing included.
+                let config = VirtualAdversaryConfig {
+                    request_delay: std::time::Duration::from_millis(0),
+                    ..VirtualAdversaryConfig::default()
+                };
                 let target = resolve_authorized_target(&normalized)?;
                 let mut audit = AuditSession::new("posture_va1", &target, true)?;
                 let mut runner = VirtualAdversaryRunner::new(config)?;

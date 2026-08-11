@@ -148,6 +148,10 @@ Generates a unified security grade (A-F) and risk score (0-100) combining detect
 # Include behavioral analysis
 ./target/release/waf-detect --posture example.com --posture-va2
 
+# Include enforcement testing (VA1) -- distinguishes "WAF present but not
+# enforcing" (monitor/log-only mode) from "no WAF at all"
+./target/release/waf-detect --posture example.com --posture-va1
+
 # JSON output
 ./target/release/waf-detect --posture example.com --posture-va2 --posture-json
 ```

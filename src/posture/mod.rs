@@ -309,7 +309,7 @@ impl PostureBuilder {
             format!("Grade {grade}: {}", parts.join(", "))
         };
 
-        let active_enforcement_likelihood = scoring::active_enforcement_likelihood(
+        let active_enforcement_likelihood = scoring::active_enforcement_likelihood_normalized(
             self.va1_report.as_ref(),
             self.va2_report.as_ref(),
         );
@@ -598,6 +598,53 @@ mod tests {
         let report = PostureBuilder::new("https://example.com").compute();
         assert_eq!(report.monitor_mode_likelihood, 0.0);
         assert_eq!(report.active_enforcement_likelihood, 0.0);
+    }
+
+    #[test]
+    fn test_posture_monitor_mode_likelihood_low_when_va1_alone_shows_hard_block() {
+        use crate::virtual_adversary::{VaResultSummary, VirtualAdversaryConfig};
+
+        let det = mock_detection_result(0.9);
+        let va1 = VaRunReport {
+            target_url: "https://example.com".to_string(),
+            plan_size: 10,
+            replay_plan: vec![],
+            summary: VaResultSummary {
+                total: 10,
+                blocked: 10,
+                challenge: 0,
+                allowed: 0,
+                error: 0,
+            },
+            enforcement: VaEnforcement::HardBlock,
+            evidence_score: 0.9,
+            evidence_summary: vec![],
+            config: VirtualAdversaryConfig::default(),
+            results: vec![],
+            started_at: std::time::Instant::now(),
+            finished_at: None,
+            replay_bundle: None,
+            audit: None,
+        };
+        let report = PostureBuilder::new("https://example.com")
+            .with_detection(&det)
+            .with_va1(&va1)
+            .compute();
+
+        // Regression test for the final-review-caught bug: a WAF blocking 100%
+        // of VA1 probes, with no VA2 evidence, must NOT read as "likely present
+        // but not enforcing." Before the normalization fix, this was 0.72
+        // (self-contradictory next to a HardBlock verdict).
+        assert!(
+            report.active_enforcement_likelihood > 0.9,
+            "got {}",
+            report.active_enforcement_likelihood
+        );
+        assert!(
+            report.monitor_mode_likelihood < 0.1,
+            "got {}",
+            report.monitor_mode_likelihood
+        );
     }
 
     #[test]
