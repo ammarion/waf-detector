@@ -746,9 +746,12 @@ impl SimpleCliApp {
             if matches.get_flag("posture-va1") {
                 // Trim the embedded run for speed, matching --posture-va2's precedent of
                 // zeroing its own campaign's step delays for the same reason: --posture
-                // should stay fast even with enforcement testing included.
+                // should stay fast even with enforcement testing included. Unlike VA2's
+                // step-level delay, VA1's RateLimiter hard-rejects a zero delay by design
+                // (deliberate rate-limiting for adversarial/attack-payload testing) -- use
+                // the smallest valid nonzero delay instead of disabling the limiter.
                 let config = VirtualAdversaryConfig {
-                    request_delay: std::time::Duration::from_millis(0),
+                    request_delay: std::time::Duration::from_millis(50),
                     ..VirtualAdversaryConfig::default()
                 };
                 let target = resolve_authorized_target(&normalized)?;
