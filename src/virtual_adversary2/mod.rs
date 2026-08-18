@@ -678,23 +678,109 @@ fn compute_differential(
     }
 }
 
+/// Headers whose *value* legitimately differs between any two requests, even
+/// from an identical origin with no intermediary at all: clocks, per-request
+/// trace IDs, cache-age counters, and body-length echoes.
+///
+/// Comparing these by value made `count_header_mutations` return a nonzero
+/// count for every pair against every target. Measured against a bare
+/// `python3 -m http.server` (no WAF, no proxy, no rules): 6 of 6 pairs came
+/// back `discriminated` and `differential_score` was 1.0 — the maximum —
+/// because `Date` ticked one second between the baseline and variant request.
+///
+/// These are excluded from value comparison only. A volatile header that
+/// appears on *one side of the pair and not the other* still counts as a
+/// key-set mutation, because that is real signal (e.g. a WAF attaching
+/// `Set-Cookie` to a flagged request but not a clean one).
+const VOLATILE_HEADER_NAMES: &[&str] = &[
+    // Clocks and freshness
+    "date",
+    "age",
+    "expires",
+    "last-modified",
+    "etag",
+    // Echoes body size, already captured by body_length_pct_change
+    "content-length",
+    // Per-request trace/correlation IDs
+    "x-request-id",
+    "request-id",
+    "x-correlation-id",
+    "x-trace-id",
+    "traceparent",
+    "cf-ray",
+    "x-amz-cf-id",
+    "x-amz-request-id",
+    "x-amzn-requestid",
+    "x-amzn-trace-id",
+    "x-akamai-request-id",
+    "akamai-grn",
+    "x-msedge-ref",
+    "x-azure-ref",
+    "x-iinfo",
+    "x-cdn-requestid",
+    // Per-request cache and timing telemetry
+    "x-cache",
+    "x-cache-hits",
+    "x-served-by",
+    "x-timer",
+    "server-timing",
+    "x-fastly-request-id",
+    // Session values that rotate per response
+    "set-cookie",
+];
+
+fn is_volatile_header(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    VOLATILE_HEADER_NAMES.contains(&lower.as_str())
+}
+
+/// Header differences between a paired baseline and variant, split by kind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct HeaderMutations {
+    /// Headers present on exactly one side of the pair. Strong signal: an
+    /// intermediary added or withheld a header based on request content.
+    key_set: usize,
+    /// Headers present on both sides whose values differ, excluding
+    /// `VOLATILE_HEADER_NAMES`.
+    stable_value: usize,
+}
+
+impl HeaderMutations {
+    fn total(self) -> usize {
+        self.key_set + self.stable_value
+    }
+}
+
 fn count_header_mutations(
     baseline: &HashMap<String, String>,
     variant: &HashMap<String, String>,
 ) -> usize {
-    let mut count = 0usize;
+    classify_header_mutations(baseline, variant).total()
+}
+
+fn classify_header_mutations(
+    baseline: &HashMap<String, String>,
+    variant: &HashMap<String, String>,
+) -> HeaderMutations {
+    let mut mutations = HeaderMutations::default();
+
     for (name, value) in baseline {
         match variant.get(name) {
-            Some(other) if other == value => {}
-            _ => count += 1,
+            Some(other) => {
+                if other != value && !is_volatile_header(name) {
+                    mutations.stable_value += 1;
+                }
+            }
+            None => mutations.key_set += 1,
         }
     }
     for name in variant.keys() {
         if !baseline.contains_key(name) {
-            count += 1;
+            mutations.key_set += 1;
         }
     }
-    count
+
+    mutations
 }
 
 fn has_confidence_converged(rate_history: &[f64]) -> bool {
@@ -1764,6 +1850,78 @@ mod tests {
         assert_eq!(result.baseline_step_id, 1);
         assert_eq!(result.status_delta, 0);
         assert!(result.body_length_pct_change < 0.01);
+        assert!(!result.discriminated);
+    }
+
+    #[test]
+    fn test_volatile_header_values_are_not_mutations() {
+        // Regression test for the measured false positive: against a bare
+        // `python3 -m http.server` (no WAF, no proxy, no rules) every pair came
+        // back discriminated and `differential_score` was 1.0, solely because
+        // `Date` advanced one second between the two requests.
+        let baseline = HashMap::from([
+            ("server".to_string(), "SimpleHTTP/0.6".to_string()),
+            (
+                "date".to_string(),
+                "Tue, 18 Aug 2026 22:30:23 GMT".to_string(),
+            ),
+            ("content-length".to_string(), "118".to_string()),
+        ]);
+        let variant = HashMap::from([
+            ("server".to_string(), "SimpleHTTP/0.6".to_string()),
+            (
+                "date".to_string(),
+                "Tue, 18 Aug 2026 22:30:24 GMT".to_string(),
+            ),
+            ("content-length".to_string(), "118".to_string()),
+        ]);
+        let mutations = classify_header_mutations(&baseline, &variant);
+        assert_eq!(mutations, HeaderMutations::default());
+        assert_eq!(count_header_mutations(&baseline, &variant), 0);
+    }
+
+    #[test]
+    fn test_volatile_header_present_on_only_one_side_is_a_key_set_mutation() {
+        // The value of `set-cookie` rotates and must not be compared, but a WAF
+        // attaching it to a flagged request and not to a clean one is exactly
+        // the signal we are looking for.
+        let baseline = HashMap::from([("server".to_string(), "nginx".to_string())]);
+        let variant = HashMap::from([
+            ("server".to_string(), "nginx".to_string()),
+            ("set-cookie".to_string(), "incap_ses=abc".to_string()),
+        ]);
+        let mutations = classify_header_mutations(&baseline, &variant);
+        assert_eq!(mutations.key_set, 1);
+        assert_eq!(mutations.stable_value, 0);
+    }
+
+    #[test]
+    fn test_stable_header_value_change_is_a_mutation() {
+        // A non-volatile header changing value between the pair is real signal
+        // (here an intermediary rewriting `server` on the flagged request).
+        let baseline = HashMap::from([("server".to_string(), "nginx".to_string())]);
+        let variant = HashMap::from([("server".to_string(), "cloudflare".to_string())]);
+        let mutations = classify_header_mutations(&baseline, &variant);
+        assert_eq!(mutations.key_set, 0);
+        assert_eq!(mutations.stable_value, 1);
+    }
+
+    #[test]
+    fn test_differential_not_discriminated_on_volatile_headers_alone() {
+        // End-to-end through compute_differential: identical responses whose
+        // only difference is a ticking clock must not read as discrimination.
+        let baseline = Va2HttpResponse {
+            status: 200,
+            headers: HashMap::from([("date".to_string(), "a".to_string())]),
+            body: "same body".to_string(),
+        };
+        let variant = Va2HttpResponse {
+            status: 200,
+            headers: HashMap::from([("date".to_string(), "b".to_string())]),
+            body: "same body".to_string(),
+        };
+        let result = compute_differential(2, 1, &baseline, &variant, None, 100, 108);
+        assert_eq!(result.header_mutation_count, 0);
         assert!(!result.discriminated);
     }
 
