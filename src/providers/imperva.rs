@@ -110,20 +110,6 @@ impl ImpervaProvider {
             }
         }
 
-        // Check X-Request-ID header for Incapsula format
-        if let Some(request_id) = response.headers.get("x-request-id") {
-            // Incapsula request IDs typically have a specific format
-            if request_id.len() > 10 {
-                evidence.push(Evidence {
-                    method_type: MethodType::Header("x-request-id".to_string()),
-                    confidence: 0.70,
-                    description: "Potential Incapsula request ID header".to_string(),
-                    raw_data: request_id.clone(),
-                    signature_matched: "imperva-request-id-header".to_string(),
-                });
-            }
-        }
-
         evidence
     }
 
@@ -296,6 +282,18 @@ mod tests {
     async fn no_evidence_without_imperva_headers() {
         let provider = ImpervaProvider::new();
         let response = mock_response(200, [("server", "nginx")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(evidence.is_empty());
+    }
+
+    #[tokio::test]
+    async fn generic_x_request_id_header_is_not_imperva_evidence() {
+        let provider = ImpervaProvider::new();
+        let response = mock_response(
+            200,
+            [("x-request-id", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")],
+            "",
+        );
         let evidence = provider.passive_detect(&response).await.unwrap();
         assert!(evidence.is_empty());
     }
