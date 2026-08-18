@@ -690,9 +690,7 @@ impl SimpleCliApp {
                     budget: 12,
                 },
             )?;
-            for step in &mut plan.steps {
-                step.delay_ms = 0;
-            }
+            plan.trim_delays_for_embedded_run();
             let mut audit = AuditSession::new("posture_summary_va2", &target, true)?;
             let runner = Va2Runner::new()?;
             let mut va2_report = match runner.run_plan_with_target(plan, &target).await {
@@ -726,9 +724,7 @@ impl SimpleCliApp {
                 let config = Va2CampaignConfig::default();
                 let target = resolve_authorized_target(&normalized)?;
                 let mut plan = build_va2_campaign_plan(&target.normalized_url, &phases, config)?;
-                for step in &mut plan.steps {
-                    step.delay_ms = 0;
-                }
+                plan.trim_delays_for_embedded_run();
                 let mut audit = AuditSession::new("posture_va2", &target, true)?;
                 let runner = Va2Runner::new()?;
                 let mut report = match runner.run_plan_with_target(plan, &target).await {

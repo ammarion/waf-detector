@@ -1106,6 +1106,7 @@ mod tests {
                 discriminated: false,
                 outcome: Some(crate::virtual_adversary2::PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Query),
+                ..Default::default()
             }],
             channel_coverage: Some(Va2ChannelCoverage {
                 channels: HashMap::from([(Va2ProbeChannel::Query, 0.0)]),

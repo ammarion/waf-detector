@@ -129,8 +129,9 @@ pub fn compose_posture_summary(
         .unwrap_or((0, 0.0));
 
     let active_enforcement_likelihood = scoring::active_enforcement_likelihood(va1, va2);
+    let waf_presence_likelihood = scoring::waf_presence_likelihood(detection_confidence, va2);
     let monitor_mode_likelihood =
-        scoring::monitor_mode_likelihood(detection_confidence, active_enforcement_likelihood);
+        scoring::monitor_mode_likelihood(waf_presence_likelihood, active_enforcement_likelihood);
 
     let overall_posture_score = ((active_enforcement_likelihood * 65.0)
         + (coverage_score * 25.0)
@@ -313,8 +314,14 @@ impl PostureBuilder {
             self.va1_report.as_ref(),
             self.va2_report.as_ref(),
         );
+        // Presence, not `self.detection_confidence`. The latter is 0.0 for any
+        // WAF that leaves no passive signature, and because
+        // `monitor_mode_likelihood` is a product, a 0.0 presence term makes
+        // "present but not enforcing" unreportable for precisely those targets.
+        let waf_presence_likelihood =
+            scoring::waf_presence_likelihood(self.detection_confidence, self.va2_report.as_ref());
         let monitor_mode_likelihood = scoring::monitor_mode_likelihood(
-            self.detection_confidence,
+            waf_presence_likelihood,
             active_enforcement_likelihood,
         );
 
@@ -385,7 +392,11 @@ mod tests {
             challenge: None,
             throttle: None,
             wbf: Va2WbfSummary {
+                // See the note in scoring.rs's fixture: these mocks stand for an
+                // enforcing WAF, so the discrimination they describe is
+                // enforcement discrimination.
                 differential_score: diff_score,
+                enforcement_differential_score: diff_score,
                 challenge_score: 0.5,
                 ..Default::default()
             },

@@ -26,8 +26,15 @@ pub fn active_enforcement_likelihood(
     va1: Option<&crate::virtual_adversary::VaRunReport>,
     va2: Option<&crate::virtual_adversary2::Va2RunReport>,
 ) -> f64 {
+    // `enforcement_differential_score`, not `differential_score`. The latter
+    // counts every paired probe the WAF discriminated against, including ones
+    // it inspected and then *allowed* -- which is what a monitor-mode WAF
+    // does. Feeding that into an "is it enforcing" term made monitor-mode
+    // inspection read as enforcement, and `monitor_mode_likelihood`'s
+    // `(1 - enforcement)` factor then suppressed the very verdict the
+    // inspection evidence supports.
     let (differential_score, challenge_score) = va2
-        .map(|r| (r.wbf.differential_score, r.wbf.challenge_score))
+        .map(|r| (r.wbf.enforcement_differential_score, r.wbf.challenge_score))
         .unwrap_or((0.0, 0.0));
     let enforcement_ratio = va1
         .map(|r| {
@@ -67,6 +74,74 @@ pub fn active_enforcement_likelihood_normalized(
     } else {
         0.0
     }
+}
+
+/// Ceiling on how much behavioral inspection evidence can contribute to "a WAF
+/// is present". Below a vendor-header match, which identifies a specific
+/// product rather than merely establishing that something is inspecting.
+///
+/// This applies to evidence drawn from VA2's length-matched pairs only, whose
+/// two sides are interchangeable to the origin. That is what rules out the
+/// confounder: an application that reflects, sanitizes, or 404s on
+/// attack-shaped input produces a benign/attack differential with no WAF
+/// involved, and VA2's path/query pairs cannot tell the two apart.
+const ORIGIN_EQUIVALENT_INSPECTION_CEILING: f64 = 0.80;
+
+/// Ceiling on how much a latency-only signal can contribute to "a WAF is
+/// present". Above the single-channel content ceiling, because the latency
+/// score already requires agreement across at least six pairs, but below the
+/// multi-channel one: response timing is the signal most exposed to the
+/// network between the scanner and the target.
+const LATENCY_INSPECTION_CEILING: f64 = 0.65;
+
+/// How likely it is that *something is inspecting traffic*, derived purely
+/// from behavior and independent of any vendor signature.
+///
+/// This exists because passive detection only fires when a product leaves an
+/// identifying header, cookie, or certificate behind. A WAF that strips its
+/// headers -- or simply doesn't advertise -- scores 0.0 passively, and since
+/// `monitor_mode_likelihood` is a product, a 0.0 presence term makes it
+/// mathematically impossible to ever report monitor mode for exactly the
+/// targets where the question matters most.
+///
+/// A monitor-mode WAF still inspects. Inspection is observable even when the
+/// verdict is "allow": the paired benign/attack probes come back with
+/// different headers, different body lengths, or a consistent latency penalty
+/// while both still return a non-error status.
+pub fn inspection_presence_likelihood(
+    va2: Option<&crate::virtual_adversary2::Va2RunReport>,
+) -> f64 {
+    let Some(report) = va2 else {
+        return 0.0;
+    };
+
+    // Route 1: on requests the origin cannot distinguish, the response
+    // *content* still differed -- an extra header, a rewritten value, a
+    // different body length -- while both were allowed through.
+    let content_evidence =
+        report.wbf.inspection_differential_score * ORIGIN_EQUIVALENT_INSPECTION_CEILING;
+
+    // Route 2: nothing about the response differed except how long it took.
+    let latency_evidence = report.wbf.inspection_latency_score * LATENCY_INSPECTION_CEILING;
+
+    // `max`, matching `waf_presence_likelihood`: either observation is on its
+    // own a sufficient argument that something inspected the request.
+    content_evidence.max(latency_evidence).clamp(0.0, 1.0)
+}
+
+/// P(a WAF is present), taking the stronger of the two independent routes to
+/// that conclusion: a passive vendor signature, or vendor-agnostic evidence
+/// that something is inspecting traffic. `max` rather than a blend because
+/// these are alternative sufficient arguments, not partial ones -- a
+/// confirmed CloudFlare header is not made less true by the absence of a
+/// behavioral differential, and vice versa.
+pub fn waf_presence_likelihood(
+    passive_detection_confidence: f64,
+    va2: Option<&crate::virtual_adversary2::Va2RunReport>,
+) -> f64 {
+    passive_detection_confidence
+        .max(inspection_presence_likelihood(va2))
+        .clamp(0.0, 1.0)
 }
 
 /// P(WAF present but not enforcing) = P(WAF present) * P(not enforcing).
@@ -119,7 +194,11 @@ mod tests {
             challenge: None,
             throttle: None,
             wbf: Va2WbfSummary {
+                // Both set: an enforcement differential is by definition also a
+                // discrimination, and these fixtures describe an *enforcing*
+                // WAF, which is what the enforcement term now reads.
                 differential_score,
+                enforcement_differential_score: differential_score,
                 challenge_score,
                 ..Default::default()
             },
@@ -132,6 +211,106 @@ mod tests {
             paired_control: None,
             audit: None,
         }
+    }
+
+    /// A VA2 report whose paired probes were inspected-and-allowed (never
+    /// blocked), spread across `channels`. This is the monitor-mode shape.
+    /// A VA2 report whose paired probes were inspected-and-allowed, never
+    /// blocked. `origin_equivalent` selects whether those pairs were the
+    /// length-matched kind (whose two sides the origin cannot tell apart) or
+    /// the path/query kind (whose two sides it can). This is the monitor-mode
+    /// shape.
+    fn va2_inspected_not_blocked(pairs: usize, origin_equivalent: bool) -> Va2RunReport {
+        use crate::virtual_adversary2::Va2DifferentialResult;
+        let mut report = va2_with_scores(0.0, 0.0);
+        report.differential = (0..pairs)
+            .map(|i| Va2DifferentialResult {
+                step_id: (i as u32 * 2) + 2,
+                baseline_step_id: (i as u32 * 2) + 1,
+                discriminated: true,
+                inspection_signal: true,
+                enforcement_signal: false,
+                latency_matched: origin_equivalent,
+                ..Default::default()
+            })
+            .collect();
+        report.wbf.differential_score = 1.0;
+        // Mirrors compute_wbf: the inspection rate is only ever computed over
+        // origin-equivalent pairs.
+        report.wbf.inspection_differential_score = if origin_equivalent { 1.0 } else { 0.0 };
+        report.wbf.enforcement_differential_score = 0.0;
+        report
+    }
+
+    #[test]
+    fn test_inspection_presence_zero_without_va2() {
+        assert_eq!(inspection_presence_likelihood(None), 0.0);
+    }
+
+    #[test]
+    fn test_inspection_presence_zero_when_nothing_was_inspected() {
+        // The bare-origin case: paired probes ran and found no differential.
+        let va2 = va2_with_scores(0.0, 0.0);
+        assert_eq!(inspection_presence_likelihood(Some(&va2)), 0.0);
+    }
+
+    #[test]
+    fn test_inspection_presence_ignores_non_equivalent_pairs() {
+        // The bare-origin false positive, as a test. A static file server with
+        // nothing in front of it discriminated on 6 of 6 path/query pairs
+        // simply because `/api/v1/status` and `/../../etc/passwd` are different
+        // requests. That must contribute nothing to "a WAF is present".
+        let va2 = va2_inspected_not_blocked(6, false);
+        assert_eq!(inspection_presence_likelihood(Some(&va2)), 0.0);
+    }
+
+    #[test]
+    fn test_inspection_presence_from_origin_equivalent_pairs_clears_threshold() {
+        // The same discrimination rate, but on pairs the origin cannot tell
+        // apart -- so an intermediary is the only thing left to explain it.
+        let va2 = va2_inspected_not_blocked(6, true);
+        let presence = inspection_presence_likelihood(Some(&va2));
+        assert!(
+            presence >= PASSIVE_WAF_PRESENCE_THRESHOLD,
+            "inspection on origin-equivalent probes should read as a WAF being present, got {presence}"
+        );
+    }
+
+    #[test]
+    fn test_waf_presence_takes_the_stronger_argument() {
+        let va2 = va2_inspected_not_blocked(6, true);
+        // A strong vendor signature is not weakened by behavioral evidence...
+        assert!((waf_presence_likelihood(0.95, Some(&va2)) - 0.95).abs() < 0.001);
+        // ...and behavior carries presence when the vendor signature is absent.
+        assert!(waf_presence_likelihood(0.0, Some(&va2)) > 0.5);
+    }
+
+    #[test]
+    fn test_inspected_but_never_blocked_is_not_counted_as_enforcement() {
+        let va2 = va2_inspected_not_blocked(6, true);
+        assert_eq!(
+            active_enforcement_likelihood(None, Some(&va2)),
+            0.0,
+            "probes that were inspected and allowed are not enforcement evidence"
+        );
+    }
+
+    #[test]
+    fn test_header_stripping_monitor_mode_waf_is_reportable() {
+        // The case the whole feature exists for: a WAF that leaves no passive
+        // signature at all (detection_confidence 0.0), inspects traffic across
+        // channels, and blocks nothing. Before the presence term existed this
+        // was mathematically pinned at 0.0 -- monitor_mode_likelihood is a
+        // product, and its first factor was vendor-signature confidence.
+        let va2 = va2_inspected_not_blocked(6, true);
+        let presence = waf_presence_likelihood(0.0, Some(&va2));
+        let enforcement = active_enforcement_likelihood_normalized(None, Some(&va2));
+        let monitor = monitor_mode_likelihood(presence, enforcement);
+        assert!(
+            monitor > 0.5,
+            "expected a header-stripping monitor-mode WAF to be reported, got \
+             monitor={monitor} (presence={presence}, enforcement={enforcement})"
+        );
     }
 
     #[test]
