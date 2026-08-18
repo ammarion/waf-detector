@@ -176,17 +176,15 @@ impl FastlyProvider {
                     });
                 }
             }
-            429 => {
-                // Fastly rate limiting
-                if response.headers.contains_key("fastly-restarts") {
-                    evidence.push(Evidence {
-                        method_type: MethodType::StatusCode(429),
-                        confidence: 0.85,
-                        description: "Fastly rate limiting detected".to_string(),
-                        raw_data: "429".to_string(),
-                        signature_matched: "fastly-429-pattern".to_string(),
-                    });
-                }
+            // Fastly rate limiting, confirmed by the fastly-restarts header
+            429 if response.headers.contains_key("fastly-restarts") => {
+                evidence.push(Evidence {
+                    method_type: MethodType::StatusCode(429),
+                    confidence: 0.85,
+                    description: "Fastly rate limiting detected".to_string(),
+                    raw_data: "429".to_string(),
+                    signature_matched: "fastly-429-pattern".to_string(),
+                });
             }
             _ => {}
         }

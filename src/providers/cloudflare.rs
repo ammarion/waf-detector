@@ -203,17 +203,15 @@ impl CloudFlareProvider {
                     });
                 }
             }
-            429 => {
-                // CloudFlare rate limiting
-                if response.headers.contains_key("cf-ray") {
-                    evidence.push(Evidence {
-                        method_type: MethodType::StatusCode(429),
-                        confidence: 0.80,
-                        description: "CloudFlare rate limiting detected".to_string(),
-                        raw_data: "429".to_string(),
-                        signature_matched: "cf-429-status".to_string(),
-                    });
-                }
+            // CloudFlare rate limiting, confirmed by the cf-ray header
+            429 if response.headers.contains_key("cf-ray") => {
+                evidence.push(Evidence {
+                    method_type: MethodType::StatusCode(429),
+                    confidence: 0.80,
+                    description: "CloudFlare rate limiting detected".to_string(),
+                    raw_data: "429".to_string(),
+                    signature_matched: "cf-429-status".to_string(),
+                });
             }
             _ => {}
         }

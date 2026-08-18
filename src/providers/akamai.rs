@@ -185,17 +185,15 @@ impl AkamaiProvider {
                     });
                 }
             }
-            404 => {
-                // Check if it's an Akamai 404 with reference pattern
-                if Self::akamai_reference_pattern().is_match(&response.body) {
-                    evidence.push(Evidence {
-                        method_type: MethodType::StatusCode(404),
-                        confidence: 0.75,
-                        description: "Akamai 404 Not Found with reference ID".to_string(),
-                        raw_data: "404".to_string(),
-                        signature_matched: "akamai-404-pattern".to_string(),
-                    });
-                }
+            // Akamai 404 carrying a reference ID pattern in the body
+            404 if Self::akamai_reference_pattern().is_match(&response.body) => {
+                evidence.push(Evidence {
+                    method_type: MethodType::StatusCode(404),
+                    confidence: 0.75,
+                    description: "Akamai 404 Not Found with reference ID".to_string(),
+                    raw_data: "404".to_string(),
+                    signature_matched: "akamai-404-pattern".to_string(),
+                });
             }
             _ => {}
         }

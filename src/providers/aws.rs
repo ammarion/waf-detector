@@ -449,19 +449,17 @@ impl AwsProvider {
                     });
                 }
             }
-            503 => {
-                // AWS service unavailable
-                if response.headers.contains_key("x-amzn-requestid")
-                    || response.headers.contains_key("x-amz-cf-id")
-                {
-                    evidence.push(Evidence {
-                        method_type: MethodType::StatusCode(503),
-                        confidence: 0.70,
-                        description: "AWS service unavailable response".to_string(),
-                        raw_data: "503".to_string(),
-                        signature_matched: "aws-503-pattern".to_string(),
-                    });
-                }
+            // AWS service unavailable, identified by an AWS request-id header
+            503 if response.headers.contains_key("x-amzn-requestid")
+                || response.headers.contains_key("x-amz-cf-id") =>
+            {
+                evidence.push(Evidence {
+                    method_type: MethodType::StatusCode(503),
+                    confidence: 0.70,
+                    description: "AWS service unavailable response".to_string(),
+                    raw_data: "503".to_string(),
+                    signature_matched: "aws-503-pattern".to_string(),
+                });
             }
             _ => {}
         }
