@@ -73,8 +73,13 @@ tower-http = { version = "0.5", features = ["fs", "cors"] }
 mime = "0.3"
 percent-encoding = "2.3"
 tempfile = "3.20.0"
-hickory-resolver = "0.24"
-tokio-rustls = { version = "0.26", features = ["ring"] }
+hickory-resolver = "0.26"
+# default-features = false drops rustls's aws-lc-rs backend (and its aws-lc-sys
+# C dependency, which carries four open RustSec advisories); the code already
+# installs the ring provider explicitly. "logging" and "tls12" are re-added
+# because they are part of rustls's defaults and dropping them silently would
+# change behavior.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 x509-parser = "0.16"
 md5 = "0.7"
 h2 = "0.4"
