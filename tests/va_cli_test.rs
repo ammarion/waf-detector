@@ -473,3 +473,60 @@ async fn test_subcommand_rejects_legacy_root_flags() {
         .expect_err("runtime should reject mixed legacy root flags with subcommands");
     assert!(err.to_string().contains("Do not mix legacy root flags"));
 }
+
+#[test]
+fn test_posture_va1_requires_posture() {
+    let cmd = build_simple_cli();
+    let result = cmd.try_get_matches_from(["waf-detect", "--posture-va1"]);
+    assert!(
+        result.is_err(),
+        "expected --posture-va1 without --posture to fail"
+    );
+}
+
+#[test]
+fn test_posture_va1_parses_with_posture() {
+    let cmd = build_simple_cli();
+    let matches = cmd
+        .try_get_matches_from([
+            "waf-detect",
+            "--posture",
+            "https://example.com",
+            "--posture-va1",
+        ])
+        .expect("--posture-va1 with --posture should parse");
+    assert!(matches.get_flag("posture-va1"));
+}
+
+#[test]
+fn test_virtual_adversary_config_default_matches_flagless_va_subcommand() {
+    // Guards the fact documented in the design spec: VirtualAdversaryConfig::default()
+    // is only coincidentally identical to flagless `waf-detect va <url>` today (three
+    // independently-maintained literal sets — clap's .default_value(...) strings,
+    // run_va_subcommand's .unwrap_or(&N) fallbacks, and the Default impl). If this
+    // test ever fails, --posture-va1's use of VirtualAdversaryConfig::default() has
+    // silently drifted from documented `va` defaults.
+    let cmd = build_simple_cli();
+    let matches = cmd
+        .try_get_matches_from(["waf-detect", "va", "https://example.com"])
+        .expect("flagless va subcommand should parse");
+    let sub_matches = matches
+        .subcommand_matches("va")
+        .expect("va subcommand matches should be present");
+    let cli_config = waf_detector::virtual_adversary::VirtualAdversaryConfig {
+        tier: *sub_matches.get_one::<u8>("tier").unwrap_or(&1),
+        request_budget: *sub_matches.get_one::<u32>("budget").unwrap_or(&120),
+        request_timeout: std::time::Duration::from_secs(
+            *sub_matches.get_one::<u64>("timeout").unwrap_or(&15),
+        ),
+        request_delay: std::time::Duration::from_millis(
+            *sub_matches.get_one::<u64>("delay").unwrap_or(&750),
+        ),
+        max_variants_per_payload: *sub_matches.get_one::<u8>("variants").unwrap_or(&4),
+        skip_dns_validation: false,
+    };
+    assert_eq!(
+        cli_config,
+        waf_detector::virtual_adversary::VirtualAdversaryConfig::default()
+    );
+}

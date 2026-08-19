@@ -2759,6 +2759,8 @@ mod tests {
             behavioral: None,
             enforcement: None,
             summary: "Good protection with some coverage gaps.".to_string(),
+            active_enforcement_likelihood: 0.0,
+            monitor_mode_likelihood: 0.0,
         };
         let raw = serde_json::to_string(&report).unwrap();
         let html = render_report_html(&raw, Path::new("posture.json")).unwrap();
@@ -3201,6 +3203,8 @@ mod tests {
             behavioral: None,
             enforcement: None,
             summary: "Good protection.".to_string(),
+            active_enforcement_likelihood: 0.0,
+            monitor_mode_likelihood: 0.0,
         };
         let raw = serde_json::to_string(&report).unwrap();
         let html = render_report_html(&raw, Path::new("posture.json")).unwrap();

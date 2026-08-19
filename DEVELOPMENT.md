@@ -120,8 +120,8 @@ registry.register_provider(provider, metadata)?;
 ### Open
 - [ ] **Probabilistic enforcement model** — replace linear PMI weights with posterior distribution + confidence intervals
 - [ ] **Bypass distance metric** — count transformations needed before WAF response normalizes
-- [ ] **Monitor-mode detection** — infer WAF presence from subtle behavioral signals when nothing is blocked
-- [ ] **Posture CLI with VA1** — `--posture` integration with enforcement testing
+- [x] **Monitor-mode detection** — infer WAF presence from subtle behavioral signals when nothing is blocked
+- [x] **Posture CLI with VA1** — `--posture` integration with enforcement testing
 - [ ] **Cookie channel** — add cookie inspection as a probe channel
 
 ### Done

@@ -8,6 +8,8 @@ use crate::virtual_adversary::{VaEnforcement, VaRunReport};
 use crate::virtual_adversary2::Va2RunReport;
 use crate::DetectionResult;
 
+pub mod scoring;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PostureGrade {
     A,
@@ -68,6 +70,16 @@ pub struct PostureReport {
     pub behavioral: Option<BehavioralPosture>,
     pub enforcement: Option<EnforcementPosture>,
     pub summary: String,
+    /// Blended estimate that the target is actively enforcing (blocking/
+    /// challenging), from whichever of VA1/VA2 ran. Additive: does not
+    /// affect `risk_score`/`grade`.
+    #[serde(default)]
+    pub active_enforcement_likelihood: f64,
+    /// P(WAF present but not enforcing) = detection confidence * (1 -
+    /// active_enforcement_likelihood). Additive: does not affect
+    /// `risk_score`/`grade`.
+    #[serde(default)]
+    pub monitor_mode_likelihood: f64,
 }
 
 pub struct PostureBuilder {
@@ -79,6 +91,8 @@ pub struct PostureBuilder {
     channel_coverage_score: f64,
     enforcement: Option<EnforcementPosture>,
     enforcement_score: f64,
+    va1_report: Option<VaRunReport>,
+    va2_report: Option<Va2RunReport>,
 }
 
 pub fn compose_posture_summary(
@@ -91,7 +105,7 @@ pub fn compose_posture_summary(
 
     let detection_confidence = detection.and_then(|d| d.waf_confidence()).unwrap_or(0.0);
 
-    let (differential_score, challenge_score, pair_count, coverage_score) = va2
+    let (pair_count, coverage_score) = va2
         .map(|report| {
             if let Some(coverage) = &report.channel_coverage {
                 for (channel, score) in &coverage.channels {
@@ -104,8 +118,6 @@ pub fn compose_posture_summary(
                 .map(|p| p.executed_pairs)
                 .unwrap_or(report.differential.len());
             (
-                report.wbf.differential_score,
-                report.wbf.challenge_score,
                 pairs,
                 report
                     .channel_coverage
@@ -114,25 +126,12 @@ pub fn compose_posture_summary(
                     .unwrap_or(0.0),
             )
         })
-        .unwrap_or((0.0, 0.0, 0, 0.0));
+        .unwrap_or((0, 0.0));
 
-    let blocked_ratio = va1
-        .map(|report| {
-            let total = report.summary.total as f64;
-            if total > 0.0 {
-                report.summary.blocked as f64 / total
-            } else {
-                0.0
-            }
-        })
-        .unwrap_or(0.0);
-
-    let active_enforcement_likelihood =
-        ((differential_score * 0.55) + (challenge_score * 0.25) + (blocked_ratio * 0.20))
-            .clamp(0.0, 1.0);
-
+    let active_enforcement_likelihood = scoring::active_enforcement_likelihood(va1, va2);
+    let waf_presence_likelihood = scoring::waf_presence_likelihood(detection_confidence, va2);
     let monitor_mode_likelihood =
-        (detection_confidence * (1.0 - active_enforcement_likelihood)).clamp(0.0, 1.0);
+        scoring::monitor_mode_likelihood(waf_presence_likelihood, active_enforcement_likelihood);
 
     let overall_posture_score = ((active_enforcement_likelihood * 65.0)
         + (coverage_score * 25.0)
@@ -181,6 +180,8 @@ impl PostureBuilder {
             channel_coverage_score: 0.0,
             enforcement: None,
             enforcement_score: 0.0,
+            va1_report: None,
+            va2_report: None,
         }
     }
 
@@ -214,6 +215,7 @@ impl PostureBuilder {
         });
         self.pmi_normalized = pmi_normalized;
         self.channel_coverage_score = cov_score;
+        self.va2_report = Some(report.clone());
         self
     }
 
@@ -235,8 +237,13 @@ impl PostureBuilder {
             VaEnforcement::ChallengeGate => confidence * 0.8,
             VaEnforcement::SilentFilter => confidence * 0.5,
             VaEnforcement::NoEnforcement => 0.0,
+            // Same score as NoEnforcement — this variant changes the label,
+            // not the enforcement-strength math. See spec section 2 / Global
+            // Constraints: no new risk-scoring logic for this variant.
+            VaEnforcement::PresentNotEnforcing => 0.0,
             VaEnforcement::Inconclusive => confidence * 0.3,
         };
+        self.va1_report = Some(report.clone());
         self
     }
 
@@ -303,6 +310,21 @@ impl PostureBuilder {
             format!("Grade {grade}: {}", parts.join(", "))
         };
 
+        let active_enforcement_likelihood = scoring::active_enforcement_likelihood_normalized(
+            self.va1_report.as_ref(),
+            self.va2_report.as_ref(),
+        );
+        // Presence, not `self.detection_confidence`. The latter is 0.0 for any
+        // WAF that leaves no passive signature, and because
+        // `monitor_mode_likelihood` is a product, a 0.0 presence term makes
+        // "present but not enforcing" unreportable for precisely those targets.
+        let waf_presence_likelihood =
+            scoring::waf_presence_likelihood(self.detection_confidence, self.va2_report.as_ref());
+        let monitor_mode_likelihood = scoring::monitor_mode_likelihood(
+            waf_presence_likelihood,
+            active_enforcement_likelihood,
+        );
+
         PostureReport {
             target_url: self.target_url,
             timestamp: Utc::now(),
@@ -312,6 +334,8 @@ impl PostureBuilder {
             behavioral: self.behavioral,
             enforcement: self.enforcement,
             summary,
+            active_enforcement_likelihood,
+            monitor_mode_likelihood,
         }
     }
 }
@@ -368,7 +392,11 @@ mod tests {
             challenge: None,
             throttle: None,
             wbf: Va2WbfSummary {
+                // See the note in scoring.rs's fixture: these mocks stand for an
+                // enforcing WAF, so the discrimination they describe is
+                // enforcement discrimination.
                 differential_score: diff_score,
+                enforcement_differential_score: diff_score,
                 challenge_score: 0.5,
                 ..Default::default()
             },
@@ -520,6 +548,163 @@ mod tests {
         let beh = report.behavioral.unwrap();
         assert_eq!(beh.blind_spot_count, 2);
         assert!((beh.channel_coverage_score - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_posture_monitor_mode_likelihood_high_when_waf_present_and_not_blocking() {
+        use crate::virtual_adversary::{VaResultSummary, VirtualAdversaryConfig};
+
+        let det = mock_detection_result(0.9);
+        let va1 = VaRunReport {
+            target_url: "https://example.com".to_string(),
+            plan_size: 10,
+            replay_plan: vec![],
+            summary: VaResultSummary {
+                total: 10,
+                blocked: 0,
+                challenge: 0,
+                allowed: 10,
+                error: 0,
+            },
+            enforcement: VaEnforcement::PresentNotEnforcing,
+            evidence_score: 0.1,
+            evidence_summary: vec![],
+            config: VirtualAdversaryConfig::default(),
+            results: vec![],
+            started_at: std::time::Instant::now(),
+            finished_at: None,
+            replay_bundle: None,
+            audit: None,
+        };
+        let report = PostureBuilder::new("https://example.com")
+            .with_detection(&det)
+            .with_va1(&va1)
+            .compute();
+
+        // Additive fields reflect "WAF present, not enforcing":
+        assert!(
+            report.monitor_mode_likelihood > 0.7,
+            "got {}",
+            report.monitor_mode_likelihood
+        );
+        assert!(
+            report.active_enforcement_likelihood < 0.3,
+            "got {}",
+            report.active_enforcement_likelihood
+        );
+
+        // Discriminating check: grade/risk_score math is UNTOUCHED.
+        // enforcement_score for PresentNotEnforcing is 0.0 (same as
+        // NoEnforcement, per Task 3) -> base = 100 - (20*0.9) - (20*0.0) = 82.
+        assert!(
+            report.risk_score > 81.0 && report.risk_score < 83.0,
+            "got {}",
+            report.risk_score
+        );
+        assert_eq!(report.grade, PostureGrade::F);
+    }
+
+    #[test]
+    fn test_posture_monitor_mode_likelihood_zero_with_no_detection() {
+        let report = PostureBuilder::new("https://example.com").compute();
+        assert_eq!(report.monitor_mode_likelihood, 0.0);
+        assert_eq!(report.active_enforcement_likelihood, 0.0);
+    }
+
+    #[test]
+    fn test_posture_monitor_mode_likelihood_low_when_va1_alone_shows_hard_block() {
+        use crate::virtual_adversary::{VaResultSummary, VirtualAdversaryConfig};
+
+        let det = mock_detection_result(0.9);
+        let va1 = VaRunReport {
+            target_url: "https://example.com".to_string(),
+            plan_size: 10,
+            replay_plan: vec![],
+            summary: VaResultSummary {
+                total: 10,
+                blocked: 10,
+                challenge: 0,
+                allowed: 0,
+                error: 0,
+            },
+            enforcement: VaEnforcement::HardBlock,
+            evidence_score: 0.9,
+            evidence_summary: vec![],
+            config: VirtualAdversaryConfig::default(),
+            results: vec![],
+            started_at: std::time::Instant::now(),
+            finished_at: None,
+            replay_bundle: None,
+            audit: None,
+        };
+        let report = PostureBuilder::new("https://example.com")
+            .with_detection(&det)
+            .with_va1(&va1)
+            .compute();
+
+        // Regression test for the final-review-caught bug: a WAF blocking 100%
+        // of VA1 probes, with no VA2 evidence, must NOT read as "likely present
+        // but not enforcing." Before the normalization fix, this was 0.72
+        // (self-contradictory next to a HardBlock verdict).
+        assert!(
+            report.active_enforcement_likelihood > 0.9,
+            "got {}",
+            report.active_enforcement_likelihood
+        );
+        assert!(
+            report.monitor_mode_likelihood < 0.1,
+            "got {}",
+            report.monitor_mode_likelihood
+        );
+    }
+
+    #[test]
+    fn test_posture_monitor_mode_likelihood_low_when_va1_alone_shows_challenge_gate() {
+        use crate::virtual_adversary::{VaResultSummary, VirtualAdversaryConfig};
+
+        let det = mock_detection_result(0.9);
+        let va1 = VaRunReport {
+            target_url: "https://example.com".to_string(),
+            plan_size: 10,
+            replay_plan: vec![],
+            summary: VaResultSummary {
+                total: 10,
+                blocked: 0,
+                challenge: 10,
+                allowed: 0,
+                error: 0,
+            },
+            enforcement: VaEnforcement::ChallengeGate,
+            evidence_score: 0.9,
+            evidence_summary: vec![],
+            config: VirtualAdversaryConfig::default(),
+            results: vec![],
+            started_at: std::time::Instant::now(),
+            finished_at: None,
+            replay_bundle: None,
+            audit: None,
+        };
+        let report = PostureBuilder::new("https://example.com")
+            .with_detection(&det)
+            .with_va1(&va1)
+            .compute();
+
+        // Regression test for a bug found during live --posture-va1
+        // verification: a WAF challenging 100% of VA1 probes (ChallengeGate),
+        // with no VA2 evidence, must NOT read as "likely present but not
+        // enforcing" -- before this fix, active_enforcement_likelihood only
+        // counted outright-blocked requests, so this scenario produced
+        // monitor_mode_likelihood ~1.0 next to a live ChallengeGate verdict.
+        assert!(
+            report.active_enforcement_likelihood > 0.9,
+            "got {}",
+            report.active_enforcement_likelihood
+        );
+        assert!(
+            report.monitor_mode_likelihood < 0.1,
+            "got {}",
+            report.monitor_mode_likelihood
+        );
     }
 
     #[test]

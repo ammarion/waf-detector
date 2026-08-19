@@ -248,6 +248,23 @@ pub struct Va2DifferentialResult {
     pub timing_delta_ms: i128,
     /// WAF discriminated between baseline and this variant
     pub discriminated: bool,
+    /// The variant was discriminated against *and* the response indicates the
+    /// request was stopped: the variant returned an error/challenge status the
+    /// paired baseline did not. Evidence of active enforcement.
+    #[serde(default)]
+    pub enforcement_signal: bool,
+    /// The variant was discriminated against while *both* responses stayed
+    /// non-error. The request was inspected and treated differently, but not
+    /// stopped — the signature of a WAF in monitor/log-only mode. Evidence of
+    /// presence, not of enforcement.
+    #[serde(default)]
+    pub inspection_signal: bool,
+    /// This pair's two requests were byte-length identical apart from the
+    /// contents of one application-irrelevant header, so `timing_delta_ms` is
+    /// attributable to inspection rather than to the origin handling two
+    /// different requests differently.
+    #[serde(default)]
+    pub latency_matched: bool,
     #[serde(default)]
     pub outcome: Option<PairedControlOutcome>,
     /// Which channel this differential result corresponds to
@@ -306,7 +323,25 @@ pub struct Va2WbfSummary {
     pub statefulness_score: f64,
     pub challenge_score: f64,
     pub throttle_score: f64,
+    /// Fraction of paired probes where the WAF discriminated at all, for any
+    /// reason. Retained unchanged so PMI and existing consumers keep their
+    /// meaning; prefer the two fields below when reasoning about *mode*.
     pub differential_score: f64,
+    /// Fraction of paired probes the WAF discriminated against *and stopped*
+    /// (variant returned an error/challenge status the baseline did not).
+    #[serde(default)]
+    pub enforcement_differential_score: f64,
+    /// Fraction of paired probes the WAF discriminated against while letting
+    /// both requests through. This is the monitor-mode signature: something is
+    /// inspecting traffic and reacting to it without blocking.
+    #[serde(default)]
+    pub inspection_differential_score: f64,
+    /// Strength of a *consistent* added latency on attack-shaped probes that
+    /// were allowed through. Catches the hardest case: a WAF that inspects
+    /// every request and changes nothing observable about the response except
+    /// how long it took. See `compute_inspection_latency_score`.
+    #[serde(default)]
+    pub inspection_latency_score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -387,9 +422,28 @@ impl Va2Runner {
             .unwrap_or(default_pair_cap);
         let mut early_stop_reason: Option<String> = None;
         let mut rate_history: Vec<f64> = Vec::new();
+        let mut latency_pairs_run = 0usize;
         for step in &plan.steps {
+            // The length-matched latency probes are a separate instrument with a
+            // separate budget. Counting them against `pair_cap` starved the
+            // channel-coverage pairs that share it -- adding six of them
+            // silently dropped the body and method channels.
+            let is_latency_probe = step.notes.contains(LATENCY_MATCHED_NOTE);
             if step.phase == Va2Phase::ProtocolVariance && step.expected_equivalence.is_some() {
-                if differential_results.len() >= pair_cap {
+                let budget_used = if is_latency_probe {
+                    latency_pairs_run
+                } else {
+                    differential_results
+                        .iter()
+                        .filter(|d| !d.latency_matched)
+                        .count()
+                };
+                let budget_cap = if is_latency_probe {
+                    LATENCY_MIN_PAIRS
+                } else {
+                    pair_cap
+                };
+                if budget_used >= budget_cap {
                     results.push(Va2RunResult {
                         step_id: step.id,
                         phase: step.phase,
@@ -400,16 +454,25 @@ impl Va2Runner {
                     });
                     continue;
                 }
+                // Convergence is a statement about the content-discrimination
+                // probes only: they stop telling us anything new once the
+                // discrimination rate settles. The latency probes have not run
+                // at that point and answer a different question, so stopping
+                // them here silently disabled the whole latency signal -- the
+                // control matrix showed every latency pair as "skipped:
+                // confidence converged after 6 pairs".
                 if let Some(reason) = &early_stop_reason {
-                    results.push(Va2RunResult {
-                        step_id: step.id,
-                        phase: step.phase,
-                        kind: step.kind,
-                        status: None,
-                        duration_ms: 0,
-                        error: Some(format!("skipped: {reason}")),
-                    });
-                    continue;
+                    if !is_latency_probe {
+                        results.push(Va2RunResult {
+                            step_id: step.id,
+                            phase: step.phase,
+                            kind: step.kind,
+                            status: None,
+                            duration_ms: 0,
+                            error: Some(format!("skipped: {reason}")),
+                        });
+                        continue;
+                    }
                 }
             }
             if step.delay_ms > 0 {
@@ -435,27 +498,49 @@ impl Va2Runner {
                         if let Some(ref_id) = step.expected_equivalence {
                             if let Some(ref_resp) = baseline_responses.get(&ref_id) {
                                 differential_results.push(compute_differential(
-                                    step.id,
-                                    ref_id,
-                                    ref_resp,
-                                    &resp,
-                                    step.channel,
-                                    baseline_durations.get(&ref_id).copied().unwrap_or(0),
-                                    duration,
+                                    PairedObservation {
+                                        step_id: step.id,
+                                        baseline_id: ref_id,
+                                        baseline: ref_resp,
+                                        variant: &resp,
+                                        channel: step.channel,
+                                        baseline_duration_ms: baseline_durations
+                                            .get(&ref_id)
+                                            .copied()
+                                            .unwrap_or(0),
+                                        variant_duration_ms: duration,
+                                        latency_matched: is_latency_probe,
+                                    },
                                 ));
-                                let discriminated = differential_results
+                                if is_latency_probe {
+                                    latency_pairs_run += 1;
+                                }
+                                // Convergence tracks the channel-coverage pairs
+                                // only. The latency probes are deliberately
+                                // repetitive, so folding them in would look
+                                // like convergence and stop the run early.
+                                let coverage_pairs: Vec<&Va2DifferentialResult> =
+                                    differential_results
+                                        .iter()
+                                        .filter(|diff| !diff.latency_matched)
+                                        .collect();
+                                let discriminated = coverage_pairs
                                     .iter()
                                     .filter(|diff| diff.discriminated)
                                     .count();
-                                let rate = discriminated as f64 / differential_results.len() as f64;
+                                let rate = if coverage_pairs.is_empty() {
+                                    0.0
+                                } else {
+                                    discriminated as f64 / coverage_pairs.len() as f64
+                                };
                                 rate_history.push(rate);
-                                if differential_results.len() >= 6
+                                if coverage_pairs.len() >= 6
                                     && early_stop_reason.is_none()
                                     && has_confidence_converged(&rate_history)
                                 {
                                     early_stop_reason = Some(format!(
                                         "confidence converged after {} pairs",
-                                        differential_results.len()
+                                        coverage_pairs.len()
                                     ));
                                 }
                             }
@@ -513,9 +598,18 @@ impl Va2Runner {
             &differential_results,
         );
         let pmi = compute_pmi(&wbf);
-        let channel_coverage = compute_channel_coverage(&differential_results);
+        // Channel coverage and the paired-control summary describe the
+        // content-discrimination probes. The latency probes measure a different
+        // thing on purpose-built traffic, so they are excluded here rather than
+        // quietly shifting metrics that already have a defined meaning.
+        let coverage_differential: Vec<Va2DifferentialResult> = differential_results
+            .iter()
+            .filter(|diff| !diff.latency_matched)
+            .cloned()
+            .collect();
+        let channel_coverage = compute_channel_coverage(&coverage_differential);
         let paired_control = build_paired_control_summary(
-            &differential_results,
+            &coverage_differential,
             channel_coverage.as_ref(),
             pair_cap,
             early_stop_reason,
@@ -632,15 +726,32 @@ fn compute_normalization_variance(
     }
 }
 
-fn compute_differential(
+/// One executed paired probe: the control response and the variant response,
+/// plus what we know about how the pair was built.
+struct PairedObservation<'a> {
     step_id: u32,
     baseline_id: u32,
-    baseline: &Va2HttpResponse,
-    variant: &Va2HttpResponse,
+    baseline: &'a Va2HttpResponse,
+    variant: &'a Va2HttpResponse,
     channel: Option<Va2ProbeChannel>,
     baseline_duration_ms: u128,
     variant_duration_ms: u128,
-) -> Va2DifferentialResult {
+    /// Whether the pair's two requests are interchangeable to the origin. See
+    /// `Va2DifferentialResult::latency_matched`.
+    latency_matched: bool,
+}
+
+fn compute_differential(observation: PairedObservation<'_>) -> Va2DifferentialResult {
+    let PairedObservation {
+        step_id,
+        baseline_id,
+        baseline,
+        variant,
+        channel,
+        baseline_duration_ms,
+        variant_duration_ms,
+        latency_matched,
+    } = observation;
     let status_delta = baseline.status.abs_diff(variant.status);
     let baseline_len = baseline.body.len() as f64;
     let variant_len = variant.body.len() as f64;
@@ -658,6 +769,17 @@ fn compute_differential(
         || pct_change > 0.15
         || header_mutation_count > 0
         || timing_delta_ms.abs() > 200;
+
+    // Split discrimination by what it implies. `discriminated` alone conflates
+    // "the WAF stopped this request" with "the WAF looked at this request and
+    // let it through" -- and the second is exactly what a monitor-mode WAF
+    // does. Treating both as enforcement evidence made detecting monitor-mode
+    // inspection *lower* the reported monitor-mode likelihood.
+    let variant_stopped = variant.status >= 400 && baseline.status < 400;
+    let enforcement_signal = discriminated && variant_stopped;
+    let inspection_signal =
+        discriminated && !variant_stopped && baseline.status < 400 && variant.status < 400;
+
     let outcome = if baseline.status >= 400 && variant.status >= 400 && status_delta == 0 {
         Some(PairedControlOutcome::Inconclusive)
     } else if discriminated {
@@ -673,8 +795,84 @@ fn compute_differential(
         header_mutation_count,
         timing_delta_ms,
         discriminated,
+        enforcement_signal,
+        inspection_signal,
+        latency_matched,
         outcome,
         channel,
+    }
+}
+
+/// Headers whose *value* legitimately differs between any two requests, even
+/// from an identical origin with no intermediary at all: clocks, per-request
+/// trace IDs, cache-age counters, and body-length echoes.
+///
+/// Comparing these by value made `count_header_mutations` return a nonzero
+/// count for every pair against every target. Measured against a bare
+/// `python3 -m http.server` (no WAF, no proxy, no rules): 6 of 6 pairs came
+/// back `discriminated` and `differential_score` was 1.0 — the maximum —
+/// because `Date` ticked one second between the baseline and variant request.
+///
+/// These are excluded from value comparison only. A volatile header that
+/// appears on *one side of the pair and not the other* still counts as a
+/// key-set mutation, because that is real signal (e.g. a WAF attaching
+/// `Set-Cookie` to a flagged request but not a clean one).
+const VOLATILE_HEADER_NAMES: &[&str] = &[
+    // Clocks and freshness
+    "date",
+    "age",
+    "expires",
+    "last-modified",
+    "etag",
+    // Echoes body size, already captured by body_length_pct_change
+    "content-length",
+    // Per-request trace/correlation IDs
+    "x-request-id",
+    "request-id",
+    "x-correlation-id",
+    "x-trace-id",
+    "traceparent",
+    "cf-ray",
+    "x-amz-cf-id",
+    "x-amz-request-id",
+    "x-amzn-requestid",
+    "x-amzn-trace-id",
+    "x-akamai-request-id",
+    "akamai-grn",
+    "x-msedge-ref",
+    "x-azure-ref",
+    "x-iinfo",
+    "x-cdn-requestid",
+    // Per-request cache and timing telemetry
+    "x-cache",
+    "x-cache-hits",
+    "x-served-by",
+    "x-timer",
+    "server-timing",
+    "x-fastly-request-id",
+    // Session values that rotate per response
+    "set-cookie",
+];
+
+fn is_volatile_header(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    VOLATILE_HEADER_NAMES.contains(&lower.as_str())
+}
+
+/// Header differences between a paired baseline and variant, split by kind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct HeaderMutations {
+    /// Headers present on exactly one side of the pair. Strong signal: an
+    /// intermediary added or withheld a header based on request content.
+    key_set: usize,
+    /// Headers present on both sides whose values differ, excluding
+    /// `VOLATILE_HEADER_NAMES`.
+    stable_value: usize,
+}
+
+impl HeaderMutations {
+    fn total(self) -> usize {
+        self.key_set + self.stable_value
     }
 }
 
@@ -682,19 +880,32 @@ fn count_header_mutations(
     baseline: &HashMap<String, String>,
     variant: &HashMap<String, String>,
 ) -> usize {
-    let mut count = 0usize;
+    classify_header_mutations(baseline, variant).total()
+}
+
+fn classify_header_mutations(
+    baseline: &HashMap<String, String>,
+    variant: &HashMap<String, String>,
+) -> HeaderMutations {
+    let mut mutations = HeaderMutations::default();
+
     for (name, value) in baseline {
         match variant.get(name) {
-            Some(other) if other == value => {}
-            _ => count += 1,
+            Some(other) => {
+                if other != value && !is_volatile_header(name) {
+                    mutations.stable_value += 1;
+                }
+            }
+            None => mutations.key_set += 1,
         }
     }
     for name in variant.keys() {
         if !baseline.contains_key(name) {
-            count += 1;
+            mutations.key_set += 1;
         }
     }
-    count
+
+    mutations
 }
 
 fn has_confidence_converged(rate_history: &[f64]) -> bool {
@@ -981,19 +1192,176 @@ fn compute_wbf(
         .as_ref()
         .map(|t| if t.triggered { 1.0 } else { 0.2 })
         .unwrap_or(0.0);
-    let differential_score = if differential.is_empty() {
+    // `differential_score` keeps its original meaning -- the discrimination
+    // rate over the path/query/body/method probes -- so PMI and existing
+    // consumers are unaffected.
+    let content_pairs: Vec<&Va2DifferentialResult> =
+        differential.iter().filter(|d| !d.latency_matched).collect();
+    let differential_score = if content_pairs.is_empty() {
         0.0
     } else {
-        let disc = differential.iter().filter(|d| d.discriminated).count();
-        (disc as f64 / differential.len() as f64).min(1.0)
+        (content_pairs.iter().filter(|d| d.discriminated).count() as f64
+            / content_pairs.len() as f64)
+            .min(1.0)
     };
+
+    // Enforcement is read over *every* pair. A variant that came back 4xx/5xx
+    // where its control came back 2xx is unambiguous regardless of how the pair
+    // was constructed.
+    let enforcement_differential_score = if differential.is_empty() {
+        0.0
+    } else {
+        (differential.iter().filter(|d| d.enforcement_signal).count() as f64
+            / differential.len() as f64)
+            .min(1.0)
+    };
+
+    // Inspection-without-blocking is read *only* over the length-matched
+    // pairs, because it is the one conclusion the other pairs cannot support.
+    // Their benign and attack sides are different requests -- different paths,
+    // different lengths -- so the origin alone answers them differently.
+    // Measured against the bare-origin control (a static file server with no
+    // proxy of any kind in front of it), the content pairs produced a 0.5
+    // discrimination rate purely from `/api/v1/status` and
+    // `/../../etc/passwd` returning different 404 bodies and header sets.
+    // Reading that as "something inspected this request" put a WAF on an origin
+    // that plainly had none.
+    let equivalent_pairs: Vec<&Va2DifferentialResult> =
+        differential.iter().filter(|d| d.latency_matched).collect();
+    let inspection_differential_score = if equivalent_pairs.is_empty() {
+        0.0
+    } else {
+        (equivalent_pairs
+            .iter()
+            .filter(|d| d.inspection_signal)
+            .count() as f64
+            / equivalent_pairs.len() as f64)
+            .min(1.0)
+    };
+
     Va2WbfSummary {
         normalization_score,
         statefulness_score,
         challenge_score,
         throttle_score,
         differential_score,
+        enforcement_differential_score,
+        inspection_differential_score,
+        inspection_latency_score: compute_inspection_latency_score(differential),
     }
+}
+
+/// Header carrying the length-matched inspection-cost payloads. Deliberately
+/// namespaced and meaningless to any application, so the origin has no reason
+/// to branch on it while anything inspecting the request still has to read it.
+pub(crate) const INSPECTION_PROBE_HEADER: &str = "X-Waf-Detect-Inspection-Probe";
+
+/// Note prefix marking a paired probe as length-matched, i.e. usable for
+/// latency attribution. See the comment on those probes for why the other
+/// pairs are not.
+pub(crate) const LATENCY_MATCHED_NOTE: &str = "latency-matched-";
+
+/// Minimum pairs before a latency shift is worth interpreting. Below this the
+/// sign agreement required below is satisfiable by chance too easily.
+const LATENCY_MIN_PAIRS: usize = 6;
+
+/// Fraction of pairs whose attack-shaped probe must be the *slower* of the two.
+/// Random jitter lands near 0.5; an intermediary that inspects pays the cost
+/// on every request, so real inspection is strongly one-sided.
+const LATENCY_MIN_POSITIVE_FRACTION: f64 = 0.75;
+
+/// Median added milliseconds below which a shift is treated as noise rather
+/// than inspection, regardless of how one-sided it is. Scheduling and
+/// connection-reuse effects live here.
+const LATENCY_NOISE_FLOOR_MS: f64 = 15.0;
+
+/// Signal-to-noise ratio (median shift over its own dispersion) at which
+/// confidence in the latency signal saturates. Three times the gate below, so
+/// clearing the gate outright rather than scraping past it reads as certain.
+const LATENCY_SNR_SATURATION: f64 = 4.5;
+
+/// How far the median shift must stand clear of its own dispersion (median
+/// absolute deviation) before it counts as inspection rather than jitter.
+const LATENCY_CONSISTENCY_FACTOR: f64 = 1.5;
+
+fn median_of(values: &mut [f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        (values[mid - 1] + values[mid]) / 2.0
+    } else {
+        values[mid]
+    }
+}
+
+/// How strongly the paired probes show a consistent latency penalty on
+/// attack-shaped requests that were nonetheless allowed through.
+///
+/// This is the one signal available against a WAF that blocks nothing, strips
+/// its headers, and leaves the response byte-identical: it still has to *read*
+/// the request before allowing it, and that costs time on every flagged
+/// request but not on the paired clean one.
+///
+/// Deliberately robust rather than clever. Each pair is its own control, so
+/// the pair deltas already cancel the target's baseline RTT; what remains is
+/// a one-sided-ness test (how many pairs were slower on the attack side) plus
+/// a median magnitude, both resistant to a single outlier request. Pairs the
+/// WAF actually blocked are excluded -- a block short-circuits processing and
+/// its timing says nothing about inspection cost.
+///
+/// Returns 0.0 rather than a small number when any gate fails, so that a
+/// weak, noisy shift contributes nothing at all instead of quietly adding up.
+fn compute_inspection_latency_score(differential: &[Va2DifferentialResult]) -> f64 {
+    // Only length-matched pairs. Mixing in the path/query pairs both dilutes a
+    // real signal (their benign and attack sides differ in cost for reasons
+    // unrelated to inspection) and manufactures a fake one.
+    let mut deltas: Vec<f64> = differential
+        .iter()
+        .filter(|d| d.latency_matched && !d.enforcement_signal)
+        .map(|d| d.timing_delta_ms as f64)
+        .collect();
+    if deltas.len() < LATENCY_MIN_PAIRS {
+        return 0.0;
+    }
+
+    let positive_fraction =
+        deltas.iter().filter(|delta| **delta > 0.0).count() as f64 / deltas.len() as f64;
+    if positive_fraction < LATENCY_MIN_POSITIVE_FRACTION {
+        return 0.0;
+    }
+
+    let median = median_of(&mut deltas);
+    if median < LATENCY_NOISE_FLOOR_MS {
+        return 0.0;
+    }
+
+    // The magnitude floor alone is not enough. Measured against the bare
+    // `python3 -m http.server` control, 5 of 6 pairs were already "slower on
+    // the attack side" purely from connection and code-path effects (deltas of
+    // 15, 16, 8, 1, -2, 1 ms) -- the one-sidedness gate passed and only the
+    // floor rejected it. So also require the shift to be *consistent*: the
+    // median must stand clear of the spread around it. Real inspection cost is
+    // paid on every flagged request and lands in a tight band; network noise
+    // does not. On that control the median (4.5ms) sits below its own
+    // dispersion, which rejects it a second time and for the right reason.
+    let mut deviations: Vec<f64> = deltas.iter().map(|delta| (delta - median).abs()).collect();
+    let median_absolute_deviation = median_of(&mut deviations);
+    if median < LATENCY_CONSISTENCY_FACTOR * median_absolute_deviation {
+        return 0.0;
+    }
+
+    // Score the *consistency* of the penalty, not its size. Absolute
+    // milliseconds measure how slow the WAF is, which says nothing about how
+    // sure we are that one is there: a fast WAF adding a reliable 20ms is
+    // stronger evidence than a sluggish origin varying by 100ms. Signal-to-
+    // noise -- the median shift measured against its own dispersion -- is what
+    // actually tracks confidence.
+    let snr = median / median_absolute_deviation.max(1.0);
+    ((snr - LATENCY_CONSISTENCY_FACTOR) / (LATENCY_SNR_SATURATION - LATENCY_CONSISTENCY_FACTOR))
+        .clamp(0.0, 1.0)
 }
 
 fn compute_pmi(wbf: &Va2WbfSummary) -> Va2PmiScore {
@@ -1017,6 +1385,31 @@ fn compute_pmi(wbf: &Va2WbfSummary) -> Va2PmiScore {
 }
 
 impl Va2CampaignPlan {
+    /// Minimum spacing kept in front of a length-matched latency probe even in
+    /// a "go fast" run.
+    ///
+    /// Callers that embed a campaign (the posture command, the fixture
+    /// harness) zero every `delay_ms` to keep the run short. For the
+    /// content-discrimination probes that is harmless. For the latency probes
+    /// it is not: back-to-back requests measure the target's accept queue and
+    /// connection reuse rather than its inspection cost. Measured against the
+    /// bare-origin control, zeroing these delays alone was enough to invent a
+    /// consistent latency shift where the spaced-out run correctly found none.
+    pub const FAST_RUN_LATENCY_PROBE_DELAY_MS: u64 = 150;
+
+    /// Shorten a campaign for an embedded run without corrupting the timing
+    /// measurements. Use this instead of setting `delay_ms = 0` across the
+    /// board.
+    pub fn trim_delays_for_embedded_run(&mut self) {
+        for step in &mut self.steps {
+            step.delay_ms = if step.notes.contains(LATENCY_MATCHED_NOTE) {
+                Self::FAST_RUN_LATENCY_PROBE_DELAY_MS
+            } else {
+                0
+            };
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.phases.is_empty() {
             return Err(anyhow!("va2 campaign requires at least one phase"));
@@ -1273,6 +1666,135 @@ pub fn build_va2_campaign_plan(
                         attack_method: "DELETE",
                         attack_path: "/api/v1/status",
                         attack_query: None,
+                        attack_headers: &[],
+                        attack_body: None,
+                    },
+                    // Length-matched inspection-cost probes.
+                    //
+                    // Every other pair below differs between its benign and
+                    // attack side in ways the *origin* also reacts to: a
+                    // different path, a longer query string, a route that 404s
+                    // where the control 200s. That is fine for spotting a block
+                    // or a rewritten response, but it makes response *timing*
+                    // uninterpretable -- measured against a plain pass-through
+                    // reverse proxy with no rules at all, the path-channel pair
+                    // alone showed a ~17ms penalty purely from the origin
+                    // handling the two paths differently.
+                    //
+                    // These pairs isolate inspection cost instead. Same method,
+                    // same path, no query, no body, and one custom header whose
+                    // value is *the same length* on both sides -- byte-for-byte
+                    // identical requests apart from what that header contains.
+                    // An origin ignores a header it does not know; something
+                    // inspecting the request has to read it either way. Any
+                    // latency difference is therefore attributable to
+                    // inspection rather than to origin routing.
+                    //
+                    // Each of the three payload families is sent twice: once in
+                    // the custom header, once as an unknown query parameter.
+                    //
+                    // The split is not for sample size, it is because neither
+                    // channel alone suffices. Measured against real Coraza
+                    // running the OWASP Core Rule Set, a SQLi payload in an
+                    // arbitrary custom header is not flagged even with
+                    // `SecRuleEngine On` -- default paranoia does not inspect
+                    // unknown headers -- so header-only probes are invisible to
+                    // it. The query channel is where CRS actually looks (ARGS),
+                    // and an unknown parameter name (`__wd_inspect`) keeps the
+                    // pair origin-equivalent for the same reason an unknown
+                    // header does: the application has no handler for it.
+                    //
+                    // Query-channel equivalence is the weaker of the two -- an
+                    // application that echoes or validates every query parameter
+                    // could respond differently with no WAF present -- which is
+                    // why both channels are kept rather than switching wholesale.
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Header,
+                        benign_note: "latency-matched-sqli-control-1",
+                        benign_method: "GET",
+                        benign_path: "/",
+                        benign_query: None,
+                        benign_headers: &[(INSPECTION_PROBE_HEADER, "xxxxxxxxxxxxxxxx")],
+                        benign_body: None,
+                        attack_note: "latency-matched-sqli-probe-1",
+                        attack_method: "GET",
+                        attack_path: "/",
+                        attack_query: None,
+                        attack_headers: &[(INSPECTION_PROBE_HEADER, "1' OR '1'='1 -- ")],
+                        attack_body: None,
+                    },
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Query,
+                        benign_note: "latency-matched-sqli-query-control",
+                        benign_method: "GET",
+                        benign_path: "/",
+                        benign_query: Some("__wd_inspect=xxxxxxxxxxxxxxxx"),
+                        benign_headers: &[],
+                        benign_body: None,
+                        attack_note: "latency-matched-sqli-query-probe",
+                        attack_method: "GET",
+                        attack_path: "/",
+                        attack_query: Some("__wd_inspect=1' OR '1'='1 -- "),
+                        attack_headers: &[],
+                        attack_body: None,
+                    },
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Header,
+                        benign_note: "latency-matched-xss-control-1",
+                        benign_method: "GET",
+                        benign_path: "/",
+                        benign_query: None,
+                        benign_headers: &[(INSPECTION_PROBE_HEADER, "xxxxxxxxxxxxxxxxxxxxxxxxx")],
+                        benign_body: None,
+                        attack_note: "latency-matched-xss-probe-1",
+                        attack_method: "GET",
+                        attack_path: "/",
+                        attack_query: None,
+                        attack_headers: &[(INSPECTION_PROBE_HEADER, "<script>alert(1)</script>")],
+                        attack_body: None,
+                    },
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Query,
+                        benign_note: "latency-matched-xss-query-control",
+                        benign_method: "GET",
+                        benign_path: "/",
+                        benign_query: Some("__wd_inspect=xxxxxxxxxxxxxxxxxxxxxxxxx"),
+                        benign_headers: &[],
+                        benign_body: None,
+                        attack_note: "latency-matched-xss-query-probe",
+                        attack_method: "GET",
+                        attack_path: "/",
+                        attack_query: Some("__wd_inspect=<script>alert(1)</script>"),
+                        attack_headers: &[],
+                        attack_body: None,
+                    },
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Header,
+                        benign_note: "latency-matched-traversal-control-1",
+                        benign_method: "GET",
+                        benign_path: "/",
+                        benign_query: None,
+                        benign_headers: &[(INSPECTION_PROBE_HEADER, "xxxxxxxxxxxxxxxxxxxxxx")],
+                        benign_body: None,
+                        attack_note: "latency-matched-traversal-probe-1",
+                        attack_method: "GET",
+                        attack_path: "/",
+                        attack_query: None,
+                        attack_headers: &[(INSPECTION_PROBE_HEADER, "../../../../etc/passwd")],
+                        attack_body: None,
+                    },
+                    PairedProbe {
+                        channel: Va2ProbeChannel::Query,
+                        benign_note: "latency-matched-traversal-query-control",
+                        benign_method: "GET",
+                        benign_path: "/",
+                        benign_query: Some("__wd_inspect=xxxxxxxxxxxxxxxxxxxxxx"),
+                        benign_headers: &[],
+                        benign_body: None,
+                        attack_note: "latency-matched-traversal-query-probe",
+                        attack_method: "GET",
+                        attack_path: "/",
+                        attack_query: Some("__wd_inspect=../../../../etc/passwd"),
                         attack_headers: &[],
                         attack_body: None,
                     },
@@ -1652,6 +2174,7 @@ mod tests {
             challenge_score: 1.0,
             throttle_score: 1.0,
             differential_score: 1.0,
+            ..Default::default()
         };
         let pmi = compute_pmi(&wbf);
         assert_eq!(pmi.label, "strong");
@@ -1759,11 +2282,164 @@ mod tests {
             headers: HashMap::new(),
             body: "baseline ok".to_string(),
         };
-        let result = compute_differential(2, 1, &baseline, &variant, None, 100, 105);
+        let result = compute_differential(PairedObservation {
+            step_id: 2,
+            baseline_id: 1,
+            baseline: &baseline,
+            variant: &variant,
+            channel: None,
+            baseline_duration_ms: 100,
+            variant_duration_ms: 105,
+            latency_matched: false,
+        });
         assert_eq!(result.step_id, 2);
         assert_eq!(result.baseline_step_id, 1);
         assert_eq!(result.status_delta, 0);
         assert!(result.body_length_pct_change < 0.01);
+        assert!(!result.discriminated);
+    }
+
+    fn latency_pairs(deltas: &[i128]) -> Vec<Va2DifferentialResult> {
+        deltas
+            .iter()
+            .enumerate()
+            .map(|(i, delta)| Va2DifferentialResult {
+                step_id: (i as u32 * 2) + 2,
+                baseline_step_id: (i as u32 * 2) + 1,
+                timing_delta_ms: *delta,
+                latency_matched: true,
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_latency_score_rejects_the_measured_bare_origin_control() {
+        // These are the actual per-pair deltas recorded against
+        // `python3 -m http.server` serving one static file: no WAF, no proxy,
+        // no rules. Five of six pairs were slower on the attack side purely
+        // from connection and code-path effects, so the one-sidedness gate
+        // passes and the magnitude/consistency gates have to do the work.
+        let score = compute_inspection_latency_score(&latency_pairs(&[15, 16, 8, 1, -2, 1]));
+        assert_eq!(score, 0.0, "bare origin must not read as inspection");
+    }
+
+    #[test]
+    fn test_latency_score_detects_a_consistent_inspection_penalty() {
+        // A WAF that inspects every flagged request pays a similar cost each
+        // time: a tight band well clear of its own dispersion.
+        let score = compute_inspection_latency_score(&latency_pairs(&[58, 62, 60, 65, 55, 61]));
+        assert!(
+            score > 0.3,
+            "a consistent ~60ms penalty should register, got {score}"
+        );
+    }
+
+    #[test]
+    fn test_latency_score_rejects_a_large_but_erratic_shift() {
+        // Same median magnitude as a real penalty, but the spread swamps it --
+        // this is what a congested network or a noisy origin looks like, and it
+        // must not be reported as inspection.
+        let score = compute_inspection_latency_score(&latency_pairs(&[5, 210, -80, 60, 190, -60]));
+        assert_eq!(score, 0.0, "erratic timing must not read as inspection");
+    }
+
+    #[test]
+    fn test_latency_score_requires_a_minimum_number_of_pairs() {
+        let score = compute_inspection_latency_score(&latency_pairs(&[60, 62, 61]));
+        assert_eq!(score, 0.0, "too few pairs to interpret a shift");
+    }
+
+    #[test]
+    fn test_latency_score_ignores_blocked_pairs() {
+        // A block short-circuits processing, so its timing says nothing about
+        // inspection cost; with those pairs excluded there is nothing left to
+        // meet the minimum-pairs gate.
+        let mut pairs = latency_pairs(&[60, 62, 61, 59, 63, 58]);
+        for pair in pairs.iter_mut() {
+            pair.enforcement_signal = true;
+        }
+        assert_eq!(compute_inspection_latency_score(&pairs), 0.0);
+    }
+
+    #[test]
+    fn test_volatile_header_values_are_not_mutations() {
+        // Regression test for the measured false positive: against a bare
+        // `python3 -m http.server` (no WAF, no proxy, no rules) every pair came
+        // back discriminated and `differential_score` was 1.0, solely because
+        // `Date` advanced one second between the two requests.
+        let baseline = HashMap::from([
+            ("server".to_string(), "SimpleHTTP/0.6".to_string()),
+            (
+                "date".to_string(),
+                "Tue, 18 Aug 2026 22:30:23 GMT".to_string(),
+            ),
+            ("content-length".to_string(), "118".to_string()),
+        ]);
+        let variant = HashMap::from([
+            ("server".to_string(), "SimpleHTTP/0.6".to_string()),
+            (
+                "date".to_string(),
+                "Tue, 18 Aug 2026 22:30:24 GMT".to_string(),
+            ),
+            ("content-length".to_string(), "118".to_string()),
+        ]);
+        let mutations = classify_header_mutations(&baseline, &variant);
+        assert_eq!(mutations, HeaderMutations::default());
+        assert_eq!(count_header_mutations(&baseline, &variant), 0);
+    }
+
+    #[test]
+    fn test_volatile_header_present_on_only_one_side_is_a_key_set_mutation() {
+        // The value of `set-cookie` rotates and must not be compared, but a WAF
+        // attaching it to a flagged request and not to a clean one is exactly
+        // the signal we are looking for.
+        let baseline = HashMap::from([("server".to_string(), "nginx".to_string())]);
+        let variant = HashMap::from([
+            ("server".to_string(), "nginx".to_string()),
+            ("set-cookie".to_string(), "incap_ses=abc".to_string()),
+        ]);
+        let mutations = classify_header_mutations(&baseline, &variant);
+        assert_eq!(mutations.key_set, 1);
+        assert_eq!(mutations.stable_value, 0);
+    }
+
+    #[test]
+    fn test_stable_header_value_change_is_a_mutation() {
+        // A non-volatile header changing value between the pair is real signal
+        // (here an intermediary rewriting `server` on the flagged request).
+        let baseline = HashMap::from([("server".to_string(), "nginx".to_string())]);
+        let variant = HashMap::from([("server".to_string(), "cloudflare".to_string())]);
+        let mutations = classify_header_mutations(&baseline, &variant);
+        assert_eq!(mutations.key_set, 0);
+        assert_eq!(mutations.stable_value, 1);
+    }
+
+    #[test]
+    fn test_differential_not_discriminated_on_volatile_headers_alone() {
+        // End-to-end through compute_differential: identical responses whose
+        // only difference is a ticking clock must not read as discrimination.
+        let baseline = Va2HttpResponse {
+            status: 200,
+            headers: HashMap::from([("date".to_string(), "a".to_string())]),
+            body: "same body".to_string(),
+        };
+        let variant = Va2HttpResponse {
+            status: 200,
+            headers: HashMap::from([("date".to_string(), "b".to_string())]),
+            body: "same body".to_string(),
+        };
+        let result = compute_differential(PairedObservation {
+            step_id: 2,
+            baseline_id: 1,
+            baseline: &baseline,
+            variant: &variant,
+            channel: None,
+            baseline_duration_ms: 100,
+            variant_duration_ms: 108,
+            latency_matched: false,
+        });
+        assert_eq!(result.header_mutation_count, 0);
         assert!(!result.discriminated);
     }
 
@@ -1779,15 +2455,16 @@ mod tests {
             headers: HashMap::new(),
             body: "access denied".to_string(),
         };
-        let result = compute_differential(
-            2,
-            1,
-            &baseline,
-            &variant,
-            Some(Va2ProbeChannel::Query),
-            80,
-            200,
-        );
+        let result = compute_differential(PairedObservation {
+            step_id: 2,
+            baseline_id: 1,
+            baseline: &baseline,
+            variant: &variant,
+            channel: Some(Va2ProbeChannel::Query),
+            baseline_duration_ms: 80,
+            variant_duration_ms: 200,
+            latency_matched: false,
+        });
         assert_eq!(result.status_delta, 203);
         assert!(result.discriminated);
         assert_eq!(result.channel, Some(Va2ProbeChannel::Query));
@@ -1806,6 +2483,7 @@ mod tests {
                 discriminated: true,
                 outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Query),
+                ..Default::default()
             },
             Va2DifferentialResult {
                 step_id: 4,
@@ -1817,6 +2495,7 @@ mod tests {
                 discriminated: false,
                 outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Header),
+                ..Default::default()
             },
         ];
         let wbf = compute_wbf(
@@ -1838,15 +2517,79 @@ mod tests {
             budget: 60,
         };
         let plan = build_va2_campaign_plan("https://example.com", &phases, config).unwrap();
-        // Should have baseline (3) + path variance (3) + paired probes (9 pairs = 18) = 24 steps
-        assert_eq!(plan.steps.len(), 24);
+        // baseline (3) + path variance (3) + content pairs (9 pairs = 18)
+        // + length-matched latency pairs (6 pairs = 12) = 36 steps
+        assert_eq!(plan.steps.len(), 36);
         // Check paired probes have correct expected_equivalence references
         let paired_steps: Vec<_> = plan
             .steps
             .iter()
             .filter(|s| s.notes.starts_with("paired-control:"))
             .collect();
-        assert_eq!(paired_steps.len(), 18);
+        assert_eq!(paired_steps.len(), 30);
+
+        // The latency probes only mean anything if both sides of each pair are
+        // genuinely interchangeable to the origin: same method, same path, no
+        // body, and a payload of equal length carried in the same single place
+        // (a custom header, or an unknown query parameter). If a future edit
+        // breaks that, `inspection_latency_score` silently goes back to
+        // measuring origin routing instead of inspection cost.
+        let latency_steps: Vec<_> = plan
+            .steps
+            .iter()
+            .filter(|s| s.notes.contains(LATENCY_MATCHED_NOTE))
+            .collect();
+        assert_eq!(latency_steps.len(), 12, "expected 6 length-matched pairs");
+        for step in &latency_steps {
+            assert_eq!(step.method, "GET");
+            assert_eq!(step.path, "/");
+            assert_eq!(step.body, None);
+            match step.channel {
+                Some(Va2ProbeChannel::Header) => {
+                    assert_eq!(step.query, None);
+                    assert_eq!(step.headers.len(), 1);
+                    assert!(step.headers.contains_key(INSPECTION_PROBE_HEADER));
+                }
+                Some(Va2ProbeChannel::Query) => {
+                    assert!(step.headers.is_empty());
+                    let query = step.query.as_deref().expect("query probe needs a query");
+                    assert!(
+                        query.starts_with("__wd_inspect="),
+                        "query probes must use the unknown-parameter name that keeps them \
+                         origin-equivalent, got {query:?}"
+                    );
+                }
+                other => panic!("unexpected latency probe channel: {other:?}"),
+            }
+        }
+        // Both channels are represented: header-only probes are invisible to
+        // default-paranoia CRS, query-only probes are the weaker of the two for
+        // origin-equivalence.
+        let latency_channels: std::collections::HashSet<_> =
+            latency_steps.iter().filter_map(|s| s.channel).collect();
+        assert!(latency_channels.contains(&Va2ProbeChannel::Header));
+        assert!(latency_channels.contains(&Va2ProbeChannel::Query));
+
+        for pair in latency_steps.chunks(2) {
+            let payload = |step: &Va2CampaignStep| -> String {
+                match step.channel {
+                    Some(Va2ProbeChannel::Query) => step.query.clone().unwrap_or_default(),
+                    _ => step
+                        .headers
+                        .get(INSPECTION_PROBE_HEADER)
+                        .cloned()
+                        .unwrap_or_default(),
+                }
+            };
+            let control = payload(pair[0]);
+            let probe = payload(pair[1]);
+            assert_eq!(
+                control.len(),
+                probe.len(),
+                "latency probe pair must be length-matched: {control:?} vs {probe:?}"
+            );
+            assert_ne!(control, probe);
+        }
         // Every second paired step should reference the one before it
         for chunk in paired_steps.chunks(2) {
             assert!(chunk[0].expected_equivalence.is_none());
@@ -2024,6 +2767,7 @@ mod tests {
                 discriminated: true,
                 outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Query),
+                ..Default::default()
             },
             Va2DifferentialResult {
                 step_id: 4,
@@ -2035,6 +2779,7 @@ mod tests {
                 discriminated: false,
                 outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Header),
+                ..Default::default()
             },
             Va2DifferentialResult {
                 step_id: 6,
@@ -2046,6 +2791,7 @@ mod tests {
                 discriminated: true,
                 outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Header),
+                ..Default::default()
             },
         ];
         let coverage = compute_channel_coverage(&results).unwrap();
@@ -2070,6 +2816,7 @@ mod tests {
                 discriminated: true,
                 outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Query),
+                ..Default::default()
             },
             Va2DifferentialResult {
                 step_id: 4,
@@ -2081,6 +2828,7 @@ mod tests {
                 discriminated: true,
                 outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Header),
+                ..Default::default()
             },
             Va2DifferentialResult {
                 step_id: 6,
@@ -2092,6 +2840,7 @@ mod tests {
                 discriminated: true,
                 outcome: Some(PairedControlOutcome::Detected),
                 channel: Some(Va2ProbeChannel::Body),
+                ..Default::default()
             },
         ];
         let coverage = compute_channel_coverage(&results).unwrap();
@@ -2112,6 +2861,7 @@ mod tests {
                 discriminated: false,
                 outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Query),
+                ..Default::default()
             },
             Va2DifferentialResult {
                 step_id: 4,
@@ -2123,6 +2873,7 @@ mod tests {
                 discriminated: false,
                 outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Header),
+                ..Default::default()
             },
             Va2DifferentialResult {
                 step_id: 6,
@@ -2134,6 +2885,7 @@ mod tests {
                 discriminated: false,
                 outcome: Some(PairedControlOutcome::NotDetected),
                 channel: Some(Va2ProbeChannel::Body),
+                ..Default::default()
             },
         ];
         let coverage = compute_channel_coverage(&results).unwrap();

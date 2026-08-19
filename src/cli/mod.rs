@@ -226,6 +226,7 @@ fn completion_global_options() -> &'static [&'static str] {
         "--posture",
         "--posture-summary",
         "--posture-va2",
+        "--posture-va1",
         "--posture-json",
         "--va",
         "--va-replay-run",
@@ -689,9 +690,7 @@ impl SimpleCliApp {
                     budget: 12,
                 },
             )?;
-            for step in &mut plan.steps {
-                step.delay_ms = 0;
-            }
+            plan.trim_delays_for_embedded_run();
             let mut audit = AuditSession::new("posture_summary_va2", &target, true)?;
             let runner = Va2Runner::new()?;
             let mut va2_report = match runner.run_plan_with_target(plan, &target).await {
@@ -725,9 +724,7 @@ impl SimpleCliApp {
                 let config = Va2CampaignConfig::default();
                 let target = resolve_authorized_target(&normalized)?;
                 let mut plan = build_va2_campaign_plan(&target.normalized_url, &phases, config)?;
-                for step in &mut plan.steps {
-                    step.delay_ms = 0;
-                }
+                plan.trim_delays_for_embedded_run();
                 let mut audit = AuditSession::new("posture_va2", &target, true)?;
                 let runner = Va2Runner::new()?;
                 let mut report = match runner.run_plan_with_target(plan, &target).await {
@@ -740,6 +737,39 @@ impl SimpleCliApp {
                 audit.record_completed()?;
                 report.audit = Some(audit.snapshot());
                 builder = builder.with_va2(&report);
+            }
+
+            if matches.get_flag("posture-va1") {
+                // Trim the embedded run for speed, matching --posture-va2's precedent of
+                // zeroing its own campaign's step delays for the same reason: --posture
+                // should stay fast even with enforcement testing included. Unlike VA2's
+                // step-level delay, VA1's RateLimiter hard-rejects a zero delay by design
+                // (deliberate rate-limiting for adversarial/attack-payload testing) -- use
+                // the smallest valid nonzero delay instead of disabling the limiter.
+                let config = VirtualAdversaryConfig {
+                    request_delay: std::time::Duration::from_millis(50),
+                    ..VirtualAdversaryConfig::default()
+                };
+                let target = resolve_authorized_target(&normalized)?;
+                let mut audit = AuditSession::new("posture_va1", &target, true)?;
+                let mut runner = VirtualAdversaryRunner::new(config)?;
+                let mut report = match runner.run_with_events_for_target(&target, |_, _| {}, |_| {})
+                {
+                    Ok(report) => report,
+                    Err(err) => {
+                        audit.record_failed(&err.to_string())?;
+                        return Err(err);
+                    }
+                };
+                audit.record_completed()?;
+                report.audit = Some(audit.snapshot());
+                let waf_confidence = detection_result.waf_confidence().unwrap_or(0.0);
+                report.enforcement = crate::virtual_adversary::classify_enforcement(
+                    &report.summary,
+                    report.evidence_score,
+                    Some(waf_confidence),
+                );
+                builder = builder.with_va1(&report);
             }
 
             let posture = builder.compute();
@@ -769,6 +799,14 @@ impl SimpleCliApp {
                         "  Enforce:    {} ({:.0}%)",
                         enf.enforcement,
                         enf.confidence_score * 100.0
+                    );
+                }
+                if (posture.enforcement.is_some() || posture.behavioral.is_some())
+                    && posture.monitor_mode_likelihood > 0.01
+                {
+                    println!(
+                        "  Monitor-mode likelihood: {:.0}%",
+                        posture.monitor_mode_likelihood * 100.0
                     );
                 }
                 println!("  Summary:    {}", posture.summary);
@@ -3497,6 +3535,13 @@ The tool automatically adds https:// for bare domains where supported.
             Arg::new("posture-va2")
                 .long("posture-va2")
                 .help("Include behavioral analysis in posture report")
+                .action(clap::ArgAction::SetTrue)
+                .requires("posture"),
+        )
+        .arg(
+            Arg::new("posture-va1")
+                .long("posture-va1")
+                .help("Include enforcement testing (VA1) in posture report")
                 .action(clap::ArgAction::SetTrue)
                 .requires("posture"),
         )

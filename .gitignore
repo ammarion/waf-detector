@@ -24,6 +24,9 @@ CLAUDE.md
 # Worktrees
 .worktrees/
 
+# Superpowers subagent-driven-development scratch workspace
+.superpowers/
+
 # Test output
 integration_test_report.txt
 *.log
