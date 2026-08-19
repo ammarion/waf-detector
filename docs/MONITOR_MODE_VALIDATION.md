@@ -172,3 +172,54 @@ question has an exact answer available over an API rather than an inferred one:
 This is the reliable way to answer "which of our WAFs are not enforcing", and
 it is not what a black-box scanner can do. Tracked as an open item in
 DEVELOPMENT.md.
+
+## Ruling out the last angle: parser/normalization fingerprinting
+
+The obvious remaining idea, and the one this document previously listed as the
+next lead: a WAF's rule *action* (Count vs Block) governs what it does with a
+match, but not what its request **parser** accepts. If putting a WAF in the
+path changed any parse-level behaviour, that would be a fingerprint immune to
+monitor mode.
+
+Tested against real AWS WAF on an ALB with 33 parse-level probes sent over raw
+sockets (so the client library could not normalise them away): oversized header
+values stepped 4/8/16/32/64KB, header counts to 200, URI and query lengths to
+16KB, bodies to 64KB spanning AWS WAF's 8KB inspection limit, unusual and
+invalid methods, null bytes and single/double-encoded traversal in the path,
+duplicate `Content-Length`, `Transfer-Encoding` + `Content-Length` conflicts,
+obfuscated `Transfer-Encoding`, absolute-form request URIs, bare-LF line
+terminators, and duplicate `Host`.
+
+Each probe was run three ways against the same ALB: WebACL detached, WebACL
+attached with all managed rules `Count`, and attached with them blocking.
+
+```
+                                  differences vs the WebACL-detached baseline
+  WebACL attached, rules Count      0 / 33
+  WebACL attached, rules blocking  23 / 33
+```
+
+The battery is therefore sensitive — it separates a WAF that acts from no WAF
+on 23 probes — and Count is still invisible on every single one.
+
+This is not a case of the WAF failing to look. CloudWatch for the Count run:
+
+```
+CountedRequests 24    CommonRuleSet counted 23    BlockedRequests 0
+```
+
+AWS WAF matched 23 of the 33 probes as attacks, counted them, and forwarded
+them anyway. The client could not distinguish any of it from an ALB with no
+WAF at all.
+
+Note when reading the blocking column: it 403s even the benign baseline,
+because these raw-socket requests carry no `User-Agent` and AWS's
+`AWSManagedRulesCommonRuleSet` includes `NoUserAgent_HEADER`. That is a rule
+match, not a parser difference — it does not weaken the comparison, since the
+question was only whether Count differs from detached.
+
+**Conclusion.** For AWS WAF, monitor mode has now been probed for latency
+(n=30, CI spans zero), response content, body-inspection limits, and
+parse-level behaviour (33 probes, proven rule matching). All negative. The
+remote answer is that there isn't one, and the control-plane route above is not
+a fallback — it is the correct instrument for this question.
