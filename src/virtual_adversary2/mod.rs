@@ -1690,13 +1690,24 @@ pub fn build_va2_campaign_plan(
                     // latency difference is therefore attributable to
                     // inspection rather than to origin routing.
                     //
-                    // Each family appears twice: the latency estimator needs
-                    // several samples, and repetition costs less than breadth
-                    // here because the attribution, not the payload, is the
-                    // point. (This does assume the WAF inspects request headers
-                    // and not only path/query/body -- default rule sets
-                    // generally do, but a header-blind deployment would not be
-                    // caught by these pairs.)
+                    // Each of the three payload families is sent twice: once in
+                    // the custom header, once as an unknown query parameter.
+                    //
+                    // The split is not for sample size, it is because neither
+                    // channel alone suffices. Measured against real Coraza
+                    // running the OWASP Core Rule Set, a SQLi payload in an
+                    // arbitrary custom header is not flagged even with
+                    // `SecRuleEngine On` -- default paranoia does not inspect
+                    // unknown headers -- so header-only probes are invisible to
+                    // it. The query channel is where CRS actually looks (ARGS),
+                    // and an unknown parameter name (`__wd_inspect`) keeps the
+                    // pair origin-equivalent for the same reason an unknown
+                    // header does: the application has no handler for it.
+                    //
+                    // Query-channel equivalence is the weaker of the two -- an
+                    // application that echoes or validates every query parameter
+                    // could respond differently with no WAF present -- which is
+                    // why both channels are kept rather than switching wholesale.
                     PairedProbe {
                         channel: Va2ProbeChannel::Header,
                         benign_note: "latency-matched-sqli-control-1",
@@ -1713,18 +1724,18 @@ pub fn build_va2_campaign_plan(
                         attack_body: None,
                     },
                     PairedProbe {
-                        channel: Va2ProbeChannel::Header,
-                        benign_note: "latency-matched-sqli-control-2",
+                        channel: Va2ProbeChannel::Query,
+                        benign_note: "latency-matched-sqli-query-control",
                         benign_method: "GET",
                         benign_path: "/",
-                        benign_query: None,
-                        benign_headers: &[(INSPECTION_PROBE_HEADER, "xxxxxxxxxxxxxxxx")],
+                        benign_query: Some("__wd_inspect=xxxxxxxxxxxxxxxx"),
+                        benign_headers: &[],
                         benign_body: None,
-                        attack_note: "latency-matched-sqli-probe-2",
+                        attack_note: "latency-matched-sqli-query-probe",
                         attack_method: "GET",
                         attack_path: "/",
-                        attack_query: None,
-                        attack_headers: &[(INSPECTION_PROBE_HEADER, "1' OR '1'='1 -- ")],
+                        attack_query: Some("__wd_inspect=1' OR '1'='1 -- "),
+                        attack_headers: &[],
                         attack_body: None,
                     },
                     PairedProbe {
@@ -1743,18 +1754,18 @@ pub fn build_va2_campaign_plan(
                         attack_body: None,
                     },
                     PairedProbe {
-                        channel: Va2ProbeChannel::Header,
-                        benign_note: "latency-matched-xss-control-2",
+                        channel: Va2ProbeChannel::Query,
+                        benign_note: "latency-matched-xss-query-control",
                         benign_method: "GET",
                         benign_path: "/",
-                        benign_query: None,
-                        benign_headers: &[(INSPECTION_PROBE_HEADER, "xxxxxxxxxxxxxxxxxxxxxxxxx")],
+                        benign_query: Some("__wd_inspect=xxxxxxxxxxxxxxxxxxxxxxxxx"),
+                        benign_headers: &[],
                         benign_body: None,
-                        attack_note: "latency-matched-xss-probe-2",
+                        attack_note: "latency-matched-xss-query-probe",
                         attack_method: "GET",
                         attack_path: "/",
-                        attack_query: None,
-                        attack_headers: &[(INSPECTION_PROBE_HEADER, "<script>alert(1)</script>")],
+                        attack_query: Some("__wd_inspect=<script>alert(1)</script>"),
+                        attack_headers: &[],
                         attack_body: None,
                     },
                     PairedProbe {
@@ -1773,18 +1784,18 @@ pub fn build_va2_campaign_plan(
                         attack_body: None,
                     },
                     PairedProbe {
-                        channel: Va2ProbeChannel::Header,
-                        benign_note: "latency-matched-traversal-control-2",
+                        channel: Va2ProbeChannel::Query,
+                        benign_note: "latency-matched-traversal-query-control",
                         benign_method: "GET",
                         benign_path: "/",
-                        benign_query: None,
-                        benign_headers: &[(INSPECTION_PROBE_HEADER, "xxxxxxxxxxxxxxxxxxxxxx")],
+                        benign_query: Some("__wd_inspect=xxxxxxxxxxxxxxxxxxxxxx"),
+                        benign_headers: &[],
                         benign_body: None,
-                        attack_note: "latency-matched-traversal-probe-2",
+                        attack_note: "latency-matched-traversal-query-probe",
                         attack_method: "GET",
                         attack_path: "/",
-                        attack_query: None,
-                        attack_headers: &[(INSPECTION_PROBE_HEADER, "../../../../etc/passwd")],
+                        attack_query: Some("__wd_inspect=../../../../etc/passwd"),
+                        attack_headers: &[],
                         attack_body: None,
                     },
                 ];
@@ -2519,9 +2530,10 @@ mod tests {
 
         // The latency probes only mean anything if both sides of each pair are
         // genuinely interchangeable to the origin: same method, same path, no
-        // query, no body, and an equal-length value in the same single header.
-        // If a future edit breaks that, `inspection_latency_score` silently
-        // starts measuring origin routing again instead of inspection cost.
+        // body, and a payload of equal length carried in the same single place
+        // (a custom header, or an unknown query parameter). If a future edit
+        // breaks that, `inspection_latency_score` silently goes back to
+        // measuring origin routing instead of inspection cost.
         let latency_steps: Vec<_> = plan
             .steps
             .iter()
@@ -2531,14 +2543,46 @@ mod tests {
         for step in &latency_steps {
             assert_eq!(step.method, "GET");
             assert_eq!(step.path, "/");
-            assert_eq!(step.query, None);
             assert_eq!(step.body, None);
-            assert_eq!(step.headers.len(), 1);
-            assert!(step.headers.contains_key(INSPECTION_PROBE_HEADER));
+            match step.channel {
+                Some(Va2ProbeChannel::Header) => {
+                    assert_eq!(step.query, None);
+                    assert_eq!(step.headers.len(), 1);
+                    assert!(step.headers.contains_key(INSPECTION_PROBE_HEADER));
+                }
+                Some(Va2ProbeChannel::Query) => {
+                    assert!(step.headers.is_empty());
+                    let query = step.query.as_deref().expect("query probe needs a query");
+                    assert!(
+                        query.starts_with("__wd_inspect="),
+                        "query probes must use the unknown-parameter name that keeps them \
+                         origin-equivalent, got {query:?}"
+                    );
+                }
+                other => panic!("unexpected latency probe channel: {other:?}"),
+            }
         }
+        // Both channels are represented: header-only probes are invisible to
+        // default-paranoia CRS, query-only probes are the weaker of the two for
+        // origin-equivalence.
+        let latency_channels: std::collections::HashSet<_> =
+            latency_steps.iter().filter_map(|s| s.channel).collect();
+        assert!(latency_channels.contains(&Va2ProbeChannel::Header));
+        assert!(latency_channels.contains(&Va2ProbeChannel::Query));
+
         for pair in latency_steps.chunks(2) {
-            let control = pair[0].headers.get(INSPECTION_PROBE_HEADER).unwrap();
-            let probe = pair[1].headers.get(INSPECTION_PROBE_HEADER).unwrap();
+            let payload = |step: &Va2CampaignStep| -> String {
+                match step.channel {
+                    Some(Va2ProbeChannel::Query) => step.query.clone().unwrap_or_default(),
+                    _ => step
+                        .headers
+                        .get(INSPECTION_PROBE_HEADER)
+                        .cloned()
+                        .unwrap_or_default(),
+                }
+            };
+            let control = payload(pair[0]);
+            let probe = payload(pair[1]);
             assert_eq!(
                 control.len(),
                 probe.len(),
