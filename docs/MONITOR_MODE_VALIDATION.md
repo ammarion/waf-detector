@@ -130,3 +130,45 @@ distinct from the origin's own. That happens in the parser, so it is
 independent of whether the rule engine is in detection-only mode. It carries
 its own false-positive surface: plain nginx normalizes paths too, which is the
 same proxy-vs-WAF trap rows 2 and 5 exist to catch.
+
+## Per-vendor: is monitor mode remotely detectable at all?
+
+Covering the WAFs supported at Adobe. "Remotely detectable" means: from
+outside, with no console or API access, can we tell a WAF is present while it
+is configured not to block?
+
+| Vendor | Its monitor mode | Detectable? | Signal, or why not | Basis |
+|--------|------------------|:-----------:|--------------------|-------|
+| **Akamai** | alert-only | **yes** | Bot Manager cookies `_abck`, `ak_bmsc`, `bm_sz`, `bm_sv`, `bm_mi` — set as part of normal handling, whether rules alert or deny | vendor + community docs |
+| **CloudFlare** | log | **yes** | `__cf_bm`, set whenever Bot Management / Bot Fight Mode is enabled, independent of any challenge. (`cf-mitigated` means it *acted* — enforcement, not presence) | CloudFlare docs; live-verified |
+| AWS WAF | `Count` | no | Inspection costs ~1.4ms and nothing about the response changes | **measured**, rows 8–10 above |
+| ModSecurity | `DetectionOnly` | no | Sub-millisecond inline evaluation, response unchanged | **measured**, rows 5–7 above |
+| Azure | Detection | no | "the client receives the normal response as if the WAF rule didn't trigger" | Microsoft docs |
+| Fastly NGWAF | Not blocking (Logging) | no | `X-SigSci-*` headers are added to requests travelling *to the origin*; clients never see them | Fastly docs |
+| Wallarm | monitoring | no | No documented client-visible artifact; NGINX-based, and Wallarm's own guidance is to strip version headers | Wallarm docs |
+
+Note on what the two "yes" rows prove: the vendor's **bot-management** module is
+engaged. Not that the WAF ruleset (Akamai App & API Protector, CloudFlare
+managed rules) is enabled, and not its mode. A site can run Bot Manager with
+AAP switched off. The scan attaches a caveat saying exactly that; do not quote
+these as "WAF ruleset in alert mode".
+
+Separately: **Wallarm has no provider in this tool at all**, which is a
+coverage gap independent of monitor mode.
+
+## Consequence: for owned estate, ask the control plane
+
+Five of seven cannot be answered from outside. For infrastructure we own, that
+question has an exact answer available over an API rather than an inferred one:
+
+- AWS: `aws wafv2 list-web-acls` → `get-web-acl` and
+  `get-web-acl-for-resource`, then read each rule's `Action` / a rule group's
+  `OverrideAction` for `Count`. AWS Firewall Manager covers this across
+  accounts, and Adobe has a Firewall Manager account.
+- Azure: the WAF policy's `policySettings.mode` is `Detection` or `Prevention`.
+- Fastly NGWAF: the corp/site API reports agent mode.
+- Wallarm: the node's filtration mode is readable from its API.
+
+This is the reliable way to answer "which of our WAFs are not enforcing", and
+it is not what a black-box scanner can do. Tracked as an open item in
+DEVELOPMENT.md.
