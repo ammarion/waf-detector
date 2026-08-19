@@ -102,7 +102,7 @@ impl ProviderRegistry {
             })
             .collect();
 
-        providers.sort_by(|a, b| b.2.cmp(&a.2)); // Sort by priority descending
+        providers.sort_by_key(|p| std::cmp::Reverse(p.2)); // Sort by priority descending
 
         let provider_futures: Vec<_> = providers
             .into_iter()
@@ -486,7 +486,7 @@ impl ProviderRegistry {
             .map(|entry| entry.value().clone())
             .collect();
 
-        providers.sort_by(|a, b| b.priority.cmp(&a.priority));
+        providers.sort_by_key(|p| std::cmp::Reverse(p.priority));
         providers
     }
 

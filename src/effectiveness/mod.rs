@@ -740,13 +740,13 @@ impl EffectivenessTest {
                         format!(
                             "Blocked: {} | Sample: {}",
                             reasons.join("; "),
-                            &response_text.chars().take(200).collect::<String>()
+                            response_text.chars().take(200).collect::<String>()
                         )
                     } else if status_code >= 500 {
                         format!(
                             "Edge error response: HTTP {} | Sample: {}",
                             status_code,
-                            &response_text.chars().take(200).collect::<String>()
+                            response_text.chars().take(200).collect::<String>()
                         )
                     } else {
                         "Request allowed".to_string()

@@ -273,6 +273,13 @@ mod tests {
 
     #[test]
     fn test_audit_session_records_hash_chain() {
+        // Every other test that repoints HOME_ENV takes this lock first; without
+        // it this test races them (and any concurrent `env::var` read) via
+        // `set_var`, which is not thread-safe. Concretely it made
+        // `effectiveness::tests::test_consent_status_with_file` fail ~2 runs in 3.
+        let _guard = crate::test_utils::env_lock()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         let temp = TempDir::new().expect("temp dir");
         let original_home = std::env::var(HOME_ENV).ok();
         std::env::set_var(HOME_ENV, temp.path());

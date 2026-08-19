@@ -458,7 +458,7 @@ fn summarize_evidence(results: &[VaResultRecord]) -> Vec<VaEvidenceTally> {
         .into_iter()
         .map(|(kind, count)| VaEvidenceTally { kind, count })
         .collect();
-    tallies.sort_by(|a, b| b.count.cmp(&a.count));
+    tallies.sort_by_key(|t| std::cmp::Reverse(t.count));
     tallies
 }
 

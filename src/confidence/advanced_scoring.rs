@@ -1076,10 +1076,8 @@ impl AdvancedScoring {
                     suggestions.push("X-Amz-Cf-Pop header (Point of Presence)".to_string());
                 }
             }
-            "Akamai" => {
-                if !current_patterns.contains("akamai-grn-header") {
-                    suggestions.push("Akamai-GRN header".to_string());
-                }
+            "Akamai" if !current_patterns.contains("akamai-grn-header") => {
+                suggestions.push("Akamai-GRN header".to_string());
             }
             _ => {}
         }
