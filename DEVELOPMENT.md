@@ -120,9 +120,11 @@ registry.register_provider(provider, metadata)?;
 ### Open
 - [ ] **Probabilistic enforcement model** — replace linear PMI weights with posterior distribution + confidence intervals
 - [ ] **Bypass distance metric** — count transformations needed before WAF response normalizes
-- [x] **Monitor-mode detection** — infer WAF presence from subtle behavioral signals when nothing is blocked
+- [x] **Monitor-mode detection** — infer WAF presence from subtle behavioral signals when nothing is blocked. **Partial: see [docs/MONITOR_MODE_VALIDATION.md](docs/MONITOR_MODE_VALIDATION.md) before quoting coverage.** Measured against 10 controls including real Coraza/OWASP-CRS and real AWS WAF; detects monitor mode only where inspection costs >=~15ms or changes the response, and misses inline optimized engines (both real products tested).
 - [x] **Posture CLI with VA1** — `--posture` integration with enforcement testing
 - [ ] **Cookie channel** — add cookie inspection as a probe channel
+- [ ] **Distinguish "measured zero" from "no measurement"** — `monitor_mode_likelihood` is emitted unconditionally, so 0.000 reads as "not in monitor mode" when it often means "cannot determine". Needs `Option<f64>` or a flag on `PostureReport`.
+- [ ] **Normalization-fingerprint probes** — detect an inspecting intermediary via how it re-serializes malformed requests, which is independent of whether the rule engine is in detection-only mode. The remaining angle on inline silent WAFs.
 
 ### Done
 - [x] Multi-channel perturbation (PR #29)
