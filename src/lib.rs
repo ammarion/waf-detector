@@ -316,6 +316,31 @@ impl DetectionResult {
             }
         }
 
+        // Caveat: bot-management evidence proves a security module is engaged,
+        // which is valuable precisely because it survives a WAF configured to
+        // log rather than block -- but it does not establish that the vendor's
+        // WAF ruleset is enabled, nor its mode. Say so, rather than letting the
+        // confidence number imply more than the cookie supports.
+        let mut bot_management_providers: Vec<&String> = self
+            .evidence_map
+            .iter()
+            .filter(|(_, evidence)| {
+                evidence.iter().any(|e| {
+                    e.signature_matched == "akamai-bot-manager-cookie"
+                        || e.signature_matched == "cloudflare-bot-management-cookie"
+                })
+            })
+            .map(|(provider, _)| provider)
+            .collect();
+        bot_management_providers.sort();
+        for provider in bot_management_providers {
+            caveats.push(format!(
+                "{provider} bot-management signals confirm a security module is in the request \
+                 path even if nothing was blocked; whether the WAF ruleset is enabled, and \
+                 whether it alerts or denies, cannot be determined remotely"
+            ));
+        }
+
         self.caveats = caveats;
     }
 
@@ -671,6 +696,51 @@ mod tests {
         assert_eq!(result.caveats.len(), 1);
         assert!(result.caveats[0].contains("body patterns only"));
         assert!(result.caveats[0].contains("ModSecurity"));
+    }
+
+    #[test]
+    fn generate_caveats_flags_bot_management_scope_limit() {
+        // Bot-management evidence is the one signal that survives a WAF set to
+        // log rather than block, so it is load-bearing -- which is exactly why
+        // the result has to say out loud what it does not prove.
+        let mut result = DetectionResult {
+            url: "https://example.com".to_string(),
+            detected_waf: Some(ProviderDetection {
+                name: "Akamai".to_string(),
+                confidence: 0.9,
+            }),
+            detected_cdn: None,
+            provider_scores: HashMap::new(),
+            evidence_map: HashMap::from([(
+                "Akamai".to_string(),
+                vec![Evidence {
+                    method_type: MethodType::Header("set-cookie".to_string()),
+                    confidence: 0.9,
+                    description: "Akamai Bot Manager cookie '_abck'".to_string(),
+                    raw_data: "_abck".to_string(),
+                    signature_matched: "akamai-bot-manager-cookie".to_string(),
+                }],
+            )]),
+            evidence: vec![],
+            detection_time_ms: 1,
+            metadata: DetectionMetadata {
+                timestamp: chrono::Utc::now(),
+                version: "0.1.0".to_string(),
+                user_agent: "test".to_string(),
+            },
+            caveats: vec![],
+            security_posture: None,
+            error: None,
+        };
+        result.generate_caveats();
+        assert!(
+            result
+                .caveats
+                .iter()
+                .any(|c| c.contains("cannot be determined remotely")),
+            "expected a caveat bounding what bot-management evidence proves, got {:?}",
+            result.caveats
+        );
     }
 
     #[test]

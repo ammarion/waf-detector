@@ -15,6 +15,59 @@ pub struct CloudFlareProvider {
 }
 
 impl CloudFlareProvider {
+    /// CloudFlare signals that indicate its security layer is engaged, as
+    /// distinct from `cf-ray`/`server: cloudflare`, which only say traffic is
+    /// proxied through CloudFlare.
+    ///
+    /// Two different claims, deliberately kept apart:
+    ///
+    /// - `__cf_bm` is set on ordinary requests whenever Bot Management or Bot
+    ///   Fight Mode is enabled, *whether or not* any challenge or block
+    ///   occurs. That makes it one of the few signals that survives a WAF
+    ///   configured to log rather than act. It does not establish that
+    ///   CloudFlare's WAF managed rules are enabled, nor their mode --
+    ///   `DetectionResult::generate_caveats` attaches that qualification.
+    /// - `cf-mitigated` appears when CloudFlare actually acted on the request
+    ///   (e.g. `cf-mitigated: challenge`). That is evidence of *enforcement*,
+    ///   not merely of presence, so it is described as such.
+    pub fn check_security_module_signals(
+        &self,
+        response: &crate::http::HttpResponse,
+    ) -> Vec<Evidence> {
+        let mut evidence = Vec::new();
+
+        if let Some(raw) = response.headers.get("set-cookie") {
+            if raw.to_ascii_lowercase().contains("__cf_bm=") {
+                evidence.push(Evidence {
+                    method_type: MethodType::Header("set-cookie".to_string()),
+                    confidence: 0.90,
+                    description: "CloudFlare Bot Management cookie '__cf_bm' — CloudFlare's \
+                                  security layer is handling this request, and sets this whether \
+                                  or not it challenges or blocks. Does not establish that the \
+                                  WAF managed rules are enabled or which mode they are in."
+                        .to_string(),
+                    raw_data: "__cf_bm".to_string(),
+                    signature_matched: "cloudflare-bot-management-cookie".to_string(),
+                });
+            }
+        }
+
+        if let Some(mitigated) = response.headers.get("cf-mitigated") {
+            evidence.push(Evidence {
+                method_type: MethodType::Header("cf-mitigated".to_string()),
+                confidence: 0.95,
+                description: format!(
+                    "CloudFlare cf-mitigated: {mitigated} — CloudFlare took action on this \
+                     request. This is evidence of active enforcement, not merely presence."
+                ),
+                raw_data: mitigated.clone(),
+                signature_matched: "cloudflare-mitigated-header".to_string(),
+            });
+        }
+
+        evidence
+    }
+
     pub fn new() -> Self {
         Self {
             name: "CloudFlare".to_string(),
@@ -251,20 +304,17 @@ impl DetectionProvider for CloudFlareProvider {
     }
 
     async fn detect(&self, context: &DetectionContext) -> Result<Vec<Evidence>> {
+        // Delegates to `passive_detect` rather than repeating its checks.
+        //
+        // These two used to run the same three checks side by side, and the
+        // registry calls `detect`, not `passive_detect`. That meant a check
+        // added to only one of them compiled, passed its unit tests, and then
+        // silently never ran against a live target -- which is exactly what
+        // happened when the security-module cookie check was added below.
         let mut all_evidence = Vec::new();
 
         if let Some(response) = &context.response {
-            // Check headers
-            let header_evidence = self.check_headers(response).await;
-            all_evidence.extend(header_evidence);
-
-            // Check body patterns
-            let body_evidence = self.check_body_patterns(response).await;
-            all_evidence.extend(body_evidence);
-
-            // Check status codes
-            let status_evidence = self.check_status_codes(response).await;
-            all_evidence.extend(status_evidence);
+            all_evidence.extend(self.passive_detect(response).await?);
         }
 
         Ok(all_evidence)
@@ -274,6 +324,7 @@ impl DetectionProvider for CloudFlareProvider {
         let mut all_evidence = Vec::new();
 
         all_evidence.extend(self.check_headers(response).await);
+        all_evidence.extend(self.check_security_module_signals(response));
         all_evidence.extend(self.check_body_patterns(response).await);
         all_evidence.extend(self.check_status_codes(response).await);
 
@@ -291,6 +342,70 @@ impl Default for CloudFlareProvider {
 mod tests {
     use super::*;
     use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_cf_bm_cookie_without_any_block() {
+        // A plain 200 with no challenge and nothing blocked, but CloudFlare's
+        // bot layer has stamped the response -- which it does regardless of
+        // whether it acts.
+        let provider = CloudFlareProvider::new();
+        let response = mock_response(
+            200,
+            [(
+                "set-cookie",
+                "__cf_bm=abc123def456; path=/; HttpOnly; Secure",
+            )],
+            "<html>ordinary page</html>",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        let bm: Vec<_> = evidence
+            .iter()
+            .filter(|e| e.signature_matched == "cloudflare-bot-management-cookie")
+            .collect();
+        assert_eq!(bm.len(), 1);
+        assert!(
+            bm[0].description.contains("managed rules"),
+            "evidence must state the WAF ruleset is not established: {}",
+            bm[0].description
+        );
+    }
+
+    #[tokio::test]
+    async fn cf_mitigated_header_is_reported_as_enforcement_not_presence() {
+        let provider = CloudFlareProvider::new();
+        let response = mock_response(200, [("cf-mitigated", "challenge")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        let hit = evidence
+            .iter()
+            .find(|e| e.signature_matched == "cloudflare-mitigated-header")
+            .expect("expected cf-mitigated evidence");
+        assert!(
+            hit.description.contains("active enforcement"),
+            "cf-mitigated means CloudFlare acted, and must be described that way: {}",
+            hit.description
+        );
+    }
+
+    #[tokio::test]
+    async fn cf_ray_alone_is_not_bot_management_evidence() {
+        // cf-ray proves traffic is proxied through CloudFlare, nothing more.
+        // It must not be conflated with the security layer being engaged.
+        let provider = CloudFlareProvider::new();
+        let response = mock_response(
+            200,
+            [("cf-ray", "7d4f8a1b2c3d4e5f-SJC"), ("server", "cloudflare")],
+            "",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence.iter().any(|e| {
+            e.signature_matched == "cloudflare-bot-management-cookie"
+                || e.signature_matched == "cloudflare-mitigated-header"
+        }));
+        assert!(
+            !evidence.is_empty(),
+            "cf-ray should still identify CloudFlare"
+        );
+    }
 
     #[tokio::test]
     async fn detects_cf_ray_header() {
