@@ -49,7 +49,12 @@ pub struct PostureSummary {
     /// no remote trace. See `docs/MONITOR_MODE_VALIDATION.md`.
     #[serde(default)]
     pub monitor_mode_likelihood: Option<f64>,
-    pub active_enforcement_likelihood: f64,
+    /// Blended estimate that the target is actively enforcing, or `None`
+    /// when neither an enforcement test nor a behavioral campaign ran. A
+    /// `0.0` here means "probed and it never blocked"; `None` means the
+    /// question was never asked.
+    #[serde(default)]
+    pub active_enforcement_likelihood: Option<f64>,
     #[serde(default)]
     pub coverage_by_vector: HashMap<String, f64>,
     pub confidence: f64,

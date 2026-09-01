@@ -71,10 +71,14 @@ pub struct PostureReport {
     pub enforcement: Option<EnforcementPosture>,
     pub summary: String,
     /// Blended estimate that the target is actively enforcing (blocking/
-    /// challenging), from whichever of VA1/VA2 ran. Additive: does not
-    /// affect `risk_score`/`grade`.
+    /// challenging), from whichever of VA1/VA2 ran, or `None` when neither
+    /// ran. A `0.0` means "probed and it never blocked"; `None` means the
+    /// question was never asked -- opposite conclusions about a WAF, and
+    /// previously the same number.
+    ///
+    /// Additive: does not affect `risk_score`/`grade`.
     #[serde(default)]
-    pub active_enforcement_likelihood: f64,
+    pub active_enforcement_likelihood: Option<f64>,
     /// P(WAF present but not enforcing) = WAF presence * (1 -
     /// active_enforcement_likelihood), or `None` when neither an enforcement
     /// test nor a behavioral campaign ran — without one, the product is
@@ -136,19 +140,25 @@ pub fn compose_posture_summary(
         })
         .unwrap_or((0, 0.0));
 
-    let active_enforcement_likelihood = scoring::active_enforcement_likelihood(va1, va2);
+    // Raw value drives the score arithmetic below: an absent probe earns no
+    // enforcement credit, unchanged. The reported field is the Option.
+    let enforcement_raw = scoring::active_enforcement_likelihood(va1, va2);
+    let active_enforcement_likelihood = scoring::active_enforcement_likelihood_measured(
+        va1.is_some(),
+        va2.is_some(),
+        enforcement_raw,
+    );
     let waf_presence_likelihood = scoring::waf_presence_likelihood(detection_confidence, va2);
     let monitor_mode_likelihood = scoring::monitor_mode_likelihood_measured(
         va1.is_some(),
         va2.is_some(),
         waf_presence_likelihood,
-        active_enforcement_likelihood,
+        enforcement_raw,
     );
 
-    let overall_posture_score = ((active_enforcement_likelihood * 65.0)
-        + (coverage_score * 25.0)
-        + (detection_confidence * 10.0))
-        .clamp(0.0, 100.0);
+    let overall_posture_score =
+        ((enforcement_raw * 65.0) + (coverage_score * 25.0) + (detection_confidence * 10.0))
+            .clamp(0.0, 100.0);
 
     if pair_count == 0 {
         caveats.push("No paired-control differential evidence collected".to_string());
@@ -163,7 +173,8 @@ pub fn compose_posture_summary(
 
     if monitor_mode_likelihood.is_none() {
         caveats.push(
-            "Monitor-mode likelihood not determined: no enforcement test or behavioral campaign ran"
+            "Monitor-mode likelihood and enforcement likelihood not determined: no enforcement \
+             test or behavioral campaign ran"
                 .to_string(),
         );
     } else if scoring::monitor_mode_is_measured_zero(monitor_mode_likelihood) {
@@ -331,9 +342,14 @@ impl PostureBuilder {
             format!("Grade {grade}: {}", parts.join(", "))
         };
 
-        let active_enforcement_likelihood = scoring::active_enforcement_likelihood_normalized(
+        let enforcement_raw = scoring::active_enforcement_likelihood_normalized(
             self.va1_report.as_ref(),
             self.va2_report.as_ref(),
+        );
+        let active_enforcement_likelihood = scoring::active_enforcement_likelihood_measured(
+            self.va1_report.is_some(),
+            self.va2_report.is_some(),
+            enforcement_raw,
         );
         // Presence, not `self.detection_confidence`. The latter is 0.0 for any
         // WAF that leaves no passive signature, and because
@@ -345,7 +361,7 @@ impl PostureBuilder {
             self.va1_report.is_some(),
             self.va2_report.is_some(),
             waf_presence_likelihood,
-            active_enforcement_likelihood,
+            enforcement_raw,
         );
 
         // `PostureReport` has no `caveats` field, so the limit rides on the
@@ -626,8 +642,10 @@ mod tests {
             report.monitor_mode_likelihood
         );
         assert!(
-            report.active_enforcement_likelihood < 0.3,
-            "got {}",
+            report
+                .active_enforcement_likelihood
+                .is_some_and(|v| v < 0.3),
+            "got {:?}",
             report.active_enforcement_likelihood
         );
 
@@ -649,7 +667,7 @@ mod tests {
     fn test_posture_monitor_mode_is_none_when_nothing_was_run() {
         let report = PostureBuilder::new("https://example.com").compute();
         assert_eq!(report.monitor_mode_likelihood, None);
-        assert_eq!(report.active_enforcement_likelihood, 0.0);
+        assert_eq!(report.active_enforcement_likelihood, None);
     }
 
     /// Passive detection alone is still no evidence about enforcement, so a
@@ -718,8 +736,10 @@ mod tests {
         // but not enforcing." Before the normalization fix, this was 0.72
         // (self-contradictory next to a HardBlock verdict).
         assert!(
-            report.active_enforcement_likelihood > 0.9,
-            "got {}",
+            report
+                .active_enforcement_likelihood
+                .is_some_and(|v| v > 0.9),
+            "got {:?}",
             report.active_enforcement_likelihood
         );
         assert!(
@@ -767,8 +787,10 @@ mod tests {
         // counted outright-blocked requests, so this scenario produced
         // monitor_mode_likelihood ~1.0 next to a live ChallengeGate verdict.
         assert!(
-            report.active_enforcement_likelihood > 0.9,
-            "got {}",
+            report
+                .active_enforcement_likelihood
+                .is_some_and(|v| v > 0.9),
+            "got {:?}",
             report.active_enforcement_likelihood
         );
         assert!(
@@ -784,7 +806,9 @@ mod tests {
         let va2 = mock_va2_report(30.0, 0.1);
         let summary = compose_posture_summary(Some(&det), Some(&va2), None);
         assert!(summary.monitor_mode_likelihood.is_some_and(|v| v > 0.5));
-        assert!(summary.active_enforcement_likelihood < 0.3);
+        assert!(summary
+            .active_enforcement_likelihood
+            .is_some_and(|v| v < 0.3));
         assert!(!summary.caveats.is_empty());
     }
 

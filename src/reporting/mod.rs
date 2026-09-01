@@ -2759,7 +2759,7 @@ mod tests {
             behavioral: None,
             enforcement: None,
             summary: "Good protection with some coverage gaps.".to_string(),
-            active_enforcement_likelihood: 0.0,
+            active_enforcement_likelihood: Some(0.0),
             monitor_mode_likelihood: Some(0.0),
         };
         let raw = serde_json::to_string(&report).unwrap();
@@ -2785,12 +2785,16 @@ mod tests {
             behavioral: None,
             enforcement: None,
             summary: "Detection only; no enforcement test run.".to_string(),
-            active_enforcement_likelihood: 0.0,
+            active_enforcement_likelihood: None,
             monitor_mode_likelihood: None,
         };
         let raw = serde_json::to_string(&report).unwrap();
         assert!(
             raw.contains("\"monitor_mode_likelihood\":null"),
+            "expected an explicit null on the wire, got {raw}"
+        );
+        assert!(
+            raw.contains("\"active_enforcement_likelihood\":null"),
             "expected an explicit null on the wire, got {raw}"
         );
 
@@ -2818,6 +2822,7 @@ mod tests {
         .to_string();
         let parsed: PostureReport = serde_json::from_str(&legacy).unwrap();
         assert_eq!(parsed.monitor_mode_likelihood, Some(0.0));
+        assert_eq!(parsed.active_enforcement_likelihood, Some(0.0));
 
         // And one with the field absent entirely.
         let absent = legacy.replace(",\n            \"monitor_mode_likelihood\": 0.0", "");
@@ -3260,7 +3265,7 @@ mod tests {
             behavioral: None,
             enforcement: None,
             summary: "Good protection.".to_string(),
-            active_enforcement_likelihood: 0.0,
+            active_enforcement_likelihood: Some(0.0),
             monitor_mode_likelihood: Some(0.0),
         };
         let raw = serde_json::to_string(&report).unwrap();
