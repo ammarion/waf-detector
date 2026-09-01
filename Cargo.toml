@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 authors = ["WAF Detector Team"]
 description = "High-performance WAF/CDN detection utility with extensible provider system"
-license = "MIT"
-repository = "https://github.com/waf-detector/waf-detector"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ammarion/waf-detector"
 keywords = ["waf", "cdn", "security", "detection", "web"]
 categories = ["command-line-utilities", "web-programming", "network-programming"]
 
