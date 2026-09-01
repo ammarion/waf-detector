@@ -22,10 +22,16 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-          - target: x86_64-apple-darwin
-            os: macos-13
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+          # x86_64-apple-darwin is deliberately absent. It needs the `macos-13`
+          # runner, which no longer picks up jobs on this repo -- a dry run sat
+          # queued for 15 minutes while the other two targets built and passed.
+          # Cross-compiling it from the arm64 runner is possible, but the
+          # resulting binary could not be executed there, and shipping one
+          # artifact that was never run would undercut the smoke test the other
+          # two get. Intel Mac users build from source, as everyone did before
+          # there were releases at all.
 
     steps:
       - uses: actions/checkout@v4
@@ -44,8 +50,9 @@ jobs:
 
       # A binary that cannot answer --version is not worth shipping. This is
       # the one check that the artifact itself works, not just that it linked.
+      # Every target in the matrix is native, so this always runs -- no target
+      # ships without having been executed.
       - name: Smoke-test the artifact
-        if: matrix.target != 'x86_64-apple-darwin'
         run: |
           BIN=target/${{ matrix.target }}/release/waf-detect
           "$BIN" --version
