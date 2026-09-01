@@ -39,7 +39,16 @@ pub mod virtual_adversary2;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PostureSummary {
     pub overall_posture_score: f64,
-    pub monitor_mode_likelihood: f64,
+    /// P(WAF present but not enforcing), or `None` when neither an
+    /// enforcement test nor a behavioral campaign ran. Without one of those,
+    /// both terms of the product are vacuously zero and a `0.0` would report
+    /// "not in monitor mode" on the strength of no evidence at all.
+    ///
+    /// A `Some(0.0)` is a measured zero, but still not a clean negative: an
+    /// inline engine that inspects in microseconds and alters nothing leaves
+    /// no remote trace. See `docs/MONITOR_MODE_VALIDATION.md`.
+    #[serde(default)]
+    pub monitor_mode_likelihood: Option<f64>,
     pub active_enforcement_likelihood: f64,
     #[serde(default)]
     pub coverage_by_vector: HashMap<String, f64>,

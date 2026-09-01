@@ -121,11 +121,26 @@ Use when the user wants channel coverage, statefulness, challenge behavior, rate
 
 ```bash
 ./target/release/waf-detect --posture <url>
+./target/release/waf-detect --posture <url> --posture-va1
 ./target/release/waf-detect --posture <url> --posture-va2
 ./target/release/waf-detect --posture <url> --posture-json
 ```
 
 Use when the user wants one final protection summary instead of raw per-command output.
+
+#### Reading `monitor_mode_likelihood`
+
+In `--posture-json` this field is **nullable**. The three states are distinct
+and must not be collapsed when reporting to a user:
+
+| Value | Means | Say |
+|---|---|---|
+| `null` | No enforcement test and no behavioral campaign ran, so nothing could have observed monitor mode | "Not determined — re-run with `--posture-va1` or `--posture-va2`" |
+| `0.0` | Probed, and no monitor-mode evidence surfaced | "No monitor-mode evidence found" — **not** "the WAF is enforcing". A zero does not rule out an inline engine that inspects in microseconds and alters nothing; this was measured against ModSecurity `DetectionOnly` and AWS WAF `Count`, both of which read `0.0`. See `docs/MONITOR_MODE_VALIDATION.md`. |
+| `> 0.0` | Positive evidence of a WAF present but not enforcing | Report the percentage |
+
+Never render a `null` as `0%`. The plain-text `--posture` output already
+distinguishes all three; match its wording.
 
 ### 9. HTML Report Rendering
 

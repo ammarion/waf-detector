@@ -75,11 +75,19 @@ pub struct PostureReport {
     /// affect `risk_score`/`grade`.
     #[serde(default)]
     pub active_enforcement_likelihood: f64,
-    /// P(WAF present but not enforcing) = detection confidence * (1 -
-    /// active_enforcement_likelihood). Additive: does not affect
-    /// `risk_score`/`grade`.
+    /// P(WAF present but not enforcing) = WAF presence * (1 -
+    /// active_enforcement_likelihood), or `None` when neither an enforcement
+    /// test nor a behavioral campaign ran — without one, the product is
+    /// vacuously zero and a `0.0` would assert a negative from no evidence.
+    ///
+    /// A `Some(0.0)` is measured, but is not a clean negative either: an
+    /// inline engine that inspects in microseconds and alters nothing is not
+    /// remotely observable. `summary` says so when that case arises. See
+    /// `docs/MONITOR_MODE_VALIDATION.md`.
+    ///
+    /// Additive: does not affect `risk_score`/`grade`.
     #[serde(default)]
-    pub monitor_mode_likelihood: f64,
+    pub monitor_mode_likelihood: Option<f64>,
 }
 
 pub struct PostureBuilder {
@@ -130,8 +138,12 @@ pub fn compose_posture_summary(
 
     let active_enforcement_likelihood = scoring::active_enforcement_likelihood(va1, va2);
     let waf_presence_likelihood = scoring::waf_presence_likelihood(detection_confidence, va2);
-    let monitor_mode_likelihood =
-        scoring::monitor_mode_likelihood(waf_presence_likelihood, active_enforcement_likelihood);
+    let monitor_mode_likelihood = scoring::monitor_mode_likelihood_measured(
+        va1.is_some(),
+        va2.is_some(),
+        waf_presence_likelihood,
+        active_enforcement_likelihood,
+    );
 
     let overall_posture_score = ((active_enforcement_likelihood * 65.0)
         + (coverage_score * 25.0)
@@ -147,6 +159,15 @@ pub fn compose_posture_summary(
 
     if coverage_score < 0.35 {
         caveats.push("Channel coverage is limited; unprotected channels likely remain".to_string());
+    }
+
+    if monitor_mode_likelihood.is_none() {
+        caveats.push(
+            "Monitor-mode likelihood not determined: no enforcement test or behavioral campaign ran"
+                .to_string(),
+        );
+    } else if scoring::monitor_mode_is_measured_zero(monitor_mode_likelihood) {
+        caveats.push(scoring::MONITOR_MODE_ZERO_CAVEAT.to_string());
     }
 
     if std::env::var("WAF_DETECTOR_INSECURE_TLS").is_ok() {
@@ -320,10 +341,27 @@ impl PostureBuilder {
         // "present but not enforcing" unreportable for precisely those targets.
         let waf_presence_likelihood =
             scoring::waf_presence_likelihood(self.detection_confidence, self.va2_report.as_ref());
-        let monitor_mode_likelihood = scoring::monitor_mode_likelihood(
+        let monitor_mode_likelihood = scoring::monitor_mode_likelihood_measured(
+            self.va1_report.is_some(),
+            self.va2_report.is_some(),
             waf_presence_likelihood,
             active_enforcement_likelihood,
         );
+
+        // `PostureReport` has no `caveats` field, so the limit rides on the
+        // summary -- otherwise a `Some(0.0)` reaches `--posture-json` and the
+        // HTML report as a bare, confident-looking zero.
+        let summary = if scoring::monitor_mode_is_measured_zero(monitor_mode_likelihood) {
+            // The composed summary does not end in punctuation, so separate
+            // explicitly rather than running the two sentences together.
+            format!(
+                "{}. {}",
+                summary.trim_end_matches(['.', ' ']),
+                scoring::MONITOR_MODE_ZERO_CAVEAT
+            )
+        } else {
+            summary
+        };
 
         PostureReport {
             target_url: self.target_url,
@@ -583,8 +621,8 @@ mod tests {
 
         // Additive fields reflect "WAF present, not enforcing":
         assert!(
-            report.monitor_mode_likelihood > 0.7,
-            "got {}",
+            report.monitor_mode_likelihood.is_some_and(|v| v > 0.7),
+            "got {:?}",
             report.monitor_mode_likelihood
         );
         assert!(
@@ -604,11 +642,44 @@ mod tests {
         assert_eq!(report.grade, PostureGrade::F);
     }
 
+    /// A bare builder ran no enforcement test and no behavioral campaign,
+    /// so monitor mode is *not determined* -- not zero. Reporting 0.0 here
+    /// was the defect: it asserted a negative from an absence of evidence.
     #[test]
-    fn test_posture_monitor_mode_likelihood_zero_with_no_detection() {
+    fn test_posture_monitor_mode_is_none_when_nothing_was_run() {
         let report = PostureBuilder::new("https://example.com").compute();
-        assert_eq!(report.monitor_mode_likelihood, 0.0);
+        assert_eq!(report.monitor_mode_likelihood, None);
         assert_eq!(report.active_enforcement_likelihood, 0.0);
+    }
+
+    /// Passive detection alone is still no evidence about enforcement, so a
+    /// confident WAF signature must not turn into a monitor-mode reading.
+    #[test]
+    fn test_posture_monitor_mode_is_none_with_detection_but_no_probes() {
+        let det = mock_detection_result(0.95);
+        let report = PostureBuilder::new("https://example.com")
+            .with_detection(&det)
+            .compute();
+        assert_eq!(report.monitor_mode_likelihood, None);
+    }
+
+    /// A measured zero must carry the reason it is not a clean negative,
+    /// because `PostureReport` has no caveats field to put it in.
+    #[test]
+    fn test_posture_measured_zero_monitor_mode_explains_itself_in_summary() {
+        let det = mock_detection_result(0.9);
+        let va2 = mock_va2_report(85.0, 0.95);
+        let report = PostureBuilder::new("https://example.com")
+            .with_detection(&det)
+            .with_va2(&va2)
+            .compute();
+        if scoring::monitor_mode_is_measured_zero(report.monitor_mode_likelihood) {
+            assert!(
+                report.summary.contains("does not rule out monitor mode"),
+                "measured zero without its caveat: {}",
+                report.summary
+            );
+        }
     }
 
     #[test]
@@ -652,8 +723,8 @@ mod tests {
             report.active_enforcement_likelihood
         );
         assert!(
-            report.monitor_mode_likelihood < 0.1,
-            "got {}",
+            report.monitor_mode_likelihood.is_some_and(|v| v < 0.1),
+            "got {:?}",
             report.monitor_mode_likelihood
         );
     }
@@ -701,8 +772,8 @@ mod tests {
             report.active_enforcement_likelihood
         );
         assert!(
-            report.monitor_mode_likelihood < 0.1,
-            "got {}",
+            report.monitor_mode_likelihood.is_some_and(|v| v < 0.1),
+            "got {:?}",
             report.monitor_mode_likelihood
         );
     }
@@ -712,7 +783,7 @@ mod tests {
         let det = mock_detection_result(0.8);
         let va2 = mock_va2_report(30.0, 0.1);
         let summary = compose_posture_summary(Some(&det), Some(&va2), None);
-        assert!(summary.monitor_mode_likelihood > 0.5);
+        assert!(summary.monitor_mode_likelihood.is_some_and(|v| v > 0.5));
         assert!(summary.active_enforcement_likelihood < 0.3);
         assert!(!summary.caveats.is_empty());
     }
