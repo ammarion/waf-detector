@@ -162,6 +162,28 @@ pub const MONITOR_MODE_ZERO_CAVEAT: &str =
      inspects in microseconds and alters nothing leaves no remote trace (measured against \
      ModSecurity DetectionOnly and AWS WAF Count -- see docs/MONITOR_MODE_VALIDATION.md).";
 
+/// Active-enforcement likelihood, or `None` when neither an enforcement test
+/// nor a behavioral campaign ran.
+///
+/// Same defect as [`monitor_mode_likelihood_measured`]: with no probe the
+/// blend has nothing to blend and returns 0.0, which on the wire is
+/// indistinguishable from "we attacked this target and it never blocked".
+/// Those are opposite conclusions about a WAF.
+///
+/// The caller keeps the raw `f64` for scoring arithmetic -- an absent probe
+/// contributes no enforcement credit, exactly as before. This changes only
+/// what is *reported*.
+pub fn active_enforcement_likelihood_measured(
+    has_enforcement_evidence: bool,
+    has_behavioral_evidence: bool,
+    raw: f64,
+) -> Option<f64> {
+    if !has_enforcement_evidence && !has_behavioral_evidence {
+        return None;
+    }
+    Some(raw)
+}
+
 /// Monitor-mode likelihood, or `None` when nothing was run that could have
 /// observed it.
 ///
@@ -397,6 +419,33 @@ mod tests {
         // High detection confidence AND high enforcement evidence -> low monitor-mode likelihood
         let score = monitor_mode_likelihood(0.9, 0.8);
         assert!((score - 0.18).abs() < 0.001, "expected 0.18, got {score}");
+    }
+
+    #[test]
+    fn test_enforcement_measured_distinguishes_never_probed_from_never_blocked() {
+        // Never probed.
+        assert_eq!(
+            active_enforcement_likelihood_measured(false, false, 0.0),
+            None
+        );
+        // Probed, and it never blocked -- the opposite conclusion, and the
+        // same `0.0` before this change.
+        assert_eq!(
+            active_enforcement_likelihood_measured(true, false, 0.0),
+            Some(0.0)
+        );
+        assert_ne!(
+            active_enforcement_likelihood_measured(false, false, 0.0),
+            active_enforcement_likelihood_measured(true, false, 0.0)
+        );
+    }
+
+    #[test]
+    fn test_enforcement_measured_passes_the_raw_value_through() {
+        assert_eq!(
+            active_enforcement_likelihood_measured(false, true, 0.42),
+            Some(0.42)
+        );
     }
 
     #[test]
