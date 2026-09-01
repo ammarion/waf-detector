@@ -152,6 +152,48 @@ pub fn monitor_mode_likelihood(
     (detection_confidence * (1.0 - active_enforcement_likelihood)).clamp(0.0, 1.0)
 }
 
+/// Below this, a monitor-mode estimate is a zero rather than a reading.
+pub const MONITOR_MODE_ZERO_EPSILON: f64 = 0.01;
+
+/// The sentence appended to a posture summary when monitor mode measured
+/// zero, recording why that is not the same as "no monitor-mode WAF here".
+pub const MONITOR_MODE_ZERO_CAVEAT: &str =
+    "A zero monitor-mode reading does not rule out monitor mode: an inline engine that \
+     inspects in microseconds and alters nothing leaves no remote trace (measured against \
+     ModSecurity DetectionOnly and AWS WAF Count -- see docs/MONITOR_MODE_VALIDATION.md).";
+
+/// Monitor-mode likelihood, or `None` when nothing was run that could have
+/// observed it.
+///
+/// Both terms of the product come from an enforcement test or a behavioral
+/// campaign. With neither, the result is 0.0 by absence of data rather than
+/// by observation -- and a bare `0.0` on the wire reads to any consumer as
+/// "this target is not in monitor mode", which is a claim the run never
+/// made. `None` says "not determined" instead.
+///
+/// This predicate previously lived only in the CLI's print gate, so the text
+/// output was honest while `--posture-json` was not.
+pub fn monitor_mode_likelihood_measured(
+    has_enforcement_evidence: bool,
+    has_behavioral_evidence: bool,
+    waf_presence_likelihood: f64,
+    active_enforcement_likelihood: f64,
+) -> Option<f64> {
+    if !has_enforcement_evidence && !has_behavioral_evidence {
+        return None;
+    }
+    Some(monitor_mode_likelihood(
+        waf_presence_likelihood,
+        active_enforcement_likelihood,
+    ))
+}
+
+/// True when a monitor-mode estimate is present and measured zero -- the case
+/// that needs `MONITOR_MODE_ZERO_CAVEAT` attached.
+pub fn monitor_mode_is_measured_zero(likelihood: Option<f64>) -> bool {
+    likelihood.is_some_and(|v| v < MONITOR_MODE_ZERO_EPSILON)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,6 +397,42 @@ mod tests {
         // High detection confidence AND high enforcement evidence -> low monitor-mode likelihood
         let score = monitor_mode_likelihood(0.9, 0.8);
         assert!((score - 0.18).abs() < 0.001, "expected 0.18, got {score}");
+    }
+
+    #[test]
+    fn test_monitor_mode_measured_is_none_without_any_probe_evidence() {
+        // Even a maximally confident passive signature says nothing about
+        // enforcement, so there is no monitor-mode reading to report.
+        assert_eq!(
+            monitor_mode_likelihood_measured(false, false, 1.0, 0.0),
+            None
+        );
+    }
+
+    #[test]
+    fn test_monitor_mode_measured_is_some_when_either_probe_ran() {
+        assert_eq!(
+            monitor_mode_likelihood_measured(true, false, 0.9, 0.0),
+            Some(0.9)
+        );
+        assert_eq!(
+            monitor_mode_likelihood_measured(false, true, 0.9, 0.0),
+            Some(0.9)
+        );
+    }
+
+    #[test]
+    fn test_measured_zero_is_distinguishable_from_not_determined() {
+        let not_determined = monitor_mode_likelihood_measured(false, false, 0.0, 0.0);
+        let measured_zero = monitor_mode_likelihood_measured(true, true, 0.9, 1.0);
+
+        assert_eq!(not_determined, None);
+        assert_eq!(measured_zero, Some(0.0));
+        // The whole point: these were both `0.0` before and are now distinct.
+        assert_ne!(not_determined, measured_zero);
+
+        assert!(!monitor_mode_is_measured_zero(not_determined));
+        assert!(monitor_mode_is_measured_zero(measured_zero));
     }
 
     #[test]

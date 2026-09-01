@@ -801,13 +801,20 @@ impl SimpleCliApp {
                         enf.confidence_score * 100.0
                     );
                 }
-                if (posture.enforcement.is_some() || posture.behavioral.is_some())
-                    && posture.monitor_mode_likelihood > 0.01
-                {
-                    println!(
-                        "  Monitor-mode likelihood: {:.0}%",
-                        posture.monitor_mode_likelihood * 100.0
-                    );
+                // The `None` case used to be indistinguishable from a
+                // measured zero and was simply not printed. Both are now
+                // stated, because "we did not test for this" and "we tested
+                // and saw nothing" are different answers for an operator.
+                match posture.monitor_mode_likelihood {
+                    None => println!(
+                        "  Monitor-mode likelihood: not determined (run --posture-va1 or --posture-va2)"
+                    ),
+                    Some(v) if v > crate::posture::scoring::MONITOR_MODE_ZERO_EPSILON => {
+                        println!("  Monitor-mode likelihood: {:.0}%", v * 100.0)
+                    }
+                    Some(_) => println!(
+                        "  Monitor-mode likelihood: 0% (a zero here does not rule out an inline silent engine)"
+                    ),
                 }
                 println!("  Summary:    {}", posture.summary);
             }

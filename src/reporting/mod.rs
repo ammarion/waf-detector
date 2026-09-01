@@ -2760,13 +2760,70 @@ mod tests {
             enforcement: None,
             summary: "Good protection with some coverage gaps.".to_string(),
             active_enforcement_likelihood: 0.0,
-            monitor_mode_likelihood: 0.0,
+            monitor_mode_likelihood: Some(0.0),
         };
         let raw = serde_json::to_string(&report).unwrap();
         let html = render_report_html(&raw, Path::new("posture.json")).unwrap();
         assert!(html.contains("Posture Report"));
         assert!(html.contains("https://example.com"));
         assert!(html.contains("Good protection with some coverage gaps."));
+    }
+
+    /// `monitor_mode_likelihood` became `Option<f64>`, so a posture JSON from
+    /// a run that never probed for enforcement now carries `null` where it
+    /// used to carry `0.0`. The renderer takes raw JSON, so this is the one
+    /// path a struct-literal test would not exercise -- both fixtures above
+    /// build `Some(..)` and would keep passing while `null` panicked.
+    #[test]
+    fn renders_posture_report_html_when_monitor_mode_is_not_determined() {
+        let report = PostureReport {
+            target_url: "https://example.com".to_string(),
+            timestamp: Utc::now(),
+            grade: PostureGrade::B,
+            risk_score: 31.2,
+            detection: None,
+            behavioral: None,
+            enforcement: None,
+            summary: "Detection only; no enforcement test run.".to_string(),
+            active_enforcement_likelihood: 0.0,
+            monitor_mode_likelihood: None,
+        };
+        let raw = serde_json::to_string(&report).unwrap();
+        assert!(
+            raw.contains("\"monitor_mode_likelihood\":null"),
+            "expected an explicit null on the wire, got {raw}"
+        );
+
+        let html = render_report_html(&raw, Path::new("posture.json")).unwrap();
+        assert!(html.contains("Posture Report"));
+        assert!(html.contains("Detection only; no enforcement test run."));
+    }
+
+    /// Posture JSON written before the field became optional omits nothing --
+    /// it carries a bare `0.0`. That must still deserialize, as `Some(0.0)`.
+    #[test]
+    fn posture_json_predating_the_optional_field_still_parses() {
+        let legacy = serde_json::json!({
+            "target_url": "https://example.com",
+            "timestamp": Utc::now(),
+            "grade": "B",
+            "risk_score": 31.2,
+            "detection": null,
+            "behavioral": null,
+            "enforcement": null,
+            "summary": "Legacy report.",
+            "active_enforcement_likelihood": 0.0,
+            "monitor_mode_likelihood": 0.0
+        })
+        .to_string();
+        let parsed: PostureReport = serde_json::from_str(&legacy).unwrap();
+        assert_eq!(parsed.monitor_mode_likelihood, Some(0.0));
+
+        // And one with the field absent entirely.
+        let absent = legacy.replace(",\n            \"monitor_mode_likelihood\": 0.0", "");
+        let absent = absent.replace(",\"monitor_mode_likelihood\":0.0", "");
+        let parsed: PostureReport = serde_json::from_str(&absent).unwrap();
+        assert_eq!(parsed.monitor_mode_likelihood, None);
     }
 
     #[test]
@@ -3204,7 +3261,7 @@ mod tests {
             enforcement: None,
             summary: "Good protection.".to_string(),
             active_enforcement_likelihood: 0.0,
-            monitor_mode_likelihood: 0.0,
+            monitor_mode_likelihood: Some(0.0),
         };
         let raw = serde_json::to_string(&report).unwrap();
         let html = render_report_html(&raw, Path::new("posture.json")).unwrap();
