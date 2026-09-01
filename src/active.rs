@@ -148,7 +148,7 @@ pub fn guard_target_with_profile(
         .ok_or_else(|| anyhow!("DNS resolution returned no addresses for {}", host))?;
 
     for ip in &resolved_ips {
-        validate_ip_for_target(ip, registered_target.class, profile)?;
+        validate_ip_for_target(ip, profile)?;
     }
 
     Ok(ResolvedTarget {
@@ -194,11 +194,23 @@ fn resolve_host(host: &str, port: u16) -> Result<Vec<IpAddr>> {
     Ok(resolved_ips)
 }
 
-fn validate_ip_for_target(
-    ip: &IpAddr,
-    registered_class: TargetClass,
-    profile: ActiveTargetProfile,
-) -> Result<()> {
+/// Gate an individual resolved IP against the active target profile.
+///
+/// This used to take the target's *registered* class as well and reject any
+/// non-public IP whose target was not registered internal. The scope
+/// registration subcommand was the only way to create that registration, and
+/// it was deleted in PR #49 with the consent system -- after which the gate
+/// could never be satisfied, the internal profile was unreachable for every
+/// private target, and the error text advised a flag that no longer existed.
+///
+/// Post-#49 the explicit `--active-target-profile internal` is the
+/// operator's declaration, so the profile alone gates here. A legacy consent
+/// file that classifies a target as internal is still honored -- and still
+/// forces the flag -- in `guard_target_with_profile`.
+///
+/// `Metadata` and `is_always_blocked_internal` are unchanged, so loopback,
+/// metadata, multicast and unspecified stay blocked under either profile.
+fn validate_ip_for_target(ip: &IpAddr, profile: ActiveTargetProfile) -> Result<()> {
     let classification = classify_ip(ip);
 
     if classification == IpClassification::Metadata {
@@ -224,14 +236,6 @@ fn validate_ip_for_target(
                 ));
             }
         }
-    }
-
-    if registered_class == TargetClass::Public && classification != IpClassification::Public {
-        return Err(anyhow!(
-            "target resolves to {} ({}), but it is registered as a public target. Register it with `--scope init <domain> --internal` and use `--active-target-profile internal`.",
-            ip,
-            classification.description()
-        ));
     }
 
     Ok(())
@@ -438,6 +442,96 @@ mod tests {
             classify_ip(&IpAddr::V6("2001:db8::1".parse().expect("doc"))),
             IpClassification::Documentation
         );
+    }
+
+    /// The regression this fixes: with no consent registration at all --
+    /// which is every target since `--scope` was deleted in PR #49 -- the
+    /// internal profile must still accept a private address. Before the fix
+    /// this returned the "registered as a public target" error, advising a
+    /// flag that no longer exists, making the profile unreachable.
+    #[test]
+    fn test_unregistered_private_target_is_reachable_under_internal_profile() {
+        with_temp_home(|| {
+            let consent_manager = ConsentManager::new();
+
+            let target = guard_target_with_profile(
+                &consent_manager,
+                "http://10.0.201.23:8099",
+                ActiveTargetProfile::Internal,
+            )
+            .expect("internal profile must accept an unregistered private target");
+
+            assert_eq!(target.host, "10.0.201.23");
+            assert_eq!(target.active_target_profile, ActiveTargetProfile::Internal);
+        });
+    }
+
+    /// The public profile must be unchanged by that fix: it is the default,
+    /// so a private address still has to be rejected without an opt-in.
+    #[test]
+    fn test_unregistered_private_target_still_rejected_under_public_profile() {
+        with_temp_home(|| {
+            let consent_manager = ConsentManager::new();
+            let err = guard_target_with_profile(
+                &consent_manager,
+                "http://10.0.201.23:8099",
+                ActiveTargetProfile::Public,
+            )
+            .expect_err("public profile must still reject private address space");
+            assert!(
+                err.to_string()
+                    .contains("public active target profile rejects"),
+                "got: {err}"
+            );
+        });
+    }
+
+    /// Opting into the internal profile buys private address space and
+    /// nothing more. These stay blocked either way, and are the reason the
+    /// registration gate could be dropped without widening the blast radius.
+    #[test]
+    fn test_internal_profile_still_blocks_loopback_and_metadata() {
+        for url in ["http://127.0.0.1:8099", "http://169.254.169.254"] {
+            with_temp_home(|| {
+                let consent_manager = ConsentManager::new();
+                guard_target_with_profile(&consent_manager, url, ActiveTargetProfile::Internal)
+                    .expect_err("internal profile must not unlock loopback or metadata");
+            });
+        }
+    }
+
+    /// No error an operator can actually hit may advise `--scope`, which was
+    /// deleted in PR #49. Pointing someone at a nonexistent command is what
+    /// made this a dead end rather than a merely strict gate.
+    #[test]
+    fn test_no_reachable_error_advises_the_deleted_scope_flag() {
+        let rejections = ["http://127.0.0.1", "http://169.254.169.254"];
+        for url in rejections {
+            for profile in [ActiveTargetProfile::Public, ActiveTargetProfile::Internal] {
+                with_temp_home(|| {
+                    let consent_manager = ConsentManager::new();
+                    let err = guard_target_with_profile(&consent_manager, url, profile)
+                        .expect_err("expected a rejection to inspect");
+                    assert!(
+                        !err.to_string().contains("--scope"),
+                        "{url} under {profile:?} advises the removed --scope flag: {err}"
+                    );
+                });
+            }
+        }
+
+        // And the private-address rejection under the default profile, which
+        // is the exact message that used to name the dead flag.
+        with_temp_home(|| {
+            let consent_manager = ConsentManager::new();
+            let err = guard_target_with_profile(
+                &consent_manager,
+                "http://10.0.201.23",
+                ActiveTargetProfile::Public,
+            )
+            .expect_err("expected a rejection to inspect");
+            assert!(!err.to_string().contains("--scope"), "got: {err}");
+        });
     }
 
     #[test]
