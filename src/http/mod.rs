@@ -259,7 +259,30 @@ impl HttpClient {
         let mut headers = HashMap::new();
         for (name, value) in response.headers() {
             if let Ok(value_str) = value.to_str() {
-                headers.insert(name.to_string().to_lowercase(), value_str.to_string());
+                let key = name.to_string().to_lowercase();
+                // A response can carry many Set-Cookie headers, and a plain
+                // `insert` keeps only the last one. That silently defeats every
+                // cookie-based signature: www.cloudflare.com returns five
+                // Set-Cookie headers and the `__cf_bm` bot-management cookie is
+                // not reliably among the last, so detection depended on header
+                // ordering. Accumulate them instead, newline-separated because
+                // cookie values legitimately contain commas (`Expires=...`) and
+                // comma-joining would corrupt them.
+                //
+                // Restricted to set-cookie on purpose: for every other header,
+                // last-wins is the pre-existing behavior and consumers may parse
+                // the value as a single scalar.
+                if key == "set-cookie" {
+                    headers
+                        .entry(key)
+                        .and_modify(|existing: &mut String| {
+                            existing.push('\n');
+                            existing.push_str(value_str);
+                        })
+                        .or_insert_with(|| value_str.to_string());
+                } else {
+                    headers.insert(key, value_str.to_string());
+                }
             }
         }
 
@@ -294,6 +317,46 @@ impl HttpClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Multiple Set-Cookie headers must all survive into `HttpResponse`.
+    ///
+    /// They previously did not: each was `insert`ed into the same map key, so
+    /// only the last one remained. Every cookie-based signature therefore
+    /// depended on header ordering -- www.cloudflare.com returns five
+    /// Set-Cookie headers, and its `__cf_bm` bot-management cookie is not
+    /// reliably last.
+    #[tokio::test]
+    async fn accumulates_every_set_cookie_header() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/")
+            .with_status(200)
+            .with_header("set-cookie", "first=1; Path=/")
+            .with_header("set-cookie", "__cf_bm=abc123; Path=/; HttpOnly")
+            .with_header("set-cookie", "last=2; Path=/")
+            .with_body("ok")
+            .create_async()
+            .await;
+
+        let client = HttpClient::new().expect("client");
+        let response = client.get(&server.url()).await.expect("request");
+        mock.assert_async().await;
+
+        let cookies = response
+            .headers
+            .get("set-cookie")
+            .expect("set-cookie must be captured");
+        for expected in ["first=1", "__cf_bm=abc123", "last=2"] {
+            assert!(
+                cookies.contains(expected),
+                "lost {expected} from the accumulated Set-Cookie value: {cookies:?}"
+            );
+        }
+        // Newline-separated, because cookie values contain commas in `Expires`
+        // and comma-joining would corrupt them.
+        assert_eq!(cookies.lines().count(), 3, "got {cookies:?}");
+    }
+
     use crate::surface::{AuthHeaderValue, AuthProfile, RouteAuthHeaders};
 
     #[tokio::test]

@@ -52,6 +52,55 @@ impl AkamaiProvider {
         PATTERN.get_or_init(|| Regex::new(r"^x-akamai-").unwrap())
     }
 
+    /// Cookies set by Akamai's security module, as opposed to plain delivery.
+    ///
+    /// These matter for a specific question the rest of this tool struggles
+    /// with: whether a WAF is present when it is *not* blocking anything.
+    /// Akamai sets these as part of Bot Manager's normal request handling, so
+    /// they appear whether its rules are configured to alert or to deny --
+    /// unlike a block page, which only appears when something is denied.
+    ///
+    /// Scope, deliberately narrow: this proves Akamai's **Bot Manager** is in
+    /// the request path. It does *not* prove App & API Protector (the WAF
+    /// ruleset) is enabled, and it says nothing about that ruleset's mode. A
+    /// site can run Bot Manager with AAP switched off entirely.
+    /// `DetectionResult::generate_caveats` attaches that qualification to the
+    /// result so the distinction survives into the report.
+    ///
+    /// Names per Akamai Bot Manager behavior: `_abck` (long-lived risk score),
+    /// `ak_bmsc` and `bm_sz` (session), `bm_sv` and `bm_mi` (secondary).
+    pub fn check_security_module_cookies(
+        &self,
+        response: &crate::http::HttpResponse,
+    ) -> Vec<Evidence> {
+        let mut evidence = Vec::new();
+        let Some(raw) = response.headers.get("set-cookie") else {
+            return evidence;
+        };
+        let haystack = raw.to_ascii_lowercase();
+
+        for cookie in ["_abck", "ak_bmsc", "bm_sz", "bm_sv", "bm_mi"] {
+            // Match `name=` so a bare substring elsewhere in the header cannot
+            // trigger this.
+            if haystack.contains(&format!("{cookie}=")) {
+                evidence.push(Evidence {
+                    method_type: MethodType::Header("set-cookie".to_string()),
+                    confidence: 0.90,
+                    description: format!(
+                        "Akamai Bot Manager cookie '{cookie}' — Akamai's security module is \
+                         handling this request, and does so whether its rules alert or deny. \
+                         Does not establish that the App & API Protector WAF ruleset is enabled \
+                         or which mode it is in."
+                    ),
+                    raw_data: cookie.to_string(),
+                    signature_matched: "akamai-bot-manager-cookie".to_string(),
+                });
+            }
+        }
+
+        evidence
+    }
+
     pub async fn check_headers(&self, response: &crate::http::HttpResponse) -> Vec<Evidence> {
         let mut evidence = Vec::new();
 
@@ -233,20 +282,17 @@ impl DetectionProvider for AkamaiProvider {
     }
 
     async fn detect(&self, context: &DetectionContext) -> Result<Vec<Evidence>> {
+        // Delegates to `passive_detect` rather than repeating its checks.
+        //
+        // These two used to run the same three checks side by side, and the
+        // registry calls `detect`, not `passive_detect`. That meant a check
+        // added to only one of them compiled, passed its unit tests, and then
+        // silently never ran against a live target -- which is exactly what
+        // happened when the security-module cookie check was added below.
         let mut all_evidence = Vec::new();
 
         if let Some(response) = &context.response {
-            // Check headers
-            let header_evidence = self.check_headers(response).await;
-            all_evidence.extend(header_evidence);
-
-            // Check body patterns
-            let body_evidence = self.check_body_patterns(response).await;
-            all_evidence.extend(body_evidence);
-
-            // Check status codes
-            let status_evidence = self.check_status_codes(response).await;
-            all_evidence.extend(status_evidence);
+            all_evidence.extend(self.passive_detect(response).await?);
         }
 
         Ok(all_evidence)
@@ -256,6 +302,7 @@ impl DetectionProvider for AkamaiProvider {
         let mut all_evidence = Vec::new();
 
         all_evidence.extend(self.check_headers(response).await);
+        all_evidence.extend(self.check_security_module_cookies(response));
         all_evidence.extend(self.check_body_patterns(response).await);
         all_evidence.extend(self.check_status_codes(response).await);
 
@@ -273,6 +320,86 @@ impl Default for AkamaiProvider {
 mod tests {
     use super::*;
     use crate::providers::test_utils::mock_response;
+
+    #[tokio::test]
+    async fn detects_akamai_bot_manager_cookie_without_any_block() {
+        // The case this exists for: an ordinary 200 with no block page, no
+        // security header, nothing denied -- but Akamai's security module has
+        // still stamped the response.
+        let provider = AkamaiProvider::new();
+        let response = mock_response(
+            200,
+            [(
+                "set-cookie",
+                "_abck=7A2F1B~-1~YAAQ...~-1~-1~-1; Path=/; Domain=.example.com",
+            )],
+            "<html>ordinary page</html>",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        let bm: Vec<_> = evidence
+            .iter()
+            .filter(|e| e.signature_matched == "akamai-bot-manager-cookie")
+            .collect();
+        assert_eq!(bm.len(), 1, "expected one Bot Manager cookie hit");
+        // The description must carry the scope limit, since the confidence
+        // number alone would overstate what a cookie proves.
+        assert!(
+            bm[0].description.contains("App & API Protector"),
+            "evidence must state that the WAF ruleset is not established: {}",
+            bm[0].description
+        );
+    }
+
+    #[tokio::test]
+    async fn detects_multiple_akamai_bot_manager_cookies() {
+        let provider = AkamaiProvider::new();
+        let response = mock_response(
+            200,
+            [("set-cookie", "ak_bmsc=ABC123; Path=/, bm_sz=DEF456; Path=/")],
+            "",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        let hits: Vec<&str> = evidence
+            .iter()
+            .filter(|e| e.signature_matched == "akamai-bot-manager-cookie")
+            .map(|e| e.raw_data.as_str())
+            .collect();
+        assert!(hits.contains(&"ak_bmsc"), "got {hits:?}");
+        assert!(hits.contains(&"bm_sz"), "got {hits:?}");
+    }
+
+    #[tokio::test]
+    async fn unrelated_cookies_are_not_bot_manager_evidence() {
+        // A cookie name that merely *contains* a fragment must not match, and
+        // an ordinary session cookie must not either.
+        let provider = AkamaiProvider::new();
+        let response = mock_response(
+            200,
+            [(
+                "set-cookie",
+                "session=abc; my_abck_lookalike_note=1; visitor_bm_szone=x",
+            )],
+            "",
+        );
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(
+            !evidence
+                .iter()
+                .any(|e| e.signature_matched == "akamai-bot-manager-cookie"),
+            "must not fire on cookies that merely embed the name: {:?}",
+            evidence.iter().map(|e| &e.raw_data).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn no_cookies_means_no_bot_manager_evidence() {
+        let provider = AkamaiProvider::new();
+        let response = mock_response(200, [("content-type", "text/html")], "");
+        let evidence = provider.passive_detect(&response).await.unwrap();
+        assert!(!evidence
+            .iter()
+            .any(|e| e.signature_matched == "akamai-bot-manager-cookie"));
+    }
 
     #[tokio::test]
     async fn detects_akamai_server_header() {
