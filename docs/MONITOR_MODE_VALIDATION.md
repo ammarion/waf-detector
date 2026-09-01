@@ -133,7 +133,7 @@ same proxy-vs-WAF trap rows 2 and 5 exist to catch.
 
 ## Per-vendor: is monitor mode remotely detectable at all?
 
-Covering the WAFs supported at Adobe. "Remotely detectable" means: from
+Covering the seven vendors this tool supports. "Remotely detectable" means: from
 outside, with no console or API access, can we tell a WAF is present while it
 is configured not to block?
 
@@ -164,7 +164,7 @@ question has an exact answer available over an API rather than an inferred one:
 - AWS: `aws wafv2 list-web-acls` → `get-web-acl` and
   `get-web-acl-for-resource`, then read each rule's `Action` / a rule group's
   `OverrideAction` for `Count`. AWS Firewall Manager covers this across
-  accounts, and Adobe has a Firewall Manager account.
+  accounts for orgs that run one.
 - Azure: the WAF policy's `policySettings.mode` is `Detection` or `Prevention`.
 - Fastly NGWAF: the corp/site API reports agent mode.
 - Wallarm: the node's filtration mode is readable from its API.
