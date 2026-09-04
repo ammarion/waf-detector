@@ -582,6 +582,13 @@ impl ProviderRegistry {
             // Akamai
             "akamai-server-pattern",
             "x-akamai-header",
+            // `Server-Timing: ak_p` (or a `Via: ... akamai` hop). Tier-1
+            // because both remaining patterns behind this signature are
+            // vendor-specific, and because a hardened Akamai property strips
+            // `Server` and `X-Akamai-*` while leaving Server-Timing in place
+            // for RUM -- measured on an Akamai property where ak_p was
+            // the only identifying header on the wire.
+            "connection-behavior-akamai",
             // Fastly
             "fastly-header",
             "x-served-by-fastly",

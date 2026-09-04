@@ -195,8 +195,29 @@ impl FingerprintDatabase {
         matches
     }
 
-    /// Generate Evidence items from TLS connection info
-    pub fn analyze(&self, conn_info: &TlsConnectionInfo) -> Vec<Evidence> {
+    /// Generate Evidence items from TLS connection info.
+    ///
+    /// Returns nothing. A `(tls_version, cipher_suite)` pair is not a vendor
+    /// fingerprint: TLS 1.3 defines only a handful of cipher suites, so
+    /// `TLS13_AES_256_GCM_SHA384` is claimed in this very table by CloudFlare,
+    /// Akamai *and* Fastly, and `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256` by both
+    /// AWS and Akamai. Measured against a bare origin with no WAF in front of it,
+    /// this emitted four mutually exclusive vendors at 0.82-0.88 on a single
+    /// connection and pushed that origin to `WAF=Akamai (0.294)`.
+    ///
+    /// Real TLS fingerprinting (JA3/JA4) hashes the ordered extension list,
+    /// supported groups and signature algorithms from the raw handshake --
+    /// which this module does not parse, as its own header comment says. Until
+    /// it does, scoring on version+cipher attributes nothing and costs
+    /// accuracy, so it attributes nothing.
+    ///
+    /// `lookup` is retained for tests and for whoever implements real JA3.
+    pub fn analyze(&self, _conn_info: &TlsConnectionInfo) -> Vec<Evidence> {
+        Vec::new()
+    }
+
+    #[allow(dead_code)]
+    fn analyze_unscored(&self, conn_info: &TlsConnectionInfo) -> Vec<Evidence> {
         let mut evidence = Vec::new();
         let matches = self.lookup(conn_info);
 
@@ -271,8 +292,10 @@ mod tests {
         assert_eq!(matches[0].provider, "CloudFlare");
     }
 
+    /// `analyze` must attribute nothing. Version+cipher is not a fingerprint,
+    /// and scoring on it made a bare origin read as `WAF=Akamai`.
     #[test]
-    fn test_analyze_generates_evidence() {
+    fn test_analyze_attributes_no_vendor() {
         let db = FingerprintDatabase::new();
 
         let conn_info = TlsConnectionInfo {
@@ -281,11 +304,37 @@ mod tests {
             alpn_protocol: Some("h2".to_string()),
         };
 
-        let evidence = db.analyze(&conn_info);
-        assert!(!evidence.is_empty());
-        assert!(evidence[0]
-            .signature_matched
-            .starts_with("tls-fingerprint-"));
+        assert!(
+            db.analyze(&conn_info).is_empty(),
+            "version+cipher must not attribute a vendor"
+        );
+    }
+
+    /// The defect itself, pinned so nobody re-enables scoring without seeing
+    /// it: one ordinary TLS 1.3 connection matches several mutually exclusive
+    /// vendors in this table, because TLS 1.3 defines only a handful of cipher
+    /// suites and every CDN negotiates the same ones.
+    #[test]
+    fn test_lookup_collides_across_mutually_exclusive_vendors() {
+        let db = FingerprintDatabase::new();
+
+        let conn_info = TlsConnectionInfo {
+            tls_version: Some("TLSv1_3".to_string()),
+            cipher_suite: Some("TLS13_AES_256_GCM_SHA384".to_string()),
+            alpn_protocol: Some("h2".to_string()),
+        };
+
+        let vendors: std::collections::BTreeSet<_> = db
+            .lookup(&conn_info)
+            .iter()
+            .map(|e| e.provider.clone())
+            .collect();
+
+        assert!(
+            vendors.len() > 1,
+            "expected the documented collision; if this table ever becomes \
+             discriminative, revisit `analyze` -- got {vendors:?}"
+        );
     }
 
     #[test]

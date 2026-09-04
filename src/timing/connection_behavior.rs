@@ -43,15 +43,21 @@ pub struct ConnectionBehaviorAnalyzer {
 
 impl ConnectionBehaviorAnalyzer {
     pub fn new() -> Self {
+        // Every pattern below must be *vendor-specific*. Matching is ANY-of,
+        // so one shared string is enough to attribute a vendor on its own --
+        // which is how `alt-svc: h3=` (the RFC 9114 HTTP/3 advertisement, sent
+        // by every HTTP/3 server) scored CloudFlare 0.75 and Fastly 0.72 on an
+        // Akamai host. `Connection: keep-alive` and `Keep-Alive: timeout=` were
+        // on every profile and are just as universal. All three are now None.
         let profiles = vec![
             // CloudFlare: Distinctive server-timing and alt-svc patterns
             ConnectionProfile {
                 provider: "CloudFlare".to_string(),
                 expected_ttfb_range: (Duration::from_millis(5), Duration::from_millis(200)),
-                keep_alive_pattern: Some("timeout=".to_string()),
-                connection_pattern: Some("keep-alive".to_string()),
+                keep_alive_pattern: None,
+                connection_pattern: None,
                 server_timing_pattern: Some("cfRequestDuration".to_string()),
-                alt_svc_pattern: Some("h3=".to_string()),
+                alt_svc_pattern: None,
                 via_pattern: None,
                 confidence: 0.75,
             },
@@ -59,20 +65,26 @@ impl ConnectionBehaviorAnalyzer {
             ConnectionProfile {
                 provider: "AWS".to_string(),
                 expected_ttfb_range: (Duration::from_millis(10), Duration::from_millis(300)),
-                keep_alive_pattern: Some("timeout=".to_string()),
-                connection_pattern: Some("keep-alive".to_string()),
+                keep_alive_pattern: None,
+                connection_pattern: None,
                 server_timing_pattern: None,
                 alt_svc_pattern: None,
                 via_pattern: Some("cloudfront".to_string()),
                 confidence: 0.80,
             },
-            // Akamai: Via header with specific Akamai hop format
+            // Akamai: `Server-Timing: ak_p` is the delivery-platform marker,
+            // emitted by the edge itself rather than by Bot Manager, so it is
+            // independent of both which modules are enabled and their mode.
+            // Verified present on www.akamai.com and on other Akamai-fronted
+            // properties, and absent from Cloudflare and Fastly edges. Distinct
+            // from Fastly's own `Server-Timing` use, which carries different
+            // tokens.
             ConnectionProfile {
                 provider: "Akamai".to_string(),
                 expected_ttfb_range: (Duration::from_millis(10), Duration::from_millis(250)),
-                keep_alive_pattern: Some("timeout=".to_string()),
-                connection_pattern: Some("keep-alive".to_string()),
-                server_timing_pattern: None,
+                keep_alive_pattern: None,
+                connection_pattern: None,
+                server_timing_pattern: Some("ak_p".to_string()),
                 alt_svc_pattern: None,
                 via_pattern: Some("akamai".to_string()),
                 confidence: 0.78,
@@ -81,10 +93,10 @@ impl ConnectionBehaviorAnalyzer {
             ConnectionProfile {
                 provider: "Fastly".to_string(),
                 expected_ttfb_range: (Duration::from_millis(5), Duration::from_millis(200)),
-                keep_alive_pattern: Some("timeout=".to_string()),
-                connection_pattern: Some("keep-alive".to_string()),
+                keep_alive_pattern: None,
+                connection_pattern: None,
                 server_timing_pattern: None,
-                alt_svc_pattern: Some("h3=".to_string()),
+                alt_svc_pattern: None,
                 via_pattern: None,
                 confidence: 0.72,
             },
@@ -92,8 +104,8 @@ impl ConnectionBehaviorAnalyzer {
             ConnectionProfile {
                 provider: "Azure".to_string(),
                 expected_ttfb_range: (Duration::from_millis(10), Duration::from_millis(300)),
-                keep_alive_pattern: Some("timeout=".to_string()),
-                connection_pattern: Some("keep-alive".to_string()),
+                keep_alive_pattern: None,
+                connection_pattern: None,
                 server_timing_pattern: None,
                 alt_svc_pattern: None,
                 via_pattern: Some("azure".to_string()),
