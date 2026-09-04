@@ -79,12 +79,6 @@ impl TlsAnalyzer {
             "Akamai".to_string(),
             vec![
                 CertificatePattern {
-                    pattern_type: CertificatePatternType::Issuer,
-                    pattern: "DigiCert".to_string(),
-                    confidence: 0.70,
-                    description: "Akamai commonly uses DigiCert".to_string(),
-                },
-                CertificatePattern {
                     pattern_type: CertificatePatternType::Subject,
                     pattern: "akamaized.net".to_string(),
                     confidence: 0.95,
@@ -121,20 +115,12 @@ impl TlsAnalyzer {
         // Fastly certificate patterns
         provider_patterns.insert(
             "Fastly".to_string(),
-            vec![
-                CertificatePattern {
-                    pattern_type: CertificatePatternType::Issuer,
-                    pattern: "GlobalSign".to_string(),
-                    confidence: 0.75,
-                    description: "Fastly uses GlobalSign".to_string(),
-                },
-                CertificatePattern {
-                    pattern_type: CertificatePatternType::Subject,
-                    pattern: "fastly.net".to_string(),
-                    confidence: 0.95,
-                    description: "Fastly CDN certificate".to_string(),
-                },
-            ],
+            vec![CertificatePattern {
+                pattern_type: CertificatePatternType::Subject,
+                pattern: "fastly.net".to_string(),
+                confidence: 0.95,
+                description: "Fastly CDN certificate".to_string(),
+            }],
         );
 
         // Azure certificate patterns
@@ -165,20 +151,12 @@ impl TlsAnalyzer {
         // Vercel certificate patterns
         provider_patterns.insert(
             "Vercel".to_string(),
-            vec![
-                CertificatePattern {
-                    pattern_type: CertificatePatternType::Subject,
-                    pattern: "vercel.app".to_string(),
-                    confidence: 0.98,
-                    description: "Vercel deployment certificate".to_string(),
-                },
-                CertificatePattern {
-                    pattern_type: CertificatePatternType::Issuer,
-                    pattern: "Let's Encrypt".to_string(),
-                    confidence: 0.65,
-                    description: "Vercel uses Let's Encrypt".to_string(),
-                },
-            ],
+            vec![CertificatePattern {
+                pattern_type: CertificatePatternType::Subject,
+                pattern: "vercel.app".to_string(),
+                confidence: 0.98,
+                description: "Vercel deployment certificate".to_string(),
+            }],
         );
 
         // Imperva certificate patterns
@@ -484,6 +462,39 @@ mod tests {
         assert!(analyzer.provider_patterns.contains_key("CloudFlare"));
         assert!(analyzer.provider_patterns.contains_key("Akamai"));
         assert!(analyzer.provider_patterns.contains_key("AWS"));
+    }
+
+    /// A CA the vendor *operates* is evidence. A CA the vendor *buys from* is
+    /// not. `DigiCert` -> Akamai, `GlobalSign` -> Fastly and `Let's Encrypt` ->
+    /// Vercel were all in this table and, between them, put `WAF=Akamai
+    /// (0.294)` on a bare origin with no WAF in front of it. Same defect class
+    /// as PR #57's generic `x-request-id`.
+    #[test]
+    fn test_no_general_purpose_ca_is_treated_as_vendor_evidence() {
+        let analyzer = TlsAnalyzer::new();
+        let general_purpose_cas = [
+            "DigiCert",
+            "GlobalSign",
+            "Let's Encrypt",
+            "Sectigo",
+            "GoDaddy",
+            "Entrust",
+        ];
+
+        for (provider, patterns) in analyzer.provider_patterns.iter() {
+            for pattern in patterns {
+                if pattern.pattern_type != CertificatePatternType::Issuer {
+                    continue;
+                }
+                for ca in general_purpose_cas {
+                    assert!(
+                        !pattern.pattern.eq_ignore_ascii_case(ca),
+                        "{provider} claims general-purpose CA '{ca}' as an issuer \
+                         signature; that matches a large fraction of the internet"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

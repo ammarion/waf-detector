@@ -129,24 +129,24 @@ impl TimingAnalyzer {
             }
         }
 
-        // Perform pattern analysis
-        if let Ok(pattern_analysis) = self.pattern_analysis(url).await {
-            if pattern_analysis.delay_detected {
-                evidence.push(Evidence {
-                    method_type: MethodType::Timing,
-                    confidence: pattern_analysis.confidence,
-                    description: format!(
-                        "WAF timing pattern detected: {}ms consistent delay",
-                        pattern_analysis.delay_amount_ms
-                    ),
-                    raw_data: format!(
-                        "pattern_detected: {}ms average delay",
-                        pattern_analysis.delay_amount_ms
-                    ),
-                    signature_matched: "timing-pattern-analysis".to_string(),
-                });
-            }
-        }
+        // `pattern_analysis` deliberately does not produce evidence.
+        //
+        // It fires on *absolute* latency with no control: average response time
+        // >= min_waf_delay_ms (50), <= 1000ms, variance < 0.3. That describes
+        // every healthy site on the internet that is more than a LAN hop away.
+        // Measured against a bare origin with no WAF in front of it, it
+        // reported "WAF timing pattern detected: 76ms consistent delay" at 0.87
+        // confidence -- that was plain network RTT.
+        //
+        // Compare `docs/MONITOR_MODE_VALIDATION.md`, where latency was probed
+        // properly: length-matched *paired* probes, 30 samples, a bootstrap CI
+        // on the median, and a 15ms floor -- and the conclusion was still that
+        // a bare origin shows per-pair swings up to 16ms from connection
+        // effects alone. An uncontrolled absolute-latency threshold cannot
+        // clear a bar that a controlled differential could not.
+        //
+        // `baseline_comparison` above stays: it at least compares a baseline
+        // request against a test request on the same target.
 
         Ok(evidence)
     }
@@ -192,6 +192,9 @@ impl TimingAnalyzer {
     }
 
     /// Analyze timing patterns across multiple requests
+    /// Retained but unscored -- see the note in `detect_timing_evidence`.
+    /// Kept so a future controlled version has somewhere to start.
+    #[allow(dead_code)]
     async fn pattern_analysis(&self, url: &str) -> Result<TimingAnalysis> {
         // Make multiple requests and look for consistent timing patterns
         let mut all_times = Vec::new();
